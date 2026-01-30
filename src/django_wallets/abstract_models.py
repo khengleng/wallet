@@ -1,4 +1,3 @@
-# django_wallets/abstract_models.py
 """
 Abstract base models for django-wallets.
 
@@ -14,6 +13,7 @@ Usage:
         class Meta(AbstractWallet.Meta):
             abstract = False
 """
+
 import uuid
 from decimal import Decimal
 
@@ -59,6 +59,17 @@ class AbstractWallet(models.Model):
         default=wallet_settings.WALLET_MATH_SCALE
     )
 
+    # Wallet freeze status
+    is_frozen = models.BooleanField(
+        default=False, help_text=_("Whether the wallet is frozen")
+    )
+    frozen_at = models.DateTimeField(
+        null=True, blank=True, help_text=_("When the wallet was frozen")
+    )
+    frozen_reason = models.CharField(
+        max_length=255, blank=True, help_text=_("Reason for freezing")
+    )
+
     # Metadata for the wallet
     meta = models.JSONField(blank=True, null=True, default=dict)
 
@@ -74,11 +85,111 @@ class AbstractWallet(models.Model):
         verbose_name_plural = _("Wallets")
 
     def __str__(self):
-        return f"{self.slug} ({self.balance})"
+        frozen_indicator = " [FROZEN]" if self.is_frozen else ""
+        return f"{self.slug} ({self.balance}){frozen_indicator}"
 
     @property
     def currency(self):
         return self.meta.get("currency", wallet_settings.WALLET_DEFAULT_CURRENCY)
+
+    def freeze(self, reason=""):
+        """
+        Freeze the wallet to prevent all transactions.
+
+        Args:
+            reason: Optional reason for freezing the wallet.
+        """
+        from django.utils import timezone
+
+        self.is_frozen = True
+        self.frozen_at = timezone.now()
+        self.frozen_reason = reason
+        self.save(
+            update_fields=["is_frozen", "frozen_at", "frozen_reason", "updated_at"]
+        )
+
+    def unfreeze(self):
+        """Unfreeze the wallet to allow transactions."""
+        self.is_frozen = False
+        self.frozen_at = None
+        self.frozen_reason = ""
+        self.save(
+            update_fields=["is_frozen", "frozen_at", "frozen_reason", "updated_at"]
+        )
+
+    def recalculate_balance(self):
+        """
+        Recalculate balance from confirmed transactions.
+
+        Returns:
+            tuple: (calculated_balance, discrepancy) where discrepancy is
+                   the difference between cached and calculated balance.
+        """
+        from decimal import Decimal
+
+        from django.db.models import Case, F, Sum, Value, When
+
+        # Get all confirmed transactions for this wallet
+        result = self.transactions.filter(confirmed=True).aggregate(
+            deposits=Sum(
+                Case(
+                    When(type="deposit", then=F("amount")),
+                    default=Value(Decimal("0")),
+                )
+            ),
+            withdrawals=Sum(
+                Case(
+                    When(type="withdraw", then=F("amount")),
+                    default=Value(Decimal("0")),
+                )
+            ),
+        )
+
+        deposits = result["deposits"] or Decimal("0")
+        withdrawals = result["withdrawals"] or Decimal("0")
+        calculated_balance = deposits - withdrawals
+        discrepancy = self.balance - calculated_balance
+
+        return calculated_balance, discrepancy
+
+    def sync_balance(self):
+        """
+        Sync the cached balance with the calculated balance from transactions.
+
+        Returns:
+            Decimal: The corrected balance.
+        """
+        calculated_balance, _ = self.recalculate_balance()
+        if self.balance != calculated_balance:
+            self.balance = calculated_balance
+            self.save(update_fields=["balance", "updated_at"])
+        return self.balance
+
+    def audit_balance(self):
+        """
+        Get a detailed audit trail of all transactions affecting this wallet.
+
+        Returns:
+            dict: Audit information including transactions and balance verification.
+        """
+        transactions = list(
+            self.transactions.all()
+            .order_by("created_at")
+            .values("uuid", "type", "amount", "confirmed", "created_at", "meta")
+        )
+
+        calculated_balance, discrepancy = self.recalculate_balance()
+
+        return {
+            "wallet_uuid": str(self.uuid),
+            "wallet_slug": self.slug,
+            "cached_balance": self.balance,
+            "calculated_balance": calculated_balance,
+            "discrepancy": discrepancy,
+            "is_consistent": discrepancy == Decimal("0"),
+            "transaction_count": len(transactions),
+            "transactions": transactions,
+        }
 
 
 class AbstractTransaction(models.Model):
@@ -93,6 +204,21 @@ class AbstractTransaction(models.Model):
     TYPE_CHOICES = (
         (TYPE_DEPOSIT, _("Deposit")),
         (TYPE_WITHDRAW, _("Withdraw")),
+    )
+
+    # Transaction status constants
+    STATUS_PENDING = "pending"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+    STATUS_REVERSED = "reversed"
+    STATUS_EXPIRED = "expired"
+
+    STATUS_CHOICES = (
+        (STATUS_PENDING, _("Pending")),
+        (STATUS_COMPLETED, _("Completed")),
+        (STATUS_FAILED, _("Failed")),
+        (STATUS_REVERSED, _("Reversed")),
+        (STATUS_EXPIRED, _("Expired")),
     )
 
     # The entity causing the transaction
@@ -111,6 +237,14 @@ class AbstractTransaction(models.Model):
     )
     confirmed = models.BooleanField(default=True)
 
+    # Transaction status for workflow management
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_COMPLETED,
+        help_text=_("Current status of the transaction"),
+    )
+
     meta = models.JSONField(blank=True, null=True, default=dict)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -122,7 +256,25 @@ class AbstractTransaction(models.Model):
         abstract = True
 
     def __str__(self):
-        return f"{self.type} {self.amount}"
+        status_indicator = (
+            f" [{self.status.upper()}]" if self.status != self.STATUS_COMPLETED else ""
+        )
+        return f"{self.type} {self.amount}{status_indicator}"
+
+    @property
+    def is_pending(self):
+        """Check if transaction is pending confirmation."""
+        return self.status == self.STATUS_PENDING
+
+    @property
+    def is_completed(self):
+        """Check if transaction is completed."""
+        return self.status == self.STATUS_COMPLETED
+
+    @property
+    def is_reversible(self):
+        """Check if transaction can be reversed."""
+        return self.status == self.STATUS_COMPLETED
 
 
 class AbstractTransfer(models.Model):
@@ -154,7 +306,9 @@ class AbstractTransfer(models.Model):
 
     # Receiver
     to_type = models.ForeignKey(
-        ContentType, on_delete=models.CASCADE, related_name="%(class)s_transfers_received"
+        ContentType,
+        on_delete=models.CASCADE,
+        related_name="%(class)s_transfers_received",
     )
     to_id = models.PositiveIntegerField()
     to_object = GenericForeignKey("to_type", "to_id")
