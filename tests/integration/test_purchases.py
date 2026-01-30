@@ -6,13 +6,13 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.exceptions import InsufficientFunds, ProductEnded
+from django_wallets.exceptions import InsufficientFunds, ProductNotAvailable
 from django_wallets.models import Transaction, Transfer
 from django_wallets.services import PurchaseService, WalletService
 
 
-@pytest.mark.django_db
-@pytest.mark.integration
+@pytest.mark.django_db()
+@pytest.mark.integration()
 class TestPurchaseWorkflows:
     """Tests for complete purchase workflows."""
 
@@ -36,7 +36,9 @@ class TestPurchaseWorkflows:
         assert isinstance(result, Transaction)
         assert result.type == Transaction.TYPE_WITHDRAW
 
-    def test_purchase_with_product_wallet_transfers(self, user, digital_product_factory):
+    def test_purchase_with_product_wallet_transfers(
+        self, user, digital_product_factory
+    ):
         """Purchase from product with wallet should transfer to seller."""
         seller_product = digital_product_factory(price=Decimal("15.00"))
 
@@ -52,11 +54,11 @@ class TestPurchaseWorkflows:
         assert seller_product.wallet.balance == Decimal("15.00")
 
     def test_purchase_out_of_stock(self, user, product_factory):
-        """Purchase of out-of-stock product should raise ProductEnded."""
+        """Purchase of out-of-stock product should raise ProductNotAvailable."""
         product = product_factory(stock=0)
         WalletService.deposit(user.wallet, Decimal("100.00"))
 
-        with pytest.raises(ProductEnded):
+        with pytest.raises(ProductNotAvailable):
             PurchaseService.pay(user, product)
 
     def test_purchase_insufficient_funds(self, user, product_factory):
@@ -88,8 +90,8 @@ class TestPurchaseWorkflows:
         assert user.wallet.balance == Decimal("70.00")
 
 
-@pytest.mark.django_db
-@pytest.mark.integration
+@pytest.mark.django_db()
+@pytest.mark.integration()
 class TestMultiplePurchases:
     """Tests for multiple purchase scenarios."""
 
