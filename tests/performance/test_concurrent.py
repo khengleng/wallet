@@ -19,14 +19,14 @@ from django_wallets.services import TransferService, WalletService
 # Skip concurrent tests on SQLite
 sqlite_skip = pytest.mark.skipif(
     "sqlite" in settings.DATABASES["default"]["ENGINE"],
-    reason="SQLite doesn't support concurrent writes"
+    reason="SQLite doesn't support concurrent writes",
 )
 
 
 @sqlite_skip
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.performance
-@pytest.mark.slow
+@pytest.mark.performance()
+@pytest.mark.slow()
 class TestConcurrentTransferPerformance:
     """Tests for concurrent transfer performance."""
 
@@ -104,11 +104,10 @@ class TestConcurrentTransferPerformance:
         assert total == Decimal("10000.00")
 
 
-
 @sqlite_skip
 @pytest.mark.django_db(transaction=True)
-@pytest.mark.performance
-@pytest.mark.slow
+@pytest.mark.performance()
+@pytest.mark.slow()
 class TestTransferScaling:
     """Tests for transfer scaling characteristics."""
 
