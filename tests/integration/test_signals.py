@@ -7,14 +7,11 @@ from decimal import Decimal
 import pytest
 
 from django_wallets.services import TransferService, WalletService
-from django_wallets.signals import (
-    balance_changed,
-    transaction_created,
-)
+from django_wallets.signals import balance_changed, transaction_created
 
 
-@pytest.mark.django_db
-@pytest.mark.integration
+@pytest.mark.django_db()
+@pytest.mark.integration()
 class TestSignalIntegration:
     """Tests for signal emission during wallet operations."""
 
