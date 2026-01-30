@@ -12,7 +12,7 @@ from django_wallets.exceptions import InsufficientFunds
 from django_wallets.services import ExchangeService, WalletService
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db()
 class TestExchangeService:
     """Tests for ExchangeService.exchange()."""
 
@@ -46,7 +46,9 @@ class TestExchangeService:
         WalletService.deposit(usd_wallet, Decimal("100.00"))
 
         # Exchange 50 USD to EUR at 0.85 rate
-        ExchangeService.exchange(user, "default", "eur", Decimal("50.00"), rate=Decimal("0.85"))
+        ExchangeService.exchange(
+            user, "default", "eur", Decimal("50.00"), rate=Decimal("0.85")
+        )
 
         usd_wallet.refresh_from_db()
         eur_wallet.refresh_from_db()
@@ -64,7 +66,9 @@ class TestExchangeService:
         WalletService.deposit(usd_wallet, Decimal("100.00"))
 
         # Exchange 10 USD to JPY at 150 rate
-        ExchangeService.exchange(user, "default", "jpy", Decimal("10.00"), rate=Decimal("150"))
+        ExchangeService.exchange(
+            user, "default", "jpy", Decimal("10.00"), rate=Decimal("150")
+        )
 
         usd_wallet.refresh_from_db()
         jpy_wallet.refresh_from_db()
