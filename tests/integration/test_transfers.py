@@ -13,8 +13,8 @@ from django_wallets.models import Transaction, Transfer
 from django_wallets.services import TransferService, WalletService
 
 
-@pytest.mark.django_db
-@pytest.mark.integration
+@pytest.mark.django_db()
+@pytest.mark.integration()
 class TestTransferWorkflows:
     """Tests for complete transfer workflows."""
 
@@ -72,8 +72,7 @@ class TestTransferWorkflows:
 
         WalletService.deposit(sender.wallet, Decimal("100.00"))
         transfer = TransferService.transfer(
-            sender, recipient, Decimal("50.00"),
-            meta={"reference": "PAY-123"}
+            sender, recipient, Decimal("50.00"), meta={"reference": "PAY-123"}
         )
 
         assert "reference" in transfer.withdraw.meta
@@ -130,8 +129,8 @@ class TestTransferWorkflows:
         assert user_c.wallet.balance == Decimal("30.00")
 
 
-@pytest.mark.django_db
-@pytest.mark.integration
+@pytest.mark.django_db()
+@pytest.mark.integration()
 class TestTransferEdgeCases:
     """Tests for edge cases in transfers."""
 
