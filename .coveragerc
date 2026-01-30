@@ -1,12 +1,12 @@
 [run]
 source = src/django_wallets
 branch = True
-omit = 
+omit =
     */tests/*
     */migrations/*
 
 [report]
-exclude_lines = 
+exclude_lines =
     pragma: no cover
     def __repr__
     raise NotImplementedError
