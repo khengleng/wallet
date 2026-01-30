@@ -13,7 +13,7 @@ from django_wallets.models import Transfer
 from django_wallets.services import TransferService, WalletService
 
 
-@pytest.mark.django_db
+@pytest.mark.django_db()
 class TestTransferService:
     """Tests for TransferService.transfer()."""
 
@@ -44,7 +44,7 @@ class TestTransferService:
         transfer = TransferService.transfer(sender, receiver, Decimal("50.00"))
 
         assert transfer.pk is not None
-        assert transfer.status == Transfer.STATUS_PAID
+        assert transfer.status == Transfer.STATUS_TRANSFER
 
     def test_transfer_links_transactions(self, user_factory):
         """Transfer should link withdraw and deposit transactions."""
@@ -68,7 +68,9 @@ class TestTransferService:
         WalletService.deposit(sender.wallet, Decimal("100.00"))
 
         meta = {"reason": "payment", "order_id": 123}
-        transfer = TransferService.transfer(sender, receiver, Decimal("50.00"), meta=meta)
+        transfer = TransferService.transfer(
+            sender, receiver, Decimal("50.00"), meta=meta
+        )
 
         assert "action" in transfer.withdraw.meta
         assert "order_id" in transfer.withdraw.meta
