@@ -24,7 +24,7 @@ def pytest_configure():
 # ============================================================================
 
 
-@pytest.fixture
+@pytest.fixture()
 def user_factory(db):
     """Factory for creating test users."""
     from tests.test_app.models import User
@@ -32,6 +32,7 @@ def user_factory(db):
     def create_user(username=None, **kwargs):
         if username is None:
             import uuid
+
             username = f"user_{uuid.uuid4().hex[:8]}"
         return User.objects.create_user(
             username=username,
@@ -43,20 +44,23 @@ def user_factory(db):
     return create_user
 
 
-@pytest.fixture
+@pytest.fixture()
 def user(user_factory):
     """Create a single test user."""
     return user_factory()
 
 
-@pytest.fixture
+@pytest.fixture()
 def user_with_balance(user_factory):
     """Create a test user with initial wallet balance."""
+
     def create_user_with_balance(amount=Decimal("100.00"), **kwargs):
         from django_wallets.services import WalletService
+
         user = user_factory(**kwargs)
         WalletService.deposit(user.wallet, amount, meta={"source": "test_fixture"})
         return user
+
     return create_user_with_balance
 
 
@@ -65,28 +69,31 @@ def user_with_balance(user_factory):
 # ============================================================================
 
 
-@pytest.fixture
+@pytest.fixture()
 def wallet(user):
     """Get or create the default wallet for a test user."""
     return user.wallet
 
 
-@pytest.fixture
+@pytest.fixture()
 def wallet_factory(user_factory):
     """Factory for creating wallets with specific slugs."""
+
     def create_wallet(holder=None, slug="default", **meta):
         if holder is None:
             holder = user_factory()
         if slug == "default":
             return holder.wallet
         return holder.create_wallet(slug, **meta)
+
     return create_wallet
 
 
-@pytest.fixture
+@pytest.fixture()
 def funded_wallet(wallet):
     """A wallet with 100.00 balance."""
     from django_wallets.services import WalletService
+
     WalletService.deposit(wallet, Decimal("100.00"))
     wallet.refresh_from_db()
     return wallet
@@ -97,7 +104,7 @@ def funded_wallet(wallet):
 # ============================================================================
 
 
-@pytest.fixture
+@pytest.fixture()
 def organization_factory(db):
     """Factory for creating test organizations."""
     from tests.test_app.models import Organization
@@ -105,6 +112,7 @@ def organization_factory(db):
     def create_org(name=None, **kwargs):
         if name is None:
             import uuid
+
             name = f"Org_{uuid.uuid4().hex[:8]}"
         return Organization.objects.create(name=name, **kwargs)
 
@@ -116,7 +124,7 @@ def organization_factory(db):
 # ============================================================================
 
 
-@pytest.fixture
+@pytest.fixture()
 def product_factory(db):
     """Factory for creating test products."""
     from tests.test_app.models import Product
@@ -124,30 +132,36 @@ def product_factory(db):
     def create_product(name=None, price=Decimal("25.00"), stock=100, **kwargs):
         if name is None:
             import uuid
+
             name = f"Product_{uuid.uuid4().hex[:8]}"
         return Product.objects.create(name=name, price=price, stock=stock, **kwargs)
 
     return create_product
 
 
-@pytest.fixture
+@pytest.fixture()
 def product(product_factory):
     """A simple test product priced at 25.00."""
     return product_factory()
 
 
-@pytest.fixture
+@pytest.fixture()
 def digital_product_factory(db, user_factory):
     """Factory for creating digital products with wallets."""
     from tests.test_app.models import DigitalProduct
 
-    def create_digital_product(name=None, price=Decimal("10.00"), seller=None, **kwargs):
+    def create_digital_product(
+        name=None, price=Decimal("10.00"), seller=None, **kwargs
+    ):
         if name is None:
             import uuid
+
             name = f"Digital_{uuid.uuid4().hex[:8]}"
         if seller is None:
             seller = user_factory()
-        return DigitalProduct.objects.create(name=name, price=price, seller=seller, **kwargs)
+        return DigitalProduct.objects.create(
+            name=name, price=price, seller=seller, **kwargs
+        )
 
     return create_digital_product
 
@@ -157,7 +171,7 @@ def digital_product_factory(db, user_factory):
 # ============================================================================
 
 
-@pytest.fixture
+@pytest.fixture()
 def deposit_factory(wallet_factory):
     """Factory for creating deposit transactions."""
     from django_wallets.services import WalletService
@@ -170,7 +184,7 @@ def deposit_factory(wallet_factory):
     return create_deposit
 
 
-@pytest.fixture
+@pytest.fixture()
 def withdrawal_factory(user_with_balance):
     """Factory for creating withdrawal transactions."""
     from django_wallets.services import WalletService
@@ -188,7 +202,7 @@ def withdrawal_factory(user_with_balance):
 # ============================================================================
 
 
-@pytest.fixture
+@pytest.fixture()
 def transfer_factory(user_with_balance, user_factory):
     """Factory for creating transfer records."""
     from django_wallets.services import TransferService
@@ -208,9 +222,10 @@ def transfer_factory(user_with_balance, user_factory):
 # ============================================================================
 
 
-@pytest.fixture
+@pytest.fixture()
 def signal_receiver():
     """Helper fixture for testing signals."""
+
     class SignalReceiver:
         def __init__(self):
             self.calls = []
