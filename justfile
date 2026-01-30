@@ -66,3 +66,11 @@ migrate:
 # Print the current version of the package
 version:
     @$env:PYTHONPATH="src"; poetry run python -c "import django_wallets; print(django_wallets.__version__)"
+
+# Build the package
+build:
+    poetry build
+
+# Release to PyPI
+release:
+    poetry publish --build
