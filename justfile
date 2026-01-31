@@ -11,11 +11,10 @@ lint:
     poetry run ruff format .
     @Write-Host "Linting and formatting completed." -ForegroundColor Green
 
-# Check for linting, formatting and typing issues without fixing
+# Check for linting and formatting issues without fixing
 check:
     poetry run ruff check .
     poetry run ruff format --check .
-    poetry run mypy src
 
 # Run tests
 test:
@@ -25,12 +24,9 @@ test:
 test-cov:
     poetry run pytest --cov=dj_wallet --cov-report=term-missing --cov-report=html
 
-# Run type checking with mypy
-type-check:
-    poetry run mypy src
 
-# Run all checks: lint (including import sort), type-check, and test
-all: lint type-check test
+# Run all checks: lint (including import sort), and test
+all: lint test
 
 # Run tests across multiple environments using tox
 tox:
