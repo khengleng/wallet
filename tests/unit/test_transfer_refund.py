@@ -6,9 +6,9 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.exceptions import TransactionAlreadyProcessed, WalletFrozen
-from django_wallets.models import Transfer
-from django_wallets.services import TransferService, WalletService
+from dj_wallet.exceptions import TransactionAlreadyProcessed, WalletFrozen
+from dj_wallet.models import Transfer
+from dj_wallet.services import TransferService, WalletService
 
 
 @pytest.mark.django_db
@@ -74,7 +74,7 @@ class TestTransferRefund:
         assert receiver.balance == Decimal("0")
 
         # Refund should fail due to insufficient funds
-        from django_wallets.exceptions import InsufficientFunds
+        from dj_wallet.exceptions import InsufficientFunds
 
         with pytest.raises(InsufficientFunds):
             TransferService.refund(transfer)

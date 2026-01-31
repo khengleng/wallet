@@ -15,7 +15,7 @@ ALLOWED_HOSTS = ["*"]
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
-    "django_wallets",
+    "dj_wallet",
     "tests.test_app",
 ]
 
@@ -41,7 +41,7 @@ TIME_ZONE = "UTC"
 AUTH_USER_MODEL = "test_app.User"
 
 # Django Wallets settings
-DJANGO_WALLETS = {
+dj_wallet = {
     "MATH_SCALE": 8,
     "DEFAULT_CURRENCY": "USD",
 }

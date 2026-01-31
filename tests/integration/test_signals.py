@@ -6,8 +6,8 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.services import TransferService, WalletService
-from django_wallets.signals import balance_changed, transaction_created
+from dj_wallet.services import TransferService, WalletService
+from dj_wallet.signals import balance_changed, transaction_created
 
 
 @pytest.mark.django_db()

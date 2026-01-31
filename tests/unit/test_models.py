@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 from django.db import IntegrityError
 
-from django_wallets.models import Transaction, Transfer
+from dj_wallet.models import Transaction, Transfer
 
 # ============================================================================
 # Wallet Model Tests
@@ -106,7 +106,7 @@ class TestTransactionModel:
 
     def test_transaction_type_withdraw(self, funded_wallet):
         """Withdrawal transaction should have correct type."""
-        from django_wallets.services import WalletService
+        from dj_wallet.services import WalletService
 
         txn = WalletService.withdraw(funded_wallet, Decimal("50.00"))
         assert txn.type == Transaction.TYPE_WITHDRAW
@@ -134,7 +134,7 @@ class TestTransactionModel:
 
     def test_transaction_amount_precision(self, wallet):
         """Transaction should preserve decimal precision."""
-        from django_wallets.services import WalletService
+        from dj_wallet.services import WalletService
 
         txn = WalletService.deposit(wallet, Decimal("123.45678901"))
         assert txn.amount == Decimal("123.45678901")

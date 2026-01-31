@@ -1,1 +1,1 @@
-"""Tests package for django_wallets."""
+"""Tests package for dj_wallet."""

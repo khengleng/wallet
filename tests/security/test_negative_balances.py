@@ -10,8 +10,8 @@ from decimal import Decimal
 import pytest
 from django.db import models
 
-from django_wallets.exceptions import AmountInvalid, InsufficientFunds
-from django_wallets.services import PurchaseService, TransferService, WalletService
+from dj_wallet.exceptions import AmountInvalid, InsufficientFunds
+from dj_wallet.services import PurchaseService, TransferService, WalletService
 
 
 @pytest.mark.django_db()

@@ -13,8 +13,8 @@ import pytest
 from django.conf import settings
 from django.db import connection
 
-from django_wallets.exceptions import InsufficientFunds
-from django_wallets.services import TransferService, WalletService
+from dj_wallet.exceptions import InsufficientFunds
+from dj_wallet.services import TransferService, WalletService
 
 # Skip concurrent tests on SQLite
 sqlite_skip = pytest.mark.skipif(

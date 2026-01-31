@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 from django.db import IntegrityError
 
-from django_wallets.exceptions import WalletException
+from dj_wallet.exceptions import WalletException
 
 # ============================================================================
 # WalletMixin Tests
@@ -20,7 +20,7 @@ class TestWalletMixin:
 
     def test_wallet_property_creates_default(self, user):
         """First access to .wallet should create default wallet."""
-        from django_wallets.models import Wallet
+        from dj_wallet.models import Wallet
 
         initial_count = Wallet.objects.count()
         wallet = user.wallet
@@ -35,7 +35,7 @@ class TestWalletMixin:
 
     def test_balance_property(self, user):
         """balance property should return wallet balance."""
-        from django_wallets.services import WalletService
+        from dj_wallet.services import WalletService
 
         assert user.balance == Decimal("0")
         WalletService.deposit(user.wallet, Decimal("100.00"))
@@ -45,7 +45,7 @@ class TestWalletMixin:
 
     def test_get_wallet_creates_if_needed(self, user):
         """get_wallet should create wallet if it doesn't exist."""
-        from django_wallets.models import Wallet
+        from dj_wallet.models import Wallet
 
         initial_count = Wallet.objects.count()
         wallet = user.get_wallet("savings")
@@ -98,7 +98,7 @@ class TestWalletMixin:
 
     def test_transfer_method(self, user_factory):
         """transfer should move funds between holders."""
-        from django_wallets.services import WalletService
+        from dj_wallet.services import WalletService
 
         sender = user_factory()
         recipient = user_factory()
@@ -124,7 +124,7 @@ class TestWalletMixin:
 
     def test_safe_transfer_works_with_valid_receiver(self, user_factory):
         """safe_transfer should work with valid wallet holder."""
-        from django_wallets.services import WalletService
+        from dj_wallet.services import WalletService
 
         sender = user_factory()
         recipient = user_factory()

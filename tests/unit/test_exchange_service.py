@@ -8,8 +8,8 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.exceptions import InsufficientFunds
-from django_wallets.services import ExchangeService, WalletService
+from dj_wallet.exceptions import InsufficientFunds
+from dj_wallet.services import ExchangeService, WalletService
 
 
 @pytest.mark.django_db()
@@ -107,7 +107,7 @@ class TestExchangeService:
 
     def test_exchange_creates_transfer_record(self, user_factory):
         """Exchange should create a Transfer record."""
-        from django_wallets.models import Transfer
+        from dj_wallet.models import Transfer
 
         user = user_factory()
         user.create_wallet("eur")

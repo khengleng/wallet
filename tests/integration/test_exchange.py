@@ -6,9 +6,9 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.exceptions import InsufficientFunds
-from django_wallets.models import Transfer
-from django_wallets.services import ExchangeService, WalletService
+from dj_wallet.exceptions import InsufficientFunds
+from dj_wallet.models import Transfer
+from dj_wallet.services import ExchangeService, WalletService
 
 
 @pytest.mark.django_db()

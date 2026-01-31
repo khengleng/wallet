@@ -6,8 +6,8 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.exceptions import WalletFrozen
-from django_wallets.services import WalletService
+from dj_wallet.exceptions import WalletFrozen
+from dj_wallet.services import WalletService
 
 
 @pytest.mark.django_db
@@ -134,7 +134,7 @@ class TestBalanceRecalculation:
     def test_sync_balance_corrects_discrepancy(self, funded_wallet):
         """Test that sync_balance corrects any discrepancy."""
         # Manually corrupt the balance (simulating a bug)
-        from django_wallets.models import Wallet
+        from dj_wallet.models import Wallet
 
         Wallet.objects.filter(pk=funded_wallet.pk).update(balance=Decimal("999.99"))
         funded_wallet.refresh_from_db()
@@ -169,7 +169,7 @@ class TestBalanceRecalculation:
     def test_audit_detects_inconsistency(self, funded_wallet):
         """Test that audit correctly identifies inconsistent balance."""
         # Manually corrupt the balance
-        from django_wallets.models import Wallet
+        from dj_wallet.models import Wallet
 
         Wallet.objects.filter(pk=funded_wallet.pk).update(balance=Decimal("50.00"))
         funded_wallet.refresh_from_db()

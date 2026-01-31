@@ -4,7 +4,7 @@ Unit tests for custom exceptions.
 
 import pytest
 
-from django_wallets.exceptions import (
+from dj_wallet.exceptions import (
     AmountInvalid,
     BalanceIsEmpty,
     ConfirmedInvalid,

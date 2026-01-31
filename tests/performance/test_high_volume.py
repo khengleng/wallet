@@ -7,8 +7,8 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.models import Transaction
-from django_wallets.services import WalletService
+from dj_wallet.models import Transaction
+from dj_wallet.services import WalletService
 
 
 @pytest.mark.django_db()

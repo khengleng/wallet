@@ -8,8 +8,8 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.exceptions import AmountInvalid, InsufficientFunds
-from django_wallets.services import WalletService
+from dj_wallet.exceptions import AmountInvalid, InsufficientFunds
+from dj_wallet.services import WalletService
 
 # ============================================================================
 # Amount Validation Tests
@@ -102,7 +102,7 @@ class TestDeposit:
 
     def test_deposit_transaction_type(self, wallet):
         """Deposit transaction should have type 'deposit'."""
-        from django_wallets.models import Transaction
+        from dj_wallet.models import Transaction
 
         txn = WalletService.deposit(wallet, Decimal("100.00"))
         assert txn.type == Transaction.TYPE_DEPOSIT
@@ -130,7 +130,7 @@ class TestDeposit:
 
     def test_deposit_emits_balance_changed(self, wallet, signal_receiver):
         """Confirmed deposit should emit balance_changed signal."""
-        from django_wallets.signals import balance_changed
+        from dj_wallet.signals import balance_changed
 
         balance_changed.connect(signal_receiver)
         try:
@@ -143,7 +143,7 @@ class TestDeposit:
 
     def test_deposit_emits_transaction_created(self, wallet, signal_receiver):
         """Deposit should emit transaction_created signal."""
-        from django_wallets.signals import transaction_created
+        from dj_wallet.signals import transaction_created
 
         transaction_created.connect(signal_receiver)
         try:
@@ -155,7 +155,7 @@ class TestDeposit:
 
     def test_deposit_unconfirmed_no_balance_signal(self, wallet, signal_receiver):
         """Unconfirmed deposit should NOT emit balance_changed."""
-        from django_wallets.signals import balance_changed
+        from dj_wallet.signals import balance_changed
 
         balance_changed.connect(signal_receiver)
         try:
@@ -200,7 +200,7 @@ class TestWithdraw:
 
     def test_withdraw_transaction_type(self, funded_wallet):
         """Withdrawal transaction should have type 'withdraw'."""
-        from django_wallets.models import Transaction
+        from dj_wallet.models import Transaction
 
         txn = WalletService.withdraw(funded_wallet, Decimal("50.00"))
         assert txn.type == Transaction.TYPE_WITHDRAW
@@ -231,7 +231,7 @@ class TestWithdraw:
 
     def test_withdraw_emits_signals(self, funded_wallet, signal_receiver):
         """Withdrawal should emit both signals."""
-        from django_wallets.signals import balance_changed
+        from dj_wallet.signals import balance_changed
 
         balance_changed.connect(signal_receiver)
         try:
@@ -270,7 +270,7 @@ class TestForceWithdraw:
 
     def test_force_withdraw_emits_signals(self, wallet, signal_receiver):
         """Force withdraw should emit signals."""
-        from django_wallets.signals import balance_changed
+        from dj_wallet.signals import balance_changed
 
         balance_changed.connect(signal_receiver)
         try:

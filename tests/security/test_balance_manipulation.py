@@ -6,8 +6,8 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.exceptions import AmountInvalid, InsufficientFunds
-from django_wallets.services import WalletService
+from dj_wallet.exceptions import AmountInvalid, InsufficientFunds
+from dj_wallet.services import WalletService
 
 
 @pytest.mark.django_db()
@@ -82,7 +82,7 @@ class TestBalanceConsistency:
 
     def test_balance_matches_transaction_sum(self, wallet):
         """Balance should equal sum of confirmed transactions."""
-        from django_wallets.models import Transaction
+        from dj_wallet.models import Transaction
 
         WalletService.deposit(wallet, Decimal("100.00"))
         WalletService.deposit(wallet, Decimal("50.00"))

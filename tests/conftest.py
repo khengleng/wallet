@@ -1,5 +1,5 @@
 """
-Pytest configuration and fixtures for django_wallets tests.
+Pytest configuration and fixtures for dj_wallet tests.
 """
 
 import os
@@ -55,7 +55,7 @@ def user_with_balance(user_factory):
     """Create a test user with initial wallet balance."""
 
     def create_user_with_balance(amount=Decimal("100.00"), **kwargs):
-        from django_wallets.services import WalletService
+        from dj_wallet.services import WalletService
 
         user = user_factory(**kwargs)
         WalletService.deposit(user.wallet, amount, meta={"source": "test_fixture"})
@@ -92,7 +92,7 @@ def wallet_factory(user_factory):
 @pytest.fixture()
 def funded_wallet(wallet):
     """A wallet with 100.00 balance."""
-    from django_wallets.services import WalletService
+    from dj_wallet.services import WalletService
 
     WalletService.deposit(wallet, Decimal("100.00"))
     wallet.refresh_from_db()
@@ -174,7 +174,7 @@ def digital_product_factory(db, user_factory):
 @pytest.fixture()
 def deposit_factory(wallet_factory):
     """Factory for creating deposit transactions."""
-    from django_wallets.services import WalletService
+    from dj_wallet.services import WalletService
 
     def create_deposit(wallet=None, amount=Decimal("100.00"), **kwargs):
         if wallet is None:
@@ -187,7 +187,7 @@ def deposit_factory(wallet_factory):
 @pytest.fixture()
 def withdrawal_factory(user_with_balance):
     """Factory for creating withdrawal transactions."""
-    from django_wallets.services import WalletService
+    from dj_wallet.services import WalletService
 
     def create_withdrawal(user=None, amount=Decimal("50.00"), **kwargs):
         if user is None:
@@ -205,7 +205,7 @@ def withdrawal_factory(user_with_balance):
 @pytest.fixture()
 def transfer_factory(user_with_balance, user_factory):
     """Factory for creating transfer records."""
-    from django_wallets.services import TransferService
+    from dj_wallet.services import TransferService
 
     def create_transfer(sender=None, recipient=None, amount=Decimal("50.00"), **kwargs):
         if sender is None:

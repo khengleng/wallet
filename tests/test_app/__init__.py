@@ -1,1 +1,1 @@
-"""Test application for django_wallets testing."""
+"""Test application for dj_wallet testing."""

@@ -6,7 +6,7 @@ from decimal import Decimal
 
 import pytest
 
-from django_wallets.services import WalletService
+from dj_wallet.services import WalletService
 
 
 @pytest.mark.django_db()
@@ -66,7 +66,7 @@ class TestWalletIsolation:
         """Wallet access requires both holder_type and holder_id."""
         from django.contrib.contenttypes.models import ContentType
 
-        from django_wallets.models import Wallet
+        from dj_wallet.models import Wallet
 
         user1 = user_factory()
         user2 = user_factory()

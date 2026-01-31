@@ -1,13 +1,13 @@
 """
-Test models for django_wallets testing.
+Test models for dj_wallet testing.
 
-These models demonstrate how to integrate django_wallets with your own models.
+These models demonstrate how to integrate dj_wallet with your own models.
 """
 
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
-from django_wallets.mixins import ProductMixin, WalletMixin
+from dj_wallet.mixins import ProductMixin, WalletMixin
 
 
 class User(WalletMixin, AbstractUser):

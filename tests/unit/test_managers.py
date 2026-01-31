@@ -4,7 +4,7 @@ Unit tests for custom model managers.
 
 import pytest
 
-from django_wallets.models import Wallet
+from dj_wallet.models import Wallet
 
 
 @pytest.mark.django_db()
@@ -49,8 +49,8 @@ class TestTransactionManager:
 
     def test_transaction_queryset_filters(self, deposit_factory, funded_wallet):
         """TransactionManager should support standard QuerySet operations."""
-        from django_wallets.models import Transaction
-        from django_wallets.services import WalletService
+        from dj_wallet.models import Transaction
+        from dj_wallet.services import WalletService
 
         # Create some transactions
         deposit_factory(wallet=funded_wallet)

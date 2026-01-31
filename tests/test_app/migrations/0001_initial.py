@@ -7,7 +7,7 @@ import django.utils.timezone
 from django.conf import settings
 from django.db import migrations, models
 
-import django_wallets.mixins
+import dj_wallet.mixins
 
 
 class Migration(migrations.Migration):
@@ -33,7 +33,7 @@ class Migration(migrations.Migration):
                 ("name", models.CharField(max_length=255)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
             ],
-            bases=(django_wallets.mixins.WalletMixin, models.Model),
+            bases=(dj_wallet.mixins.WalletMixin, models.Model),
         ),
         migrations.CreateModel(
             name="Product",
@@ -51,7 +51,7 @@ class Migration(migrations.Migration):
                 ("price", models.DecimalField(decimal_places=2, max_digits=10)),
                 ("stock", models.PositiveIntegerField(default=100)),
             ],
-            bases=(django_wallets.mixins.ProductMixin, models.Model),
+            bases=(dj_wallet.mixins.ProductMixin, models.Model),
         ),
         migrations.CreateModel(
             name="User",
@@ -158,7 +158,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
-            bases=(django_wallets.mixins.WalletMixin, models.Model),
+            bases=(dj_wallet.mixins.WalletMixin, models.Model),
             managers=[
                 ("objects", django.contrib.auth.models.UserManager()),
             ],
@@ -187,8 +187,8 @@ class Migration(migrations.Migration):
                 ),
             ],
             bases=(
-                django_wallets.mixins.ProductMixin,
-                django_wallets.mixins.WalletMixin,
+                dj_wallet.mixins.ProductMixin,
+                dj_wallet.mixins.WalletMixin,
                 models.Model,
             ),
         ),
