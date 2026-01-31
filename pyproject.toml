@@ -3,7 +3,7 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
-name = "django-wallets"
+name = "dj-wallet"
 version = "0.1.0"
 description = "A secure, flexible virtual wallet system for Django applications"
 authors = ["Khaled Sukkar <khaled.sukkar.contact@gmail.com>"]
@@ -42,11 +42,11 @@ classifiers = [
 packages = [{include = "dj_wallet", from = "src"}]
 
 [tool.poetry.urls]
-Homepage = "https://github.com/khaledsukkar2/django-wallets"
-Documentation = "https://github.com/khaledsukkar2/django-wallets#readme"
-Repository = "https://github.com/khaledsukkar2/django-wallets.git"
-Issues = "https://github.com/khaledsukkar2/django-wallets/issues"
-Changelog = "https://github.com/khaledsukkar2/django-wallets/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/khaledsukkar2/dj-wallet"
+Documentation = "https://github.com/khaledsukkar2/dj-wallet#readme"
+Repository = "https://github.com/khaledsukkar2/dj-wallet.git"
+Issues = "https://github.com/khaledsukkar2/dj-wallet/issues"
+Changelog = "https://github.com/khaledsukkar2/dj-wallet/blob/main/CHANGELOG.md"
 
 [tool.poetry.dependencies]
 python = "^3.9"
