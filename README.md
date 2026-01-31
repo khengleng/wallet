@@ -4,9 +4,9 @@
 [![Python Versions](https://img.shields.io/pypi/pyversions/dj-wallets.svg)](https://pypi.org/project/dj-wallets/)
 [![Django Versions](https://img.shields.io/pypi/djversions/dj-wallets.svg)](https://pypi.org/project/dj-wallets/)
 [![License](https://img.shields.io/badge/license-MIT-purple)](LICENSE)
-[![Coverage](https://img.shields.io/badge/coverage-92%25-yellowgreen)](https://github.com/khaledsukkar2/django-wallets/)
+[![Coverage](https://img.shields.io/badge/coverage-92%25-yellowgreen)](https://github.com/khaledsukkar2/dj-wallet)
 [![Code Style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/khaledsukkar2/django-wallets/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/khaledsukkar2/dj-wallet)
 
 A **secure**, **flexible**, and **powerful** virtual wallet system for Django applications.
 
@@ -92,9 +92,12 @@ user.transfer(recipient, 50.00)
 
 ---
 
-## Buying Things (`ProductMixin`)
+## 🛒 Buying Things (`ProductMixin`)
 
-To make an item "buyable," just add `ProductMixin` to its model. When a user pays for it, the price is automatically deducted from their wallet.
+The library includes a robust system for handling product purchases. To make any Django model "buyable," apply the `ProductMixin`. This allows wallets to interact directly with your business logic.
+
+### 1. Implementation
+To make an item purchasable, implement the `ProductMixin` in your model:
 
 ```python
 from dj_wallet.mixins import ProductMixin
@@ -105,14 +108,39 @@ class DigitalCourse(ProductMixin, models.Model):
     price = models.DecimalField(max_digits=10, decimal_places=2)
 
     def get_amount_product(self, customer):
-        return self.price  # The price to deduct
+        """REQUIRED: Return the price for this specific customer."""
+        return self.price
 
-# Usage:
+    def can_buy(self, customer, quantity=1):
+        """OPTIONAL: Check inventory or eligibility (default: True)."""
+        return True
+
+    def get_meta_product(self):
+        """OPTIONAL: Add transaction metadata (default: {})."""
+        return {"course_id": self.id}
+```
+
+### 2. Available Methods (ProductMixin)
+These methods should be defined in your product class:
+
+- **`get_amount_product(customer)`**: Returns the cost of the product. This is where you can implement dynamic pricing, discounts, or multi-currency logic.
+- **`can_buy(customer, quantity)`**: Validation logic before purchase. Return `False` to block the transaction (e.g., if out of stock).
+- **`get_meta_product()`**: Provide extra data that will be saved in the transaction's `meta` JSON field for auditing.
+
+### 3. Processing a Purchase
+A holder can pay for a product using the `.pay()` method.
+
+```python
 course = DigitalCourse.objects.get(id=1)
 
-# This single line checks the balance and deducts the money
-if user.pay(course):
-    print("Money deducted and course purchased!")
+# This single line checks balance, validates availability, and transfers funds
+try:
+    transaction = user.pay(course)
+    print("Course purchased successfully!")
+except InsufficientFunds:
+    print("Insufficient funds in wallet.")
+except ProductNotAvailable:
+    print("This item is currently out of stock.")
 ```
 
 ---
@@ -128,22 +156,28 @@ Django Wallets uses a component-based architecture where logic is encapsulated i
 
 ---
 
-## Available Methods Reference
+## 🛠️ Available Methods Reference
 
 ### User/Holder Methods (via `WalletMixin`)
-- `.balance`: Get default wallet balance.
-- `.deposit(amount)`: Add funds.
-- `.withdraw(amount)`: Remove funds.
-- `.transfer(to_holder, amount)`: Transfer to another holder.
-- `.pay(product)`: Deduct money for a product.
-- `.get_wallet(slug)`: Get/Create a wallet by its name (slug).
-- `.freeze_wallet(slug)` / `.unfreeze_wallet(slug)`: Lock/Unlock a wallet.
+- **`.balance`**: Property that returns the current balance of the default wallet.
+- **`.deposit(amount, meta=None, confirmed=True)`**: Adds funds to the default wallet. Supports metadata and unconfirmed states.
+- **`.withdraw(amount, meta=None, confirmed=True)`**: Deducts funds. Raises `InsufficientFunds` if the balance is too low.
+- **`.force_withdraw(amount)`**: Deducts funds regardless of balance (allows negative balance).
+- **`.transfer(to_holder, amount)`**: Moves funds from this holder to another.
+- **`.pay(product)`**: High-level method to purchase an item implementing `ProductMixin`.
+- **`.get_wallet(slug)`**: Returns a specific wallet by name (creates it if it doesn't exist).
+- **`.has_wallet(slug)`**: Checks if a wallet exists without creating it.
+- **`.freeze_wallet(slug)`**: Locks a wallet from all incoming/outgoing transactions.
+- **`.unfreeze_wallet(slug)`**: Re-enables a frozen wallet.
+- **`.get_pending_transactions(slug)`**: Returns a QuerySet of transactions awaiting confirmation.
 
-### Service Methods
-- `WalletService.confirm_transaction(txn)`: Approve a pending transaction.
-- `WalletService.reverse_transaction(txn)`: Undo a finished transaction.
-- `TransferService.refund(transfer)`: Refund a specific transfer.
-- `ExchangeService.exchange(holder, from, to, amount, rate)`: Move funds between wallets.
+### 🏗️ Service Methods
+For advanced usage, you can call services directly:
+
+- **`WalletService.confirm_transaction(txn)`**: Moves a transaction from `PENDING` to `COMPLETED` and updates the wallet balance.
+- **`WalletService.reverse_transaction(txn)`**: Perfectly undoes a transaction and records the reversal.
+- **`TransferService.refund(transfer)`**: Reverses a transfer and returns money to the sender.
+- **`ExchangeService.exchange(holder, from_slug, to_slug, amount)`**: Moves funds between two wallets owned by the same holder.
 
 ---
 
