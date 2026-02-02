@@ -8,6 +8,7 @@
 [![Code Style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/khaledsukkar2/dj-wallet)
 
+
 A **secure**, **flexible**, and **powerful** virtual wallet system for Django applications.
 
 *Inspired by [laravel-wallet](https://github.com/bavix/laravel-wallet)*
@@ -16,10 +17,17 @@ A **secure**, **flexible**, and **powerful** virtual wallet system for Django ap
 
 ## What is a Virtual Wallet?
 
-Think of this as a "digital bank account" inside your app. It doesn't handle real money directly (like Stripe or PayPal), but it keeps track of a **virtual balance** for your users.
+Think of this as a "digital balance system" inside your app. It doesn't handle real money directly (like Stripe or PayPal), but it keeps track of **any kind of value** for your users – whether that's money, points, credits, tokens, or any other unit.
 
-- **Deposit**: Adds "money" to the user's balance.
-- **Withdraw**: Takes "money" away from the balance.
+**Use Cases:**
+- 💰 **Virtual Currency**: E-commerce credits, in-app coins
+- 🎮 **Gaming Points**: XP, gems, energy, lives
+- 📚 **Learning Platforms**: Course credits, study tokens
+- 🏆 **Loyalty Programs**: Reward points, cashback
+- 🎁 **Gift Cards**: Prepaid balances, vouchers
+
+- **Deposit**: Adds value to the user's balance.
+- **Withdraw**: Takes value away from the balance.
 - **Pay**: Automatically deducts the cost of an item from the user's wallet and (optionally) transfers it to the seller.
 - **Safe**: Behind the scenes, the library ensures that two transactions can't happen at the exact same time to break the balance (Race Condition Protection).
 
@@ -27,11 +35,14 @@ Think of this as a "digital bank account" inside your app. It doesn't handle rea
 
 ## Features
 
-- **Multi-Wallet Support**: Each user can have multiple wallets (default, savings, USD, etc.).
+- **Multi-Purpose Wallets**: Not just for money – use for points, credits, tokens, XP, or any value type.
+- **Multi-Wallet Support**: Each user can have multiple wallets (default, savings, points, USD, etc.).
 - **Atomic Transactions**: Ensures data integrity during concurrent operations.
 - **Transfers & Exchanges**: Move funds between users or between different wallets of the same user.
 - **Product Purchases**: Built-in support for purchasing items using wallet balance.
 - **Polymorphic Holders**: Attach wallets to any Django model (Users, Organizations, Teams).
+- **Admin Panel Integration**: Full Django admin support for managing wallets, transactions, and transfers.
+- **Django Signals**: Hook into wallet events (deposits, withdrawals, transfers, etc.) for custom logic.
 
 ---
 
@@ -89,6 +100,55 @@ user.withdraw(100.00)
 recipient = User.objects.create(username="friend")
 user.transfer(recipient, 50.00)
 ```
+
+---
+
+## 🏢 Polymorphic Wallet Holders
+
+Wallets aren't just for users! The `WalletMixin` can be applied to **any Django model**, making it perfect for:
+
+- **Organizations** with shared budgets
+- **Teams** with allocated resources
+- **Projects** with dedicated funds
+- **Departments** with expense tracking
+- **Game Characters** with in-game currency
+
+### Example: Organization Wallets
+
+```python
+from django.db import models
+from dj_wallet.mixins import WalletMixin
+
+class Organization(WalletMixin, models.Model):
+    name = models.CharField(max_length=100)
+
+# Now organizations can have wallets just like users!
+org = Organization.objects.create(name="Acme Corp")
+org.deposit(10000.00)  # Company budget
+
+# Create multiple wallets for different purposes
+marketing_wallet = org.get_wallet("marketing")
+marketing_wallet.deposit(5000.00)
+
+development_wallet = org.get_wallet("development")
+development_wallet.deposit(3000.00)
+```
+
+### Example: Team Resource Allocation
+
+```python
+class Team(WalletMixin, models.Model):
+    name = models.CharField(max_length=100)
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
+
+# Allocate resources from organization to team
+team = Team.objects.create(name="Backend Team", organization=org)
+org.transfer(team, 2000.00)  # Transfer budget to team
+
+print(team.balance)  # 2000.00
+```
+
+This polymorphic design means you can model complex financial hierarchies: companies → departments → teams → employees, each with their own wallets and transfer capabilities.
 
 ---
 
@@ -230,6 +290,56 @@ dj_wallet = {
 ```
 
 ---
+
+## 🛡️ Admin Panel Integration
+
+Django Wallets comes with full Django Admin support out of the box. All models are registered with customized admin interfaces.
+---
+
+## 📡 Django Signals
+
+Hook into wallet events for custom business logic, notifications, or integrations:
+
+```python
+from dj_wallet.signals import (
+    balance_changed,
+    transaction_created,
+    wallet_created,
+    transfer_completed,
+    transaction_confirmed,
+    pre_withdraw,
+    pre_deposit,
+)
+from django.dispatch import receiver
+
+@receiver(balance_changed)
+def notify_user_of_balance_change(sender, wallet, transaction, **kwargs):
+    """Send notification when balance changes."""
+    print(f"Wallet {wallet.slug} balance changed by {transaction.amount}")
+
+@receiver(transfer_completed)
+def log_transfer(sender, transfer, from_wallet, to_wallet, **kwargs):
+    """Log completed transfers for auditing."""
+    print(f"Transfer from {from_wallet} to {to_wallet} completed")
+
+@receiver(pre_withdraw)
+def validate_withdrawal(sender, wallet, amount, meta, **kwargs):
+    """Custom validation before withdrawal."""
+    if amount > 10000:
+        raise ValueError("Withdrawals over 10,000 require approval")
+```
+
+### Available Signals
+
+| Signal | Trigger | Arguments |
+|--------|---------|----------|
+| `balance_changed` | After deposit/withdraw is confirmed | `wallet`, `transaction` |
+| `transaction_created` | When any transaction is created | `transaction` |
+| `wallet_created` | When a new wallet is created | `wallet`, `holder` |
+| `transfer_completed` | After a transfer finishes | `transfer`, `from_wallet`, `to_wallet` |
+| `transaction_confirmed` | When pending transaction is confirmed | `transaction` |
+| `pre_withdraw` | Before a withdrawal (for validation) | `wallet`, `amount`, `meta` |
+| `pre_deposit` | Before a deposit (for validation) | `wallet`, `amount`, `meta` |
 
 ## Support Us
 
