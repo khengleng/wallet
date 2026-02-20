@@ -1,0 +1,14 @@
+[run]
+source = src/dj_wallet
+branch = True
+omit =
+    */tests/*
+    */migrations/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if TYPE_CHECKING:
+show_missing = True
