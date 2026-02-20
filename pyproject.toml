@@ -55,6 +55,10 @@ Changelog = "https://github.com/khaledsukkar2/dj-wallet/blob/main/CHANGELOG.md"
 python = "^3.9"
 django = ">=3.2"
 djangorestframework = {version = ">=3.12", optional = true}
+gunicorn = ">=21.2"
+whitenoise = ">=6.7"
+dj-database-url = ">=2.2"
+psycopg = {version = ">=3.1", extras = ["binary"]}
 
 [tool.poetry.extras]
 drf = ["djangorestframework"]
