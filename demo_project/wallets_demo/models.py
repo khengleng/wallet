@@ -780,6 +780,8 @@ class MerchantCashflowEvent(models.Model):
     )
     flow_type = models.CharField(max_length=8, choices=FLOW_CHOICES)
     amount = models.DecimalField(max_digits=20, decimal_places=2)
+    fee_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    net_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
     currency = models.CharField(max_length=12, default="USD")
     from_user = models.ForeignKey(
         User,
@@ -803,6 +805,8 @@ class MerchantCashflowEvent(models.Model):
         related_name="counterparty_cashflow_events",
     )
     reference = models.CharField(max_length=128, blank=True, default="")
+    settlement_reference = models.CharField(max_length=48, blank=True, default="", db_index=True)
+    settled_at = models.DateTimeField(null=True, blank=True, db_index=True)
     note = models.CharField(max_length=255, blank=True, default="")
     created_by = models.ForeignKey(
         User,
@@ -817,11 +821,182 @@ class MerchantCashflowEvent(models.Model):
     def clean(self):
         if self.amount <= Decimal("0"):
             raise ValidationError("Amount must be greater than 0.")
+        if self.fee_amount < Decimal("0"):
+            raise ValidationError("Fee amount cannot be negative.")
+        if self.net_amount < Decimal("0"):
+            raise ValidationError("Net amount cannot be negative.")
         if not self.currency:
             raise ValidationError("Currency is required.")
 
     def __str__(self):
         return f"{self.merchant.code}:{self.flow_type}:{self.amount}{self.currency}"
+
+
+class MerchantKYBRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    )
+
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.PROTECT, related_name="kyb_requests"
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    legal_name = models.CharField(max_length=128)
+    registration_number = models.CharField(max_length=64, blank=True, default="")
+    tax_id = models.CharField(max_length=64, blank=True, default="")
+    country_code = models.CharField(max_length=3, blank=True, default="")
+    documents_json = models.JSONField(default=dict, blank=True)
+    risk_note = models.CharField(max_length=255, blank=True, default="")
+    maker = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_kyb_requests"
+    )
+    checker = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="checked_kyb_requests",
+    )
+    checker_note = models.CharField(max_length=255, blank=True, default="")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.merchant.code}:KYB:{self.status}"
+
+
+class MerchantFeeRule(models.Model):
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="fee_rules"
+    )
+    flow_type = models.CharField(max_length=8, choices=FLOW_CHOICES)
+    percent_bps = models.PositiveIntegerField(default=0, help_text="Fee percentage in basis points.")
+    fixed_fee = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    minimum_fee = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    maximum_fee = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_merchant_fee_rules"
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="updated_merchant_fee_rules"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("merchant__code", "flow_type")
+        unique_together = ("merchant", "flow_type")
+
+    def clean(self):
+        if self.maximum_fee < Decimal("0") or self.minimum_fee < Decimal("0") or self.fixed_fee < Decimal("0"):
+            raise ValidationError("Fee values cannot be negative.")
+        if self.maximum_fee and self.minimum_fee and self.maximum_fee < self.minimum_fee:
+            raise ValidationError("Maximum fee cannot be less than minimum fee.")
+
+    def __str__(self):
+        return f"{self.merchant.code}:{self.flow_type}:bps={self.percent_bps}"
+
+
+class MerchantRiskProfile(models.Model):
+    merchant = models.OneToOneField(
+        Merchant, on_delete=models.CASCADE, related_name="risk_profile"
+    )
+    daily_txn_limit = models.PositiveIntegerField(default=5000)
+    daily_amount_limit = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("1000000"))
+    single_txn_limit = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("50000"))
+    reserve_ratio_bps = models.PositiveIntegerField(default=0)
+    require_manual_review_above = models.DecimalField(
+        max_digits=20, decimal_places=2, default=Decimal("0")
+    )
+    is_high_risk = models.BooleanField(default=False)
+    updated_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="updated_merchant_risk_profiles"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("merchant__code",)
+
+    def __str__(self):
+        return f"{self.merchant.code}:risk"
+
+
+class MerchantApiCredential(models.Model):
+    merchant = models.OneToOneField(
+        Merchant, on_delete=models.CASCADE, related_name="api_credential"
+    )
+    key_id = models.CharField(max_length=64, unique=True)
+    secret_hash = models.CharField(max_length=128)
+    webhook_url = models.URLField(blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    last_rotated_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_merchant_api_credentials"
+    )
+    updated_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="updated_merchant_api_credentials"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("merchant__code",)
+
+    def __str__(self):
+        return f"{self.merchant.code}:{self.key_id}"
+
+
+class MerchantSettlementRecord(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_POSTED = "posted"
+    STATUS_PAID = "paid"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_POSTED, "Posted"),
+        (STATUS_PAID, "Paid"),
+    )
+
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.PROTECT, related_name="settlement_records"
+    )
+    settlement_no = models.CharField(max_length=40, unique=True)
+    currency = models.CharField(max_length=12, default="USD")
+    period_start = models.DateField()
+    period_end = models.DateField()
+    gross_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    fee_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    net_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    event_count = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_merchant_settlements"
+    )
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="approved_merchant_settlements",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.settlement_no}:{self.merchant.code}:{self.status}"
 
 
 class OperationCase(models.Model):

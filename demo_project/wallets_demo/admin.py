@@ -12,9 +12,14 @@ from .models import (
     JournalLine,
     LoginLockout,
     Merchant,
+    MerchantApiCredential,
     MerchantCashflowEvent,
+    MerchantFeeRule,
+    MerchantKYBRequest,
     MerchantLoyaltyEvent,
     MerchantLoyaltyProgram,
+    MerchantRiskProfile,
+    MerchantSettlementRecord,
     MerchantWalletCapability,
     OperationCase,
     OperationCaseNote,
@@ -202,15 +207,86 @@ class MerchantCashflowEventAdmin(admin.ModelAdmin):
         "merchant",
         "flow_type",
         "amount",
+        "fee_amount",
+        "net_amount",
         "currency",
         "from_user",
         "to_user",
         "counterparty_merchant",
         "reference",
+        "settlement_reference",
+        "settled_at",
         "created_at",
     )
     list_filter = ("flow_type", "currency", "created_at")
     search_fields = ("merchant__code", "reference", "from_user__username", "to_user__username")
+
+
+@admin.register(MerchantKYBRequest)
+class MerchantKYBRequestAdmin(admin.ModelAdmin):
+    list_display = ("merchant", "status", "legal_name", "registration_number", "maker", "checker", "created_at")
+    list_filter = ("status", "country_code", "created_at")
+    search_fields = ("merchant__code", "legal_name", "registration_number", "tax_id")
+
+
+@admin.register(MerchantFeeRule)
+class MerchantFeeRuleAdmin(admin.ModelAdmin):
+    list_display = (
+        "merchant",
+        "flow_type",
+        "percent_bps",
+        "fixed_fee",
+        "minimum_fee",
+        "maximum_fee",
+        "is_active",
+        "updated_at",
+    )
+    list_filter = ("flow_type", "is_active")
+    search_fields = ("merchant__code",)
+
+
+@admin.register(MerchantRiskProfile)
+class MerchantRiskProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        "merchant",
+        "daily_txn_limit",
+        "daily_amount_limit",
+        "single_txn_limit",
+        "reserve_ratio_bps",
+        "require_manual_review_above",
+        "is_high_risk",
+        "updated_at",
+    )
+    list_filter = ("is_high_risk",)
+    search_fields = ("merchant__code", "merchant__name")
+
+
+@admin.register(MerchantApiCredential)
+class MerchantApiCredentialAdmin(admin.ModelAdmin):
+    list_display = ("merchant", "key_id", "is_active", "webhook_url", "last_rotated_at", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("merchant__code", "key_id", "webhook_url")
+    readonly_fields = ("secret_hash",)
+
+
+@admin.register(MerchantSettlementRecord)
+class MerchantSettlementRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        "settlement_no",
+        "merchant",
+        "currency",
+        "period_start",
+        "period_end",
+        "gross_amount",
+        "fee_amount",
+        "net_amount",
+        "event_count",
+        "status",
+        "approved_by",
+        "created_at",
+    )
+    list_filter = ("status", "currency", "period_start", "period_end", "created_at")
+    search_fields = ("settlement_no", "merchant__code")
 
 
 @admin.register(OperationCase)

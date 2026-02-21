@@ -33,6 +33,12 @@
         <div class="form-group"><label>Contact Phone</label><input type="text" name="contact_phone" /></div>
         <div class="form-group"><label>Loyalty Earn Rate</label><input type="number" step="0.0001" min="0.0001" name="earn_rate" value="1.0000" required /></div>
         <div class="form-group"><label>Loyalty Redeem Rate</label><input type="number" step="0.0001" min="0.0001" name="redeem_rate" value="1.0000" required /></div>
+        <div class="form-group"><label>Single Txn Limit</label><input type="number" step="0.01" min="0.01" name="single_txn_limit" value="50000" required /></div>
+        <div class="form-group"><label>Daily Txn Limit</label><input type="number" min="1" name="daily_txn_limit" value="5000" required /></div>
+        <div class="form-group"><label>Daily Amount Limit</label><input type="number" step="0.01" min="0.01" name="daily_amount_limit" value="1000000" required /></div>
+        <div class="form-group"><label>Reserve Ratio (bps)</label><input type="number" min="0" name="reserve_ratio_bps" value="0" /></div>
+        <div class="form-group"><label>Manual Review Threshold</label><input type="number" step="0.01" min="0" name="require_manual_review_above" value="0" /></div>
+        <div class="form-group"><label><input type="checkbox" name="is_high_risk" /> High Risk Merchant</label></div>
         <div class="form-group"><label><input type="checkbox" name="loyalty_enabled" checked /> Loyalty Enabled</label></div>
         <div class="form-group">
             <label>Wallet Flow Capabilities</label>
@@ -120,6 +126,204 @@
                 </tr>
             {% empty %}
                 <tr><td colspan="8" class="text-muted" style="text-align:center;">No merchants yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Merchant KYB (Maker / Checker)</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="merchant_kyb_submit" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Legal Name</label><input type="text" name="legal_name" required /></div>
+        <div class="form-group"><label>Registration Number</label><input type="text" name="registration_number" /></div>
+        <div class="form-group"><label>Tax ID</label><input type="text" name="tax_id" /></div>
+        <div class="form-group"><label>Country Code</label><input type="text" name="country_code" maxlength="3" /></div>
+        <div class="form-group"><label>Incorporation Document URL</label><input type="url" name="incorporation_doc_url" /></div>
+        <div class="form-group"><label>License Document URL</label><input type="url" name="license_doc_url" /></div>
+        <div class="form-group"><label>Beneficial Owner Document URL</label><input type="url" name="beneficial_owner_doc_url" /></div>
+        <div class="form-group"><label>Risk Note</label><input type="text" name="risk_note" /></div>
+        <button class="btn btn-primary" type="submit">Submit KYB</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>KYB Requests</h3>
+    <table>
+        <thead><tr><th>ID</th><th>Merchant</th><th>Status</th><th>Legal Name</th><th>Registration</th><th>Maker</th><th>Checker</th><th>Action</th></tr></thead>
+        <tbody>
+            {% for req in kyb_requests %}
+                <tr>
+                    <td>#{{ req.id }}</td>
+                    <td>{{ req.merchant.code }}</td>
+                    <td>{{ req.status }}</td>
+                    <td>{{ req.legal_name }}</td>
+                    <td>{{ req.registration_number|default:"-" }}</td>
+                    <td>{{ req.maker.username }}</td>
+                    <td>{% if req.checker %}{{ req.checker.username }}{% else %}-{% endif %}</td>
+                    <td>
+                        {% if req.status == "pending" %}
+                            <form method="post" class="flex gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="merchant_kyb_decision" />
+                                <input type="hidden" name="kyb_request_id" value="{{ req.id }}" />
+                                <select name="decision">
+                                    <option value="approved">Approve</option>
+                                    <option value="rejected">Reject</option>
+                                </select>
+                                <input type="text" name="checker_note" placeholder="Checker note" />
+                                <button class="btn btn-outline" type="submit">Submit</button>
+                            </form>
+                        {% else %}
+                            {{ req.checker_note|default:"-" }}
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="8" class="text-muted" style="text-align:center;">No KYB requests yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Merchant Fee Rules</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="merchant_fee_rule_upsert" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Flow Type</label><select name="flow_type">{% for value, label in flow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Percent (bps)</label><input type="number" min="0" name="percent_bps" value="0" /></div>
+        <div class="form-group"><label>Fixed Fee</label><input type="number" step="0.01" min="0" name="fixed_fee" value="0" /></div>
+        <div class="form-group"><label>Minimum Fee</label><input type="number" step="0.01" min="0" name="minimum_fee" value="0" /></div>
+        <div class="form-group"><label>Maximum Fee</label><input type="number" step="0.01" min="0" name="maximum_fee" value="0" /></div>
+        <div class="form-group"><label><input type="checkbox" name="is_active" checked /> Active</label></div>
+        <button class="btn btn-primary" type="submit">Save Fee Rule</button>
+    </form>
+    <table>
+        <thead><tr><th>Merchant</th><th>Flow</th><th>BPS</th><th>Fixed</th><th>Min</th><th>Max</th><th>Active</th></tr></thead>
+        <tbody>
+            {% for rule in fee_rules %}
+                <tr>
+                    <td>{{ rule.merchant.code }}</td>
+                    <td>{{ rule.flow_type|upper }}</td>
+                    <td>{{ rule.percent_bps }}</td>
+                    <td>{{ rule.fixed_fee }}</td>
+                    <td>{{ rule.minimum_fee }}</td>
+                    <td>{{ rule.maximum_fee }}</td>
+                    <td>{% if rule.is_active %}Y{% else %}N{% endif %}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="7" class="text-muted" style="text-align:center;">No fee rules yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Merchant Risk Profile</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="merchant_risk_update" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Single Txn Limit</label><input type="number" step="0.01" min="0.01" name="single_txn_limit" required /></div>
+        <div class="form-group"><label>Daily Txn Limit</label><input type="number" min="1" name="daily_txn_limit" required /></div>
+        <div class="form-group"><label>Daily Amount Limit</label><input type="number" step="0.01" min="0.01" name="daily_amount_limit" required /></div>
+        <div class="form-group"><label>Reserve Ratio (bps)</label><input type="number" min="0" name="reserve_ratio_bps" value="0" /></div>
+        <div class="form-group"><label>Manual Review Threshold</label><input type="number" step="0.01" min="0" name="require_manual_review_above" value="0" /></div>
+        <div class="form-group"><label><input type="checkbox" name="is_high_risk" /> High Risk</label></div>
+        <button class="btn btn-primary" type="submit">Update Risk Profile</button>
+    </form>
+    <table>
+        <thead><tr><th>Merchant</th><th>Single</th><th>Daily Count</th><th>Daily Amount</th><th>Reserve (bps)</th><th>Manual Review</th><th>High Risk</th></tr></thead>
+        <tbody>
+            {% for risk in risk_profiles %}
+                <tr>
+                    <td>{{ risk.merchant.code }}</td>
+                    <td>{{ risk.single_txn_limit }}</td>
+                    <td>{{ risk.daily_txn_limit }}</td>
+                    <td>{{ risk.daily_amount_limit }}</td>
+                    <td>{{ risk.reserve_ratio_bps }}</td>
+                    <td>{{ risk.require_manual_review_above }}</td>
+                    <td>{% if risk.is_high_risk %}Y{% else %}N{% endif %}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="7" class="text-muted" style="text-align:center;">No risk profiles yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Merchant API Credential & Webhook</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="merchant_api_rotate" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Webhook URL</label><input type="url" name="webhook_url" placeholder="https://merchant.example/webhook" /></div>
+        <div class="form-group"><label><input type="checkbox" name="is_active" checked /> Credential Active</label></div>
+        <button class="btn btn-primary" type="submit">Rotate API Credential</button>
+    </form>
+    <table>
+        <thead><tr><th>Merchant</th><th>Key ID</th><th>Webhook</th><th>Active</th><th>Last Rotated</th></tr></thead>
+        <tbody>
+            {% for cred in api_credentials %}
+                <tr>
+                    <td>{{ cred.merchant.code }}</td>
+                    <td>{{ cred.key_id }}</td>
+                    <td>{{ cred.webhook_url|default:"-" }}</td>
+                    <td>{% if cred.is_active %}Y{% else %}N{% endif %}</td>
+                    <td>{% if cred.last_rotated_at %}{{ cred.last_rotated_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="5" class="text-muted" style="text-align:center;">No API credentials yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Settlement Management</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="merchant_settlement_create" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Period Start</label><input type="date" name="period_start" /></div>
+        <div class="form-group"><label>Period End</label><input type="date" name="period_end" /></div>
+        <button class="btn btn-primary" type="submit">Generate Settlement Draft</button>
+    </form>
+    <table>
+        <thead><tr><th>No</th><th>Merchant</th><th>Period</th><th>Gross</th><th>Fee</th><th>Net</th><th>Events</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+            {% for s in settlements %}
+                <tr>
+                    <td>{{ s.settlement_no }}</td>
+                    <td>{{ s.merchant.code }}</td>
+                    <td>{{ s.period_start }} to {{ s.period_end }}</td>
+                    <td>{{ s.gross_amount }} {{ s.currency }}</td>
+                    <td>{{ s.fee_amount }} {{ s.currency }}</td>
+                    <td>{{ s.net_amount }} {{ s.currency }}</td>
+                    <td>{{ s.event_count }}</td>
+                    <td>{{ s.status }}</td>
+                    <td>
+                        <form method="post" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_type" value="merchant_settlement_update" />
+                            <input type="hidden" name="settlement_id" value="{{ s.id }}" />
+                            <select name="status">
+                                <option value="draft"{% if s.status == "draft" %} selected{% endif %}>Draft</option>
+                                <option value="posted"{% if s.status == "posted" %} selected{% endif %}>Posted</option>
+                                <option value="paid"{% if s.status == "paid" %} selected{% endif %}>Paid</option>
+                            </select>
+                            <button class="btn btn-outline" type="submit">Update</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="9" class="text-muted" style="text-align:center;">No settlements yet.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -254,7 +458,7 @@
 <div class="card">
     <h3>Recent Cashflow Events</h3>
     <table>
-        <thead><tr><th>Time</th><th>Merchant</th><th>Flow</th><th>Amount</th><th>From User</th><th>To User</th><th>Counterparty Merchant</th><th>Ref</th></tr></thead>
+        <thead><tr><th>Time</th><th>Merchant</th><th>Flow</th><th>Amount</th><th>Fee</th><th>Net</th><th>From User</th><th>To User</th><th>Counterparty Merchant</th><th>Settlement</th><th>Ref</th></tr></thead>
         <tbody>
             {% for event in cashflow_events %}
                 <tr>
@@ -262,13 +466,16 @@
                     <td>{{ event.merchant.code }}</td>
                     <td>{{ event.flow_type|upper }}</td>
                     <td>{{ event.amount }} {{ event.currency }}</td>
+                    <td>{{ event.fee_amount }} {{ event.currency }}</td>
+                    <td>{{ event.net_amount }} {{ event.currency }}</td>
                     <td>{% if event.from_user %}{{ event.from_user.username }}{% else %}-{% endif %}</td>
                     <td>{% if event.to_user %}{{ event.to_user.username }}{% else %}-{% endif %}</td>
                     <td>{% if event.counterparty_merchant %}{{ event.counterparty_merchant.code }}{% else %}-{% endif %}</td>
+                    <td>{{ event.settlement_reference|default:"-" }}</td>
                     <td>{{ event.reference|default:"-" }}</td>
                 </tr>
             {% empty %}
-                <tr><td colspan="8" class="text-muted" style="text-align:center;">No cashflow events yet.</td></tr>
+                <tr><td colspan="11" class="text-muted" style="text-align:center;">No cashflow events yet.</td></tr>
             {% endfor %}
         </tbody>
     </table>

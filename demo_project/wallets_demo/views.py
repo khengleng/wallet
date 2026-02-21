@@ -1,5 +1,5 @@
 import csv
-from datetime import timedelta
+from datetime import date, datetime, time as dt_time, timedelta
 from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
@@ -18,7 +18,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.http import HttpResponse
@@ -44,9 +44,14 @@ from .models import (
     JournalLine,
     LoginLockout,
     Merchant,
+    MerchantApiCredential,
     MerchantCashflowEvent,
+    MerchantFeeRule,
+    MerchantKYBRequest,
     MerchantLoyaltyEvent,
     MerchantLoyaltyProgram,
+    MerchantRiskProfile,
+    MerchantSettlementRecord,
     MerchantWalletCapability,
     OperationCase,
     OperationCaseNote,
@@ -926,6 +931,87 @@ def _new_case_no() -> str:
     return f"CASE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
 
 
+def _new_settlement_no() -> str:
+    return f"SETTLE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def _hash_api_secret(secret: str) -> str:
+    secret_key = (settings.SECRET_KEY or "wallet-secret").encode("utf-8")
+    return hmac.new(secret_key, secret.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _merchant_fee_for_amount(merchant: Merchant, flow_type: str, amount: Decimal) -> Decimal:
+    rule = MerchantFeeRule.objects.filter(
+        merchant=merchant,
+        flow_type=flow_type,
+        is_active=True,
+    ).first()
+    if rule is None:
+        return Decimal("0.00")
+    fee = (amount * Decimal(rule.percent_bps) / Decimal("10000")) + rule.fixed_fee
+    if rule.minimum_fee and fee < rule.minimum_fee:
+        fee = rule.minimum_fee
+    if rule.maximum_fee and rule.maximum_fee > Decimal("0") and fee > rule.maximum_fee:
+        fee = rule.maximum_fee
+    return fee.quantize(Decimal("0.01"))
+
+
+def _merchant_risk_profile(merchant: Merchant) -> MerchantRiskProfile:
+    profile, _created = MerchantRiskProfile.objects.get_or_create(
+        merchant=merchant,
+        defaults={"updated_by": merchant.updated_by},
+    )
+    return profile
+
+
+def _enforce_merchant_risk_limits(
+    merchant: Merchant,
+    amount: Decimal,
+    *,
+    actor: User,
+):
+    profile = _merchant_risk_profile(merchant)
+    if amount > profile.single_txn_limit:
+        raise ValidationError(
+            f"Amount exceeds single transaction limit ({profile.single_txn_limit})."
+        )
+
+    today = timezone.localdate()
+    day_start = timezone.make_aware(datetime.combine(today, dt_time.min))
+    day_end = timezone.make_aware(datetime.combine(today, dt_time.max))
+    existing_qs = MerchantCashflowEvent.objects.filter(
+        merchant=merchant,
+        created_at__gte=day_start,
+        created_at__lte=day_end,
+    )
+    current_count = existing_qs.count()
+    current_amount = (
+        existing_qs.aggregate(total=models.Sum("amount")).get("total") or Decimal("0")
+    )
+    if current_count + 1 > profile.daily_txn_limit:
+        raise ValidationError(f"Daily transaction count limit exceeded ({profile.daily_txn_limit}).")
+    if current_amount + amount > profile.daily_amount_limit:
+        raise ValidationError(f"Daily amount limit exceeded ({profile.daily_amount_limit}).")
+    if (
+        profile.require_manual_review_above > Decimal("0")
+        and amount >= profile.require_manual_review_above
+        and not user_has_any_role(actor, CHECKER_ROLES)
+    ):
+        raise ValidationError(
+            f"Manual checker review required for amount >= {profile.require_manual_review_above}."
+        )
+
+
+def _parse_iso_date(raw: str | None, *, default: date) -> date:
+    value = (raw or "").strip()
+    if not value:
+        return default
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValidationError("Invalid date format. Use YYYY-MM-DD.") from exc
+
+
 def _merchant_loyalty_wallet_slug(merchant_code: str) -> str:
     slug = f"loyalty_{merchant_code.lower()}"
     return slug[:64]
@@ -1165,6 +1251,18 @@ def operations_center(request):
                     supports_p2g=request.POST.get("supports_p2g") == "on",
                     supports_g2p=request.POST.get("supports_g2p") == "on",
                 )
+                MerchantRiskProfile.objects.create(
+                    merchant=merchant,
+                    daily_txn_limit=int(request.POST.get("daily_txn_limit") or 5000),
+                    daily_amount_limit=Decimal(request.POST.get("daily_amount_limit") or "1000000"),
+                    single_txn_limit=Decimal(request.POST.get("single_txn_limit") or "50000"),
+                    reserve_ratio_bps=int(request.POST.get("reserve_ratio_bps") or 0),
+                    require_manual_review_above=Decimal(
+                        request.POST.get("require_manual_review_above") or "0"
+                    ),
+                    is_high_risk=request.POST.get("is_high_risk") == "on",
+                    updated_by=request.user,
+                )
                 _audit(
                     request,
                     "merchant.create",
@@ -1239,6 +1337,277 @@ def operations_center(request):
                     },
                 )
                 messages.success(request, f"Merchant {merchant.code} updated.")
+                return redirect("operations_center")
+
+            if form_type == "merchant_kyb_submit":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "sales", "finance", "customer_service"),
+                )
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                legal_name = (request.POST.get("legal_name") or "").strip()
+                if not legal_name:
+                    raise ValidationError("Legal name is required for KYB.")
+                documents_json = {
+                    "incorporation_doc_url": (request.POST.get("incorporation_doc_url") or "").strip(),
+                    "license_doc_url": (request.POST.get("license_doc_url") or "").strip(),
+                    "beneficial_owner_doc_url": (request.POST.get("beneficial_owner_doc_url") or "").strip(),
+                }
+                kyb = MerchantKYBRequest.objects.create(
+                    merchant=merchant,
+                    legal_name=legal_name,
+                    registration_number=(request.POST.get("registration_number") or "").strip(),
+                    tax_id=(request.POST.get("tax_id") or "").strip(),
+                    country_code=(request.POST.get("country_code") or "").strip().upper()[:3],
+                    documents_json=documents_json,
+                    risk_note=(request.POST.get("risk_note") or "").strip(),
+                    maker=request.user,
+                )
+                _audit(
+                    request,
+                    "merchant.kyb.submit",
+                    target_type="MerchantKYBRequest",
+                    target_id=str(kyb.id),
+                    metadata={"merchant_code": merchant.code},
+                )
+                messages.success(request, f"KYB request #{kyb.id} submitted for {merchant.code}.")
+                return redirect("operations_center")
+
+            if form_type == "merchant_kyb_decision":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk"),
+                    perms=("wallets_demo.change_merchantkybrequest",),
+                )
+                kyb = MerchantKYBRequest.objects.select_related("merchant").get(
+                    id=request.POST.get("kyb_request_id")
+                )
+                decision = (request.POST.get("decision") or "").strip().lower()
+                if kyb.status != MerchantKYBRequest.STATUS_PENDING:
+                    raise ValidationError("KYB request is not pending.")
+                if decision not in {MerchantKYBRequest.STATUS_APPROVED, MerchantKYBRequest.STATUS_REJECTED}:
+                    raise ValidationError("Invalid KYB decision.")
+                kyb.status = decision
+                kyb.checker = request.user
+                kyb.checker_note = (request.POST.get("checker_note") or "").strip()
+                kyb.decided_at = timezone.now()
+                kyb.save(update_fields=["status", "checker", "checker_note", "decided_at", "updated_at"])
+                if decision == MerchantKYBRequest.STATUS_APPROVED:
+                    merchant = kyb.merchant
+                    merchant.name = kyb.legal_name
+                    merchant.updated_by = request.user
+                    merchant.save(update_fields=["name", "updated_by", "updated_at"])
+                _audit(
+                    request,
+                    "merchant.kyb.decision",
+                    target_type="MerchantKYBRequest",
+                    target_id=str(kyb.id),
+                    metadata={"decision": decision},
+                )
+                messages.success(request, f"KYB request #{kyb.id} {decision}.")
+                return redirect("operations_center")
+
+            if form_type == "merchant_fee_rule_upsert":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "finance"),
+                )
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                flow_type = (request.POST.get("flow_type") or FLOW_B2C).strip().lower()
+                rule, _created = MerchantFeeRule.objects.get_or_create(
+                    merchant=merchant,
+                    flow_type=flow_type,
+                    defaults={"created_by": request.user, "updated_by": request.user},
+                )
+                rule.percent_bps = int(request.POST.get("percent_bps") or 0)
+                rule.fixed_fee = Decimal(request.POST.get("fixed_fee") or "0")
+                rule.minimum_fee = Decimal(request.POST.get("minimum_fee") or "0")
+                rule.maximum_fee = Decimal(request.POST.get("maximum_fee") or "0")
+                rule.is_active = request.POST.get("is_active") == "on"
+                rule.updated_by = request.user
+                rule.full_clean()
+                rule.save()
+                _audit(
+                    request,
+                    "merchant.fee_rule.upsert",
+                    target_type="MerchantFeeRule",
+                    target_id=str(rule.id),
+                    metadata={"merchant_code": merchant.code, "flow_type": flow_type},
+                )
+                messages.success(request, f"Fee rule updated for {merchant.code} ({flow_type.upper()}).")
+                return redirect("operations_center")
+
+            if form_type == "merchant_risk_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk", "operation", "finance"),
+                )
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                profile, _created = MerchantRiskProfile.objects.get_or_create(
+                    merchant=merchant,
+                    defaults={"updated_by": request.user},
+                )
+                profile.daily_txn_limit = int(request.POST.get("daily_txn_limit") or profile.daily_txn_limit)
+                profile.daily_amount_limit = Decimal(
+                    request.POST.get("daily_amount_limit") or str(profile.daily_amount_limit)
+                )
+                profile.single_txn_limit = Decimal(
+                    request.POST.get("single_txn_limit") or str(profile.single_txn_limit)
+                )
+                profile.reserve_ratio_bps = int(
+                    request.POST.get("reserve_ratio_bps") or profile.reserve_ratio_bps
+                )
+                profile.require_manual_review_above = Decimal(
+                    request.POST.get("require_manual_review_above")
+                    or str(profile.require_manual_review_above)
+                )
+                profile.is_high_risk = request.POST.get("is_high_risk") == "on"
+                profile.updated_by = request.user
+                profile.save()
+                _audit(
+                    request,
+                    "merchant.risk_profile.update",
+                    target_type="MerchantRiskProfile",
+                    target_id=str(profile.id),
+                    metadata={"merchant_code": merchant.code},
+                )
+                messages.success(request, f"Risk profile updated for {merchant.code}.")
+                return redirect("operations_center")
+
+            if form_type == "merchant_api_rotate":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "finance"),
+                )
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                webhook_url = (request.POST.get("webhook_url") or "").strip()
+                credential, created = MerchantApiCredential.objects.get_or_create(
+                    merchant=merchant,
+                    defaults={
+                        "key_id": f"mk_{secrets.token_hex(8)}",
+                        "secret_hash": "",
+                        "created_by": request.user,
+                        "updated_by": request.user,
+                        "webhook_url": webhook_url,
+                    },
+                )
+                raw_secret = secrets.token_urlsafe(32)
+                credential.secret_hash = _hash_api_secret(raw_secret)
+                credential.key_id = f"mk_{secrets.token_hex(8)}"
+                credential.webhook_url = webhook_url
+                credential.is_active = request.POST.get("is_active") == "on"
+                credential.last_rotated_at = timezone.now()
+                credential.updated_by = request.user
+                if created:
+                    credential.created_by = request.user
+                credential.save()
+                _audit(
+                    request,
+                    "merchant.api_credential.rotate",
+                    target_type="MerchantApiCredential",
+                    target_id=str(credential.id),
+                    metadata={"merchant_code": merchant.code, "key_id": credential.key_id},
+                )
+                messages.success(
+                    request,
+                    f"Credential rotated for {merchant.code}. Key ID: {credential.key_id}, Secret: {raw_secret}",
+                )
+                return redirect("operations_center")
+
+            if form_type == "merchant_settlement_create":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "treasury", "operation"),
+                )
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                currency = _normalize_currency(request.POST.get("currency"))
+                period_start = _parse_iso_date(
+                    request.POST.get("period_start"),
+                    default=timezone.localdate() - timedelta(days=1),
+                )
+                period_end = _parse_iso_date(
+                    request.POST.get("period_end"),
+                    default=timezone.localdate(),
+                )
+                if period_start > period_end:
+                    raise ValidationError("Settlement start date cannot be after end date.")
+                events = list(
+                    MerchantCashflowEvent.objects.filter(
+                        merchant=merchant,
+                        currency=currency,
+                        settled_at__isnull=True,
+                        created_at__date__gte=period_start,
+                        created_at__date__lte=period_end,
+                    ).order_by("created_at", "id")
+                )
+                if not events:
+                    raise ValidationError("No unsettled cashflow events found for selected period.")
+                gross_amount = sum((evt.amount for evt in events), Decimal("0.00"))
+                fee_amount = sum((evt.fee_amount for evt in events), Decimal("0.00"))
+                net_amount = sum((evt.net_amount for evt in events), Decimal("0.00"))
+                settlement = MerchantSettlementRecord.objects.create(
+                    merchant=merchant,
+                    settlement_no=_new_settlement_no(),
+                    currency=currency,
+                    period_start=period_start,
+                    period_end=period_end,
+                    gross_amount=gross_amount,
+                    fee_amount=fee_amount,
+                    net_amount=net_amount,
+                    event_count=len(events),
+                    created_by=request.user,
+                )
+                now = timezone.now()
+                MerchantCashflowEvent.objects.filter(id__in=[evt.id for evt in events]).update(
+                    settlement_reference=settlement.settlement_no,
+                    settled_at=now,
+                )
+                _audit(
+                    request,
+                    "merchant.settlement.create",
+                    target_type="MerchantSettlementRecord",
+                    target_id=str(settlement.id),
+                    metadata={"merchant_code": merchant.code, "event_count": len(events)},
+                )
+                messages.success(
+                    request,
+                    f"Settlement {settlement.settlement_no} created with {len(events)} events.",
+                )
+                return redirect("operations_center")
+
+            if form_type == "merchant_settlement_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "treasury", "risk"),
+                )
+                settlement = MerchantSettlementRecord.objects.get(
+                    id=request.POST.get("settlement_id")
+                )
+                status = (request.POST.get("status") or "").strip().lower()
+                if status not in {
+                    MerchantSettlementRecord.STATUS_DRAFT,
+                    MerchantSettlementRecord.STATUS_POSTED,
+                    MerchantSettlementRecord.STATUS_PAID,
+                }:
+                    raise ValidationError("Invalid settlement status.")
+                settlement.status = status
+                if status in {
+                    MerchantSettlementRecord.STATUS_POSTED,
+                    MerchantSettlementRecord.STATUS_PAID,
+                }:
+                    settlement.approved_by = request.user
+                    settlement.approved_at = timezone.now()
+                settlement.save(
+                    update_fields=["status", "approved_by", "approved_at", "updated_at"]
+                )
+                _audit(
+                    request,
+                    "merchant.settlement.update",
+                    target_type="MerchantSettlementRecord",
+                    target_id=str(settlement.id),
+                    metadata={"status": status},
+                )
+                messages.success(request, f"Settlement {settlement.settlement_no} updated to {status}.")
                 return redirect("operations_center")
 
             if form_type == "case_create":
@@ -1445,6 +1814,9 @@ def operations_center(request):
                 currency = _normalize_currency(request.POST.get("currency"))
                 reference = (request.POST.get("reference") or "").strip()
                 note = (request.POST.get("note") or "").strip()
+                _enforce_merchant_risk_limits(merchant, amount, actor=request.user)
+                fee_amount = _merchant_fee_for_amount(merchant, flow_type, amount)
+                net_amount = (amount - fee_amount).quantize(Decimal("0.01"))
                 from_user = None
                 to_user = None
                 counterparty_merchant = None
@@ -1535,6 +1907,8 @@ def operations_center(request):
                         merchant=merchant,
                         flow_type=flow_type,
                         amount=amount,
+                        fee_amount=fee_amount,
+                        net_amount=net_amount,
                         currency=currency,
                         from_user=from_user,
                         to_user=to_user,
@@ -1551,6 +1925,8 @@ def operations_center(request):
                     metadata={
                         "flow_type": flow_type,
                         "amount": str(amount),
+                        "fee_amount": str(fee_amount),
+                        "net_amount": str(net_amount),
                         "currency": currency,
                         "reference": reference,
                     },
@@ -1562,6 +1938,8 @@ def operations_center(request):
                         "merchant_code": merchant.code,
                         "flow_type": flow_type,
                         "amount": str(amount),
+                        "fee_amount": str(fee_amount),
+                        "net_amount": str(net_amount),
                         "currency": currency,
                         "reference": reference,
                     },
@@ -1578,6 +1956,10 @@ def operations_center(request):
     for merchant in merchants:
         MerchantLoyaltyProgram.objects.get_or_create(merchant=merchant)
         MerchantWalletCapability.objects.get_or_create(merchant=merchant)
+        MerchantRiskProfile.objects.get_or_create(
+            merchant=merchant,
+            defaults={"updated_by": merchant.updated_by},
+        )
     cases = OperationCase.objects.select_related("customer", "merchant", "assigned_to").order_by("-created_at")[:100]
     loyalty_events = MerchantLoyaltyEvent.objects.select_related("merchant", "customer").order_by("-created_at")[:100]
     cashflow_events = (
@@ -1586,6 +1968,15 @@ def operations_center(request):
         )
         .order_by("-created_at")[:100]
     )
+    kyb_requests = MerchantKYBRequest.objects.select_related(
+        "merchant", "maker", "checker"
+    ).order_by("-created_at")[:100]
+    fee_rules = MerchantFeeRule.objects.select_related("merchant").order_by("merchant__code", "flow_type")
+    risk_profiles = MerchantRiskProfile.objects.select_related("merchant").order_by("merchant__code")
+    api_credentials = MerchantApiCredential.objects.select_related("merchant").order_by("merchant__code")
+    settlements = MerchantSettlementRecord.objects.select_related(
+        "merchant", "created_by", "approved_by"
+    ).order_by("-created_at")[:100]
     return render(
         request,
         "wallets_demo/operations_center.html",
@@ -1594,6 +1985,11 @@ def operations_center(request):
             "cases": cases,
             "loyalty_events": loyalty_events,
             "cashflow_events": cashflow_events,
+            "kyb_requests": kyb_requests,
+            "fee_rules": fee_rules,
+            "risk_profiles": risk_profiles,
+            "api_credentials": api_credentials,
+            "settlements": settlements,
             "users": User.objects.order_by("username")[:300],
             "supported_currencies": _supported_currencies(),
             "flow_choices": FLOW_CHOICES,

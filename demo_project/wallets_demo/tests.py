@@ -15,6 +15,13 @@ from .models import (
     JournalEntry,
     JournalLine,
     Merchant,
+    MerchantCashflowEvent,
+    MerchantFeeRule,
+    MerchantKYBRequest,
+    MerchantLoyaltyProgram,
+    MerchantRiskProfile,
+    MerchantSettlementRecord,
+    MerchantWalletCapability,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -417,3 +424,190 @@ class CustomerCIFWalletManagementTests(TestCase):
         filtered = list(response.context["customer_cifs"].object_list)
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].cif_no, "CIF-0030")
+
+
+class MerchantEnterpriseOperationsTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.admin = User.objects.create_user(
+            username="merchant_admin",
+            email="merchant_admin@example.com",
+            password="pass12345",
+        )
+        self.maker = User.objects.create_user(username="merchant_maker", password="pass12345")
+        self.checker = User.objects.create_user(username="merchant_checker", password="pass12345")
+        self.customer = User.objects.create_user(username="merchant_customer", password="pass12345")
+        assign_roles(self.admin, ["admin"])
+        assign_roles(self.maker, ["operation"])
+        assign_roles(self.checker, ["risk"])
+        self.customer.deposit(200)
+        self.merchant = Merchant.objects.create(
+            code="MOPS001",
+            name="Merchant Ops",
+            settlement_currency="USD",
+            created_by=self.admin,
+            updated_by=self.admin,
+            owner=self.admin,
+        )
+        MerchantWalletCapability.objects.create(
+            merchant=self.merchant,
+            supports_b2b=True,
+            supports_b2c=True,
+            supports_c2b=True,
+            supports_p2g=False,
+            supports_g2p=False,
+        )
+        MerchantLoyaltyProgram.objects.create(merchant=self.merchant)
+        MerchantRiskProfile.objects.create(
+            merchant=self.merchant,
+            daily_txn_limit=100,
+            daily_amount_limit=Decimal("1000000"),
+            single_txn_limit=Decimal("100000"),
+            reserve_ratio_bps=0,
+            require_manual_review_above=Decimal("0"),
+            is_high_risk=False,
+            updated_by=self.admin,
+        )
+
+    def test_cashflow_applies_fee_rule(self):
+        MerchantFeeRule.objects.create(
+            merchant=self.merchant,
+            flow_type="c2b",
+            percent_bps=100,
+            fixed_fee=Decimal("1.00"),
+            minimum_fee=Decimal("0"),
+            maximum_fee=Decimal("0"),
+            is_active=True,
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+        self.client.login(username="merchant_admin", password="pass12345")
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "cashflow_event_create",
+                "merchant_id": self.merchant.id,
+                "flow_type": "c2b",
+                "user_id": self.customer.id,
+                "currency": "USD",
+                "amount": "100.00",
+                "reference": "FEE-APPLY",
+                "note": "fee test",
+            },
+        )
+        self.assertIn(response.status_code, (200, 302))
+        messages_text = []
+        if getattr(response, "context", None) is not None and "messages" in response.context:
+            messages_text = [str(m) for m in response.context["messages"]]
+        self.assertTrue(
+            MerchantCashflowEvent.objects.filter(reference="FEE-APPLY").exists(),
+            f"cashflow not created; messages={messages_text}",
+        )
+        event = MerchantCashflowEvent.objects.get(reference="FEE-APPLY")
+        self.assertEqual(event.fee_amount, Decimal("2.00"))
+        self.assertEqual(event.net_amount, Decimal("98.00"))
+
+    def test_cashflow_blocked_by_risk_single_txn_limit(self):
+        risk = self.merchant.risk_profile
+        risk.single_txn_limit = Decimal("25.00")
+        risk.save(update_fields=["single_txn_limit", "updated_at"])
+
+        self.client.login(username="merchant_admin", password="pass12345")
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "cashflow_event_create",
+                "merchant_id": self.merchant.id,
+                "flow_type": "c2b",
+                "user_id": self.customer.id,
+                "currency": "USD",
+                "amount": "30.00",
+                "reference": "RISK-BLOCK",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            MerchantCashflowEvent.objects.filter(reference="RISK-BLOCK").exists()
+        )
+
+    def test_settlement_generation_marks_events(self):
+        MerchantCashflowEvent.objects.create(
+            merchant=self.merchant,
+            flow_type="c2b",
+            amount=Decimal("100.00"),
+            fee_amount=Decimal("2.00"),
+            net_amount=Decimal("98.00"),
+            currency="USD",
+            from_user=self.customer,
+            created_by=self.admin,
+            reference="STL-1",
+        )
+        MerchantCashflowEvent.objects.create(
+            merchant=self.merchant,
+            flow_type="c2b",
+            amount=Decimal("40.00"),
+            fee_amount=Decimal("1.00"),
+            net_amount=Decimal("39.00"),
+            currency="USD",
+            from_user=self.customer,
+            created_by=self.admin,
+            reference="STL-2",
+        )
+        self.client.login(username="merchant_admin", password="pass12345")
+        today = str(self.merchant.created_at.date())
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "merchant_settlement_create",
+                "merchant_id": self.merchant.id,
+                "currency": "USD",
+                "period_start": today,
+                "period_end": today,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        settlement = MerchantSettlementRecord.objects.get(merchant=self.merchant)
+        self.assertEqual(settlement.event_count, 2)
+        self.assertEqual(settlement.gross_amount, Decimal("140.00"))
+        self.assertEqual(settlement.fee_amount, Decimal("3.00"))
+        self.assertEqual(settlement.net_amount, Decimal("137.00"))
+        self.assertEqual(
+            MerchantCashflowEvent.objects.filter(settlement_reference=settlement.settlement_no).count(),
+            2,
+        )
+
+    def test_kyb_maker_checker_approval(self):
+        self.client.login(username="merchant_maker", password="pass12345")
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "merchant_kyb_submit",
+                "merchant_id": self.merchant.id,
+                "legal_name": "Merchant Ops Legal",
+                "registration_number": "REG-7788",
+                "tax_id": "TAX-7788",
+                "country_code": "SG",
+                "risk_note": "reviewed",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        kyb = MerchantKYBRequest.objects.get(merchant=self.merchant)
+        self.assertEqual(kyb.status, MerchantKYBRequest.STATUS_PENDING)
+
+        self.client.logout()
+        self.client.login(username="merchant_checker", password="pass12345")
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "merchant_kyb_decision",
+                "kyb_request_id": kyb.id,
+                "decision": "approved",
+                "checker_note": "ok",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        kyb.refresh_from_db()
+        self.merchant.refresh_from_db()
+        self.assertEqual(kyb.status, MerchantKYBRequest.STATUS_APPROVED)
+        self.assertEqual(self.merchant.name, "Merchant Ops Legal")
