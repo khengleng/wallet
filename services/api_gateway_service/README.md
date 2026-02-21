@@ -16,6 +16,11 @@ JWT-authenticated gateway in front of `wallet-ledger-service`.
 - `JWT_ISSUER`
 - `LEDGER_BASE_URL` (for Railway use internal domain when possible)
 - `LEDGER_API_KEY` (must match ledger `SERVICE_API_KEY`)
+- `LEDGER_TIMEOUT_SECONDS` (default `10`)
+- `LEDGER_MAX_RETRIES` (default `2`)
+- `LEDGER_RETRY_BACKOFF_SECONDS` (default `0.2`)
+- `LEDGER_CIRCUIT_FAILURE_THRESHOLD` (default `5`)
+- `LEDGER_CIRCUIT_RESET_SECONDS` (default `30`)
 - `RATE_LIMIT_PER_IP` (default `120/minute`)
 - `RATE_LIMIT_PER_USER` (default `240/minute`)
 

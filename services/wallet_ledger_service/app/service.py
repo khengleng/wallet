@@ -77,6 +77,8 @@ def apply_deposit(
         )
         payload = {
             "account_id": str(account.id),
+            "amount": str(amount),
+            "currency": account.currency,
             "balance": str(account.balance),
             "reference_id": reference_id,
             "idempotency_key": idempotency_key,
@@ -115,6 +117,8 @@ def apply_withdrawal(
         )
         payload = {
             "account_id": str(account.id),
+            "amount": str(amount),
+            "currency": account.currency,
             "balance": str(account.balance),
             "reference_id": reference_id,
             "idempotency_key": idempotency_key,
@@ -178,6 +182,9 @@ def apply_transfer(
         payload = {
             "from_account_id": str(sender.id),
             "to_account_id": str(receiver.id),
+            "amount": str(amount),
+            "from_currency": sender.currency,
+            "to_currency": receiver.currency,
             "from_balance": str(sender.balance),
             "to_balance": str(receiver.balance),
             "reference_id": reference_id,

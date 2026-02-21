@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -23,6 +24,9 @@ app = FastAPI(
 logger = logging.getLogger("api_gateway.audit")
 rate_lock = Lock()
 rate_windows: dict[str, deque[float]] = defaultdict(deque)
+circuit_lock = Lock()
+circuit_failures = 0
+circuit_open_until = 0.0
 
 
 def _audit(event: str, **fields: Any) -> None:
@@ -131,26 +135,59 @@ async def _proxy(
     payload: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
 ) -> Any:
+    global circuit_failures, circuit_open_until
+
+    with circuit_lock:
+        if circuit_open_until > time.monotonic():
+            _audit("upstream_circuit_open")
+            raise HTTPException(status_code=503, detail="Ledger temporarily unavailable")
+
     url = f"{settings.ledger_base_url.rstrip('/')}{path}"
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.request(
-                method,
-                url,
-                json=payload,
-                headers=_forward_headers(idempotency_key),
-            )
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail="Ledger upstream unavailable") from exc
+    attempt = 0
+    backoff = settings.ledger_retry_backoff_seconds
+    while True:
+        attempt += 1
+        try:
+            async with httpx.AsyncClient(timeout=settings.ledger_timeout_seconds) as client:
+                resp = await client.request(
+                    method,
+                    url,
+                    json=payload,
+                    headers=_forward_headers(idempotency_key),
+                )
+        except httpx.HTTPError as exc:
+            if attempt <= settings.ledger_max_retries:
+                await asyncio.sleep(backoff)
+                backoff *= 2
+                continue
+            with circuit_lock:
+                circuit_failures += 1
+                if circuit_failures >= settings.circuit_failure_threshold:
+                    circuit_open_until = time.monotonic() + settings.circuit_reset_seconds
+            raise HTTPException(status_code=502, detail="Ledger upstream unavailable") from exc
 
-    try:
-        body = resp.json()
-    except ValueError:
-        body = {"detail": "Invalid upstream response"}
+        if resp.status_code >= 500 and attempt <= settings.ledger_max_retries:
+            await asyncio.sleep(backoff)
+            backoff *= 2
+            continue
 
-    if resp.status_code >= 400:
-        raise HTTPException(status_code=resp.status_code, detail=body.get("detail", body))
-    return body
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {"detail": "Invalid upstream response"}
+
+        if resp.status_code >= 400:
+            if resp.status_code >= 500:
+                with circuit_lock:
+                    circuit_failures += 1
+                    if circuit_failures >= settings.circuit_failure_threshold:
+                        circuit_open_until = time.monotonic() + settings.circuit_reset_seconds
+            raise HTTPException(status_code=resp.status_code, detail=body.get("detail", body))
+
+        with circuit_lock:
+            circuit_failures = 0
+            circuit_open_until = 0.0
+        return body
 
 
 @app.get("/healthz")

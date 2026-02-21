@@ -30,6 +30,8 @@ All events are emitted through the outbox table and published asynchronously.
 ```json
 {
   "account_id": "uuid",
+  "amount": "decimal-string",
+  "currency": "USD",
   "balance": "decimal-string",
   "reference_id": "ext-ref-123",
   "idempotency_key": "idem-123"
@@ -40,6 +42,8 @@ All events are emitted through the outbox table and published asynchronously.
 ```json
 {
   "account_id": "uuid",
+  "amount": "decimal-string",
+  "currency": "USD",
   "balance": "decimal-string",
   "reference_id": "ext-ref-123",
   "idempotency_key": "idem-123"
@@ -51,6 +55,9 @@ All events are emitted through the outbox table and published asynchronously.
 {
   "from_account_id": "uuid",
   "to_account_id": "uuid",
+  "amount": "decimal-string",
+  "from_currency": "USD",
+  "to_currency": "USD",
   "from_balance": "decimal-string",
   "to_balance": "decimal-string",
   "reference_id": "ext-ref-123",

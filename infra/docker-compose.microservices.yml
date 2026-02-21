@@ -51,6 +51,49 @@ services:
     depends_on:
       - wallet-ledger-service
 
+  ops-risk-service:
+    build:
+      context: ../services/ops_risk_service
+    command: >
+      sh -c "python -m app.migrate &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 2"
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      BROKER_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      EVENT_EXCHANGE_NAME: wallet.events
+      EVENT_EXCHANGE_TYPE: topic
+      EVENT_QUEUE_NAME: ops_risk_events
+      EVENT_ROUTING_KEY: ledger.#
+      EVENT_CONSUMER_PREFETCH: 50
+      RISK_HIGH_VALUE_THRESHOLD: 10000
+    ports:
+      - "8083:8080"
+    depends_on:
+      - rabbitmq
+      - postgres
+
+  ops-risk-consumer:
+    build:
+      context: ../services/ops_risk_service
+    command: >
+      sh -c "python -m app.migrate &&
+             python -m app.consumer"
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      BROKER_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      EVENT_EXCHANGE_NAME: wallet.events
+      EVENT_EXCHANGE_TYPE: topic
+      EVENT_QUEUE_NAME: ops_risk_events
+      EVENT_ROUTING_KEY: ledger.#
+      EVENT_CONSUMER_PREFETCH: 50
+      RISK_HIGH_VALUE_THRESHOLD: 10000
+    depends_on:
+      - rabbitmq
+      - postgres
+      - ops-risk-service
+
   api:
     build:
       context: ..

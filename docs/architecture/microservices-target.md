@@ -53,3 +53,13 @@
   - retry with exponential backoff,
   - dead-lettering after max attempts,
   - RabbitMQ topic exchange publish.
+
+## Phase 3 Progress
+- Added `ops-risk-service`:
+  - idempotent event consumer (`processed_events` unique by `event_id`),
+  - dead-letter persistence (`dead_letter_events`),
+  - replay tooling (`python -m app.replay_dead_letters`),
+  - risk alert generation for high-value transactions.
+- API gateway now includes:
+  - bounded retry with exponential backoff,
+  - circuit-breaker behavior for ledger upstream failures.

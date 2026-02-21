@@ -15,6 +15,15 @@ class Settings:
         "http://localhost:8081",
     )
     ledger_api_key: str = os.getenv("LEDGER_API_KEY", "")
+    ledger_timeout_seconds: float = float(os.getenv("LEDGER_TIMEOUT_SECONDS", "10"))
+    ledger_max_retries: int = int(os.getenv("LEDGER_MAX_RETRIES", "2"))
+    ledger_retry_backoff_seconds: float = float(
+        os.getenv("LEDGER_RETRY_BACKOFF_SECONDS", "0.2")
+    )
+    circuit_failure_threshold: int = int(
+        os.getenv("LEDGER_CIRCUIT_FAILURE_THRESHOLD", "5")
+    )
+    circuit_reset_seconds: int = int(os.getenv("LEDGER_CIRCUIT_RESET_SECONDS", "30"))
     per_ip_limit: str = os.getenv("RATE_LIMIT_PER_IP", "120/minute")
     per_user_limit: str = os.getenv("RATE_LIMIT_PER_USER", "240/minute")
 

@@ -221,6 +221,7 @@ This repository now includes deployment and architecture scaffolding for high-sc
 - Target microservices architecture: `docs/architecture/microservices-target.md`
 - Extracted ledger microservice: `services/wallet_ledger_service`
 - Extracted API gateway: `services/api_gateway_service`
+- Extracted ops/risk consumer: `services/ops_risk_service`
 - Production environment template: `.env.production.example`
 - Local multi-service infrastructure (PostgreSQL/Redis/RabbitMQ): `infra/docker-compose.microservices.yml`
 - Kubernetes deployment/HPA/PDB baseline: `infra/k8s/wallet-api.yaml`
@@ -228,6 +229,7 @@ This repository now includes deployment and architecture scaffolding for high-sc
   - Django web service root: repository root (uses `Procfile`)
   - Ledger service root: `services/wallet_ledger_service` (uses local `nixpacks.toml`)
   - API gateway service root: `services/api_gateway_service` (uses local `nixpacks.toml`)
+  - Ops/risk service root: `services/ops_risk_service` (uses local `nixpacks.toml`)
 
 Production defaults enforce:
 - explicit `SECRET_KEY`
