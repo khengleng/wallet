@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 
+import httpx
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Response
 from sqlalchemy import func, select, text
 
@@ -16,6 +17,10 @@ app = FastAPI(
     description="Idempotent event consumer support service for operations/risk workflows.",
 )
 APP_START_MONOTONIC = time.monotonic()
+onesignal_metrics = {
+    "onesignal_sent_total": 0,
+    "onesignal_failed_total": 0,
+}
 
 
 @app.on_event("startup")
@@ -35,6 +40,93 @@ def _require_metrics_token(
         bearer_token = authorization.split(" ", 1)[1]
     if x_metrics_token != settings.metrics_token and bearer_token != settings.metrics_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _send_onesignal_notification(
+    *,
+    status: str,
+    alert_name: str,
+    severity: str,
+    service: str,
+    payload: dict,
+) -> None:
+    if not settings.onesignal_enabled:
+        return
+    if not settings.onesignal_app_id or not settings.onesignal_rest_api_key:
+        onesignal_metrics["onesignal_failed_total"] += 1
+        print(
+            json.dumps(
+                {
+                    "event": "onesignal_send_failed",
+                    "reason": "missing_credentials",
+                }
+            )
+        )
+        return
+
+    target_segments = _split_csv(settings.onesignal_target_segments) or ["Subscribed Users"]
+    title = f"[{severity.upper() if severity else 'INFO'}] {alert_name or 'Platform Alert'}"
+    body = f"Service={service or 'unknown'} status={status}"
+    request_body = {
+        "app_id": settings.onesignal_app_id,
+        "included_segments": target_segments,
+        "headings": {"en": title[:64]},
+        "contents": {"en": body[:160]},
+        "data": {
+            "alert_name": alert_name,
+            "severity": severity,
+            "service": service,
+            "status": status,
+        },
+    }
+    headers = {
+        "Authorization": f"Key {settings.onesignal_rest_api_key}",
+        "Content-Type": "application/json",
+    }
+    endpoint = f"{settings.onesignal_api_base_url}/notifications"
+    try:
+        with httpx.Client(timeout=settings.onesignal_timeout_seconds) as client:
+            response = client.post(endpoint, json=request_body, headers=headers)
+        if response.status_code >= 400:
+            onesignal_metrics["onesignal_failed_total"] += 1
+            print(
+                json.dumps(
+                    {
+                        "event": "onesignal_send_failed",
+                        "status_code": response.status_code,
+                        "alert_name": alert_name,
+                        "response_body": response.text[:512],
+                    }
+                )
+            )
+            return
+        onesignal_metrics["onesignal_sent_total"] += 1
+        print(
+            json.dumps(
+                {
+                    "event": "onesignal_send_success",
+                    "alert_name": alert_name,
+                    "severity": severity,
+                    "service": service,
+                }
+            )
+        )
+    except Exception as exc:
+        onesignal_metrics["onesignal_failed_total"] += 1
+        print(
+            json.dumps(
+                {
+                    "event": "onesignal_send_failed",
+                    "reason": "http_exception",
+                    "alert_name": alert_name,
+                    "error": str(exc)[:256],
+                }
+            )
+        )
 
 
 def _require_alert_webhook_token(token: str | None = Query(default=None)):
@@ -92,6 +184,12 @@ def metrics(_: None = Depends(_require_metrics_token)):
         "# HELP ops_risk_alertmanager_notifications_total Alertmanager notifications received.",
         "# TYPE ops_risk_alertmanager_notifications_total counter",
         f"ops_risk_alertmanager_notifications_total {alert_notifications_total}",
+        "# HELP ops_risk_onesignal_sent_total OneSignal notifications sent successfully.",
+        "# TYPE ops_risk_onesignal_sent_total counter",
+        f"ops_risk_onesignal_sent_total {onesignal_metrics['onesignal_sent_total']}",
+        "# HELP ops_risk_onesignal_failed_total OneSignal notification send failures.",
+        "# TYPE ops_risk_onesignal_failed_total counter",
+        f"ops_risk_onesignal_failed_total {onesignal_metrics['onesignal_failed_total']}",
         "# HELP ops_risk_dead_letter_pending Pending dead letter events.",
         "# TYPE ops_risk_dead_letter_pending gauge",
         f"ops_risk_dead_letter_pending {dead_letter_pending}",
@@ -136,5 +234,12 @@ def ingest_alert(
                 "service": service,
             }
         )
+    )
+    _send_onesignal_notification(
+        status=status,
+        alert_name=alert_name,
+        severity=severity,
+        service=service,
+        payload=payload,
     )
     return {"status": "received"}

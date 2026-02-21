@@ -39,6 +39,12 @@ python -m app.replay_dead_letters --limit 200
 - `EVENT_QUEUE_NAME` (default `ops_risk_events`)
 - `EVENT_ROUTING_KEY` (default `ledger.#`)
 - `RISK_HIGH_VALUE_THRESHOLD` (default `10000`)
+- OneSignal push (optional):
+  - `ONESIGNAL_ENABLED=true`
+  - `ONESIGNAL_APP_ID=<onesignal-app-id>`
+  - `ONESIGNAL_REST_API_KEY=<onesignal-rest-api-key>`
+  - `ONESIGNAL_TARGET_SEGMENTS=Subscribed Users` (comma-separated supported)
+  - `ONESIGNAL_TIMEOUT_SECONDS=5`
 
 ## Metrics Auth
 - `GET /metrics` accepts:
