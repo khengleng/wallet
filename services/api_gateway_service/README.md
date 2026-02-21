@@ -39,6 +39,10 @@ JWT-authenticated gateway in front of `wallet-ledger-service`.
   - `RATE_LIMIT_WRITE_PER_USER` (default `240/minute`)
   - `RATE_LIMIT_CRITICAL_PER_IP` (default `60/minute`) for withdraw/transfer
   - `RATE_LIMIT_CRITICAL_PER_USER` (default `120/minute`)
+- WAF deny rules (optional):
+  - `WAF_BLOCKED_IPS` comma-separated IPs (example `1.2.3.4,8.8.8.8`)
+  - `WAF_BLOCKED_CIDRS` comma-separated CIDRs (example `10.0.0.0/8,203.0.113.0/24`)
+  - `WAF_BLOCKED_USER_AGENTS` comma-separated case-insensitive substrings (example `sqlmap,curl/8.`)
 
 ## Run Locally
 ```bash
@@ -48,3 +52,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8082
 ```
+
+## Metrics
+- `wallet_gateway_waf_blocked_total` increments when requests are blocked by WAF deny rules.

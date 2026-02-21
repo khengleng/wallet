@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import time
@@ -33,6 +34,7 @@ metrics_counters = {
     "requests_total": 0,
     "upstream_errors_total": 0,
     "rate_limited_total": 0,
+    "waf_blocked_total": 0,
     "auth_failed_total": 0,
     "circuit_open_total": 0,
     "proxy_retries_total": 0,
@@ -41,6 +43,30 @@ APP_START_MONOTONIC = time.monotonic()
 TOKEN_CACHE_TTL_SECONDS = 30
 token_cache_lock = Lock()
 token_introspection_cache: dict[str, dict[str, Any]] = {}
+
+
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _load_blocked_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    raw_entries = _split_csv(settings.waf_blocked_ips) + _split_csv(settings.waf_blocked_cidrs)
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for raw in raw_entries:
+        try:
+            if "/" in raw:
+                networks.append(ipaddress.ip_network(raw, strict=False))
+            else:
+                ip_obj = ipaddress.ip_address(raw)
+                suffix = "/32" if isinstance(ip_obj, ipaddress.IPv4Address) else "/128"
+                networks.append(ipaddress.ip_network(f"{ip_obj}{suffix}", strict=False))
+        except ValueError:
+            logger.warning("Ignoring invalid WAF IP/CIDR entry: %s", raw)
+    return networks
+
+
+BLOCKED_NETWORKS = _load_blocked_networks()
+BLOCKED_USER_AGENT_PATTERNS = [item.lower() for item in _split_csv(settings.waf_blocked_user_agents)]
 
 
 def _inc_counter(key: str, value: int = 1) -> None:
@@ -239,6 +265,22 @@ def _rate_limit_profile(request: Request) -> tuple[str, str, str]:
     return ("default", settings.per_ip_limit, settings.per_user_limit)
 
 
+def _waf_block_reason(ip: str, user_agent: str) -> str | None:
+    if BLOCKED_NETWORKS:
+        try:
+            ip_obj = ipaddress.ip_address(ip)
+            if any(ip_obj in network for network in BLOCKED_NETWORKS):
+                return "blocked_ip"
+        except ValueError:
+            pass
+
+    user_agent_l = user_agent.lower()
+    for pattern in BLOCKED_USER_AGENT_PATTERNS:
+        if pattern in user_agent_l:
+            return "blocked_user_agent"
+    return None
+
+
 async def enforce_rate_limits(
     request: Request,
     claims: dict[str, Any] = Depends(require_user),
@@ -248,6 +290,19 @@ async def enforce_rate_limits(
     user_limit, user_window = _parse_rate_limit(per_user_limit)
     ip = _client_ip(request)
     subject = str(claims["sub"])
+    user_agent = request.headers.get("user-agent", "")
+    waf_reason = _waf_block_reason(ip=ip, user_agent=user_agent)
+
+    if waf_reason:
+        _audit(
+            "waf_blocked",
+            reason=waf_reason,
+            subject=subject,
+            ip=ip,
+            path=request.url.path,
+        )
+        _inc_counter("waf_blocked_total")
+        raise HTTPException(status_code=403, detail="Request blocked")
 
     if not _consume(f"ip:{ip}", ip_limit, ip_window):
         _audit("rate_limited", reason="ip_limit", ip=ip, tier=profile_name, path=request.url.path)
@@ -368,6 +423,9 @@ def metrics(_: None = Depends(_require_metrics_token)):
         "# HELP wallet_gateway_rate_limited_total Requests blocked by rate limit.",
         "# TYPE wallet_gateway_rate_limited_total counter",
         f"wallet_gateway_rate_limited_total {snapshot['rate_limited_total']}",
+        "# HELP wallet_gateway_waf_blocked_total Requests blocked by WAF deny rules.",
+        "# TYPE wallet_gateway_waf_blocked_total counter",
+        f"wallet_gateway_waf_blocked_total {snapshot['waf_blocked_total']}",
         "# HELP wallet_gateway_auth_failed_total Failed authentications.",
         "# TYPE wallet_gateway_auth_failed_total counter",
         f"wallet_gateway_auth_failed_total {snapshot['auth_failed_total']}",

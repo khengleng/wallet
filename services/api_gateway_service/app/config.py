@@ -43,6 +43,9 @@ class Settings:
     critical_per_user_limit: str = os.getenv(
         "RATE_LIMIT_CRITICAL_PER_USER", "120/minute"
     )
+    waf_blocked_ips: str = os.getenv("WAF_BLOCKED_IPS", "")
+    waf_blocked_cidrs: str = os.getenv("WAF_BLOCKED_CIDRS", "")
+    waf_blocked_user_agents: str = os.getenv("WAF_BLOCKED_USER_AGENTS", "")
 
     @property
     def is_production(self) -> bool:
