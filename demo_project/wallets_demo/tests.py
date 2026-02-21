@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.test import Client, TestCase
 from django.urls import reverse
+from dj_wallet.models import Wallet
 
 from .models import (
     ApprovalRequest,
@@ -207,3 +208,16 @@ class FxWorkflowTests(TestCase):
         eur_wallet = self.user.get_wallet("eur")
         self.assertEqual(usd_wallet.balance, Decimal("100.00000000"))
         self.assertEqual(eur_wallet.balance, Decimal("90.00000000"))
+
+
+class DashboardMetaCompatibilityTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(username="meta_user", password="pass12345")
+        wallet = self.user.get_wallet("default")
+        Wallet.objects.filter(id=wallet.id).update(meta=None)
+
+    def test_dashboard_handles_null_wallet_meta(self):
+        self.client.login(username="meta_user", password="pass12345")
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)

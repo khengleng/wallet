@@ -68,11 +68,21 @@ def _wallet_slug(currency: str) -> str:
     return currency.lower()
 
 
+def _wallet_meta(wallet: Wallet) -> dict:
+    if isinstance(wallet.meta, dict):
+        return wallet.meta
+    wallet.meta = {}
+    wallet.save(update_fields=["meta"])
+    return wallet.meta
+
+
 def _wallet_for_currency(user: User, currency: str):
     slug = _wallet_slug(currency)
     wallet = user.get_wallet(slug=slug)
-    if wallet.meta.get("currency") != currency:
-        wallet.meta["currency"] = currency
+    meta = _wallet_meta(wallet)
+    if meta.get("currency") != currency:
+        meta["currency"] = currency
+        wallet.meta = meta
         wallet.save(update_fields=["meta"])
     return wallet
 
@@ -225,7 +235,7 @@ def dashboard(request):
     ).order_by("slug")
     currency_balances = [
         {
-            "currency": (w.meta.get("currency") or w.slug.upper()),
+            "currency": (_wallet_meta(w).get("currency") or w.slug.upper()),
             "balance": w.balance,
             "slug": w.slug,
         }

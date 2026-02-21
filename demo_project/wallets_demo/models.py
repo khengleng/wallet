@@ -112,8 +112,10 @@ class ApprovalRequest(models.Model):
         base_currency = getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper()
         source_slug = "default" if self.currency.upper() == base_currency else self.currency.lower()
         source_wallet = self.source_user.get_wallet(source_slug)
-        if source_wallet.meta.get("currency") != self.currency:
-            source_wallet.meta["currency"] = self.currency
+        source_meta = source_wallet.meta if isinstance(source_wallet.meta, dict) else {}
+        if source_meta.get("currency") != self.currency:
+            source_meta["currency"] = self.currency
+            source_wallet.meta = source_meta
             source_wallet.save(update_fields=["meta"])
         try:
             with transaction.atomic():
@@ -126,8 +128,14 @@ class ApprovalRequest(models.Model):
                         raise ValidationError("Recipient is required for transfer.")
                     recipient_slug = "default" if self.currency.upper() == base_currency else self.currency.lower()
                     recipient_wallet = self.recipient_user.get_wallet(recipient_slug)
-                    if recipient_wallet.meta.get("currency") != self.currency:
-                        recipient_wallet.meta["currency"] = self.currency
+                    recipient_meta = (
+                        recipient_wallet.meta
+                        if isinstance(recipient_wallet.meta, dict)
+                        else {}
+                    )
+                    if recipient_meta.get("currency") != self.currency:
+                        recipient_meta["currency"] = self.currency
+                        recipient_wallet.meta = recipient_meta
                         recipient_wallet.save(update_fields=["meta"])
                     wallet_service.withdraw(source_wallet, self.amount, meta=meta)
                     wallet_service.deposit(recipient_wallet, self.amount, meta=meta)
