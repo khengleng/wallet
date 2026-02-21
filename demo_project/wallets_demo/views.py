@@ -13,6 +13,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from dj_wallet.models import Transaction, Wallet
 from dj_wallet.utils import get_exchange_service, get_wallet_service
 
+from .fx_sync import sync_external_fx_rates
 from .models import (
     ApprovalRequest,
     BackofficeAuditLog,
@@ -411,23 +412,47 @@ def fx_management(request):
     if request.method == "POST":
         try:
             _require_role_or_perm(request.user, perms=("wallets_demo.add_fxrate",))
-            base = _normalize_currency(request.POST.get("base_currency"))
-            quote = _normalize_currency(request.POST.get("quote_currency"))
-            rate = _parse_amount(request.POST.get("rate"))
-            fx = FxRate.objects.create(
-                base_currency=base,
-                quote_currency=quote,
-                rate=rate,
-                created_by=request.user,
-            )
-            _audit(
-                request,
-                "fx_rate.create",
-                target_type="FxRate",
-                target_id=str(fx.id),
-                metadata={"pair": f"{base}/{quote}", "rate": str(rate)},
-            )
-            messages.success(request, f"FX rate {base}/{quote}={rate} created.")
+            action = (request.POST.get("action") or "manual").strip().lower()
+            if action == "sync_external":
+                base = _normalize_currency(
+                    request.POST.get("sync_base_currency")
+                    or getattr(settings, "PLATFORM_BASE_CURRENCY", "USD")
+                )
+                quotes = [ccy for ccy in _supported_currencies() if ccy != base]
+                count, provider = sync_external_fx_rates(
+                    base_currency=base,
+                    quote_currencies=quotes,
+                    actor=request.user,
+                )
+                _audit(
+                    request,
+                    "fx_rate.sync_external",
+                    target_type="FxRate",
+                    target_id=base,
+                    metadata={"base_currency": base, "synced_count": count, "provider": provider},
+                )
+                messages.success(
+                    request,
+                    f"Synchronized {count} FX rates from {provider} with base {base}.",
+                )
+            else:
+                base = _normalize_currency(request.POST.get("base_currency"))
+                quote = _normalize_currency(request.POST.get("quote_currency"))
+                rate = _parse_amount(request.POST.get("rate"))
+                fx = FxRate.objects.create(
+                    base_currency=base,
+                    quote_currency=quote,
+                    rate=rate,
+                    created_by=request.user,
+                )
+                _audit(
+                    request,
+                    "fx_rate.create",
+                    target_type="FxRate",
+                    target_id=str(fx.id),
+                    metadata={"pair": f"{base}/{quote}", "rate": str(rate)},
+                )
+                messages.success(request, f"FX rate {base}/{quote}={rate} created.")
             return redirect("fx_management")
         except Exception as exc:
             messages.error(request, f"Unable to create FX rate: {exc}")
@@ -439,6 +464,7 @@ def fx_management(request):
             "supported_currencies": _supported_currencies(),
             "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:100],
             "base_currency": getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper(),
+            "fx_provider": getattr(settings, "FX_PROVIDER", "frankfurter"),
         },
     )
 

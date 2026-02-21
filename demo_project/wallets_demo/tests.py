@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -221,3 +222,34 @@ class DashboardMetaCompatibilityTests(TestCase):
         self.client.login(username="meta_user", password="pass12345")
         response = self.client.get(reverse("dashboard"))
         self.assertEqual(response.status_code, 200)
+
+
+class FxProviderSyncTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.user = User.objects.create_user(username="fx_admin", password="pass12345")
+        assign_roles(self.user, ["finance"])
+
+    def test_fx_management_can_sync_external_rates(self):
+        payload = b'{"amount":1.0,"base":"USD","date":"2026-02-21","rates":{"EUR":0.93,"SGD":1.34}}'
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return payload
+
+        self.client.login(username="fx_admin", password="pass12345")
+        with patch("wallets_demo.fx_provider.urlopen", return_value=_Resp()):
+            response = self.client.post(
+                reverse("fx_management"),
+                {"action": "sync_external", "sync_base_currency": "USD"},
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(FxRate.objects.filter(base_currency="USD", quote_currency="EUR").exists())
+        self.assertTrue(FxRate.objects.filter(base_currency="USD", quote_currency="SGD").exists())

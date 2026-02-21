@@ -132,9 +132,10 @@ class FxRateAdmin(admin.ModelAdmin):
         "base_currency",
         "quote_currency",
         "rate",
+        "source_provider",
         "effective_at",
         "is_active",
         "created_by",
     )
-    list_filter = ("base_currency", "quote_currency", "is_active")
-    search_fields = ("base_currency", "quote_currency")
+    list_filter = ("base_currency", "quote_currency", "source_provider", "is_active")
+    search_fields = ("base_currency", "quote_currency", "source_provider")

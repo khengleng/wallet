@@ -10,9 +10,28 @@
 </div>
 
 <div class="card">
+    <h3>Sync International FX Source</h3>
+    <p class="text-muted">Pull latest rates from provider: <strong>{{ fx_provider }}</strong>.</p>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_external">
+        <div class="form-group">
+            <label for="sync_base_currency">Base Currency</label>
+            <select id="sync_base_currency" name="sync_base_currency" required>
+                {% for c in supported_currencies %}
+                <option value="{{ c }}" {% if c == base_currency %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Sync Latest Rates</button>
+    </form>
+</div>
+
+<div class="card">
     <h3>Create FX Rate</h3>
     <form method="post">
         {% csrf_token %}
+        <input type="hidden" name="action" value="manual">
         <div class="form-group">
             <label for="base_currency">Base Currency</label>
             <select id="base_currency" name="base_currency" required>
@@ -44,6 +63,7 @@
             <tr>
                 <th>Pair</th>
                 <th>Rate</th>
+                <th>Provider</th>
                 <th>Effective At</th>
                 <th>Created By</th>
             </tr>
@@ -53,12 +73,13 @@
                 <tr>
                     <td>{{ fx.base_currency }}/{{ fx.quote_currency }}</td>
                     <td>{{ fx.rate }}</td>
+                    <td>{% if fx.source_provider %}{{ fx.source_provider }}{% else %}-{% endif %}</td>
                     <td>{{ fx.effective_at|date:"Y-m-d H:i" }}</td>
                     <td>{% if fx.created_by %}{{ fx.created_by.username }}{% else %}-{% endif %}</td>
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="4" class="text-muted" style="text-align:center;">No FX rates yet.</td>
+                    <td colspan="5" class="text-muted" style="text-align:center;">No FX rates yet.</td>
                 </tr>
             {% endfor %}
         </tbody>

@@ -490,6 +490,8 @@ class FxRate(models.Model):
     rate = models.DecimalField(max_digits=20, decimal_places=8)
     effective_at = models.DateTimeField(default=timezone.now, db_index=True)
     is_active = models.BooleanField(default=True)
+    source_provider = models.CharField(max_length=64, blank=True, default="")
+    source_reference = models.CharField(max_length=255, blank=True, default="")
     created_by = models.ForeignKey(
         User,
         on_delete=models.PROTECT,

@@ -172,6 +172,12 @@ SUPPORTED_CURRENCIES = [
     for c in os.getenv("SUPPORTED_CURRENCIES", "USD,EUR,SGD,GBP").split(",")
     if c.strip()
 ]
+FX_PROVIDER = os.getenv("FX_PROVIDER", "frankfurter").strip().lower()
+FX_PROVIDER_TIMEOUT_SECONDS = int(os.getenv("FX_PROVIDER_TIMEOUT_SECONDS", "10"))
+FX_PROVIDER_BASE_URL = os.getenv(
+    "FX_PROVIDER_BASE_URL", "https://api.frankfurter.app"
+).strip()
+FX_PROVIDER_API_KEY = os.getenv("FX_PROVIDER_API_KEY", "").strip()
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
