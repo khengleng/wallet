@@ -143,6 +143,15 @@ def _normalize_audit_row(row: dict[str, Any]) -> dict[str, Any]:
     created_at = normalized.get("created_at")
     if hasattr(created_at, "isoformat"):
         normalized["created_at"] = created_at.isoformat()
+    ip_address = normalized.get("ip_address")
+    if ip_address is not None and not isinstance(ip_address, str):
+        normalized["ip_address"] = str(ip_address)
+    actor_id = normalized.get("actor_id")
+    if actor_id is not None:
+        normalized["actor_id"] = int(actor_id)
+    log_id = normalized.get("id")
+    if log_id is not None:
+        normalized["id"] = int(log_id)
     return normalized
 
 
