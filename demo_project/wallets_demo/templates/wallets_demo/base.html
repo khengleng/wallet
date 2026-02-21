@@ -221,6 +221,7 @@
                 <a href="{% url 'withdraw' %}">Withdraw</a>
                 {% if user|has_any_role:"admin,super_admin,finance,customer_service,risk,operation,sales" %}
                     <a href="{% url 'backoffice' %}">Backoffice</a>
+                    <a href="{% url 'treasury_dashboard' %}">Treasury</a>
                 {% endif %}
                 <span class="text-muted">|</span>
                 <span class="font-bold">{{ user.username }}</span>

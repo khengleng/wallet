@@ -5,6 +5,12 @@ from . import views
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('backoffice/', views.backoffice, name='backoffice'),
+    path('backoffice/treasury/', views.treasury_dashboard, name='treasury_dashboard'),
+    path(
+        'backoffice/treasury/<int:request_id>/decision/',
+        views.treasury_decision,
+        name='treasury_decision',
+    ),
     path(
         'backoffice/approvals/<int:request_id>/decision/',
         views.approval_decision,

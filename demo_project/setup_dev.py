@@ -4,7 +4,7 @@ import django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'demo_project_app.settings')
 django.setup()
 
-from wallets_demo.models import User
+from wallets_demo.models import TreasuryAccount, User
 from dj_wallet.models import Wallet
 from wallets_demo.rbac import (
     DEFAULT_DEMO_ROLE_ASSIGNMENTS,
@@ -37,6 +37,19 @@ def setup():
         if user:
             assign_roles(user, roles)
             print(f"Assigned roles to {username}: {', '.join(roles)}")
+
+    treasury_defaults = [
+        ("operating-usd", "USD", 500000),
+        ("settlement-usd", "USD", 200000),
+        ("reserve-usd", "USD", 1000000),
+    ]
+    for name, currency, balance in treasury_defaults:
+        account, created = TreasuryAccount.objects.get_or_create(
+            name=name,
+            defaults={"currency": currency, "balance": balance},
+        )
+        if created:
+            print(f"Treasury account created: {name} ({currency}) balance={balance}")
 
 if __name__ == '__main__':
     setup()

@@ -1,7 +1,7 @@
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from .models import ApprovalRequest, User
+from .models import ApprovalRequest, TreasuryAccount, TreasuryTransferRequest, User
 from .rbac import assign_roles, seed_role_groups
 
 
@@ -47,3 +47,61 @@ class RBACMakerCheckerTests(TestCase):
         self.assertEqual(req.status, ApprovalRequest.STATUS_APPROVED)
         self.maker.refresh_from_db()
         self.assertEqual(float(self.maker.balance), 125.0)
+
+
+class TreasuryWorkflowTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.maker = User.objects.create_user(username="treasury_maker", password="pass12345")
+        self.checker = User.objects.create_user(
+            username="treasury_checker", password="pass12345"
+        )
+        assign_roles(self.maker, ["finance"])
+        assign_roles(self.checker, ["admin"])
+        self.from_account = TreasuryAccount.objects.create(
+            name="operating-usd",
+            currency="USD",
+            balance="1000.00",
+        )
+        self.to_account = TreasuryAccount.objects.create(
+            name="settlement-usd",
+            currency="USD",
+            balance="100.00",
+        )
+
+    def test_submit_treasury_request(self):
+        self.client.login(username="treasury_maker", password="pass12345")
+        response = self.client.post(
+            reverse("treasury_dashboard"),
+            {
+                "from_account": self.from_account.id,
+                "to_account": self.to_account.id,
+                "amount": "200.00",
+                "reason": "liquidity move",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        req = TreasuryTransferRequest.objects.get()
+        self.assertEqual(req.status, TreasuryTransferRequest.STATUS_PENDING)
+
+    def test_checker_approves_treasury_request(self):
+        req = TreasuryTransferRequest.objects.create(
+            maker=self.maker,
+            from_account=self.from_account,
+            to_account=self.to_account,
+            amount="250.00",
+            reason="top up",
+        )
+        self.client.login(username="treasury_checker", password="pass12345")
+        response = self.client.post(
+            reverse("treasury_decision", kwargs={"request_id": req.id}),
+            {"decision": "approve", "checker_note": "approved"},
+        )
+        self.assertEqual(response.status_code, 302)
+        req.refresh_from_db()
+        self.from_account.refresh_from_db()
+        self.to_account.refresh_from_db()
+        self.assertEqual(req.status, TreasuryTransferRequest.STATUS_APPROVED)
+        self.assertEqual(str(self.from_account.balance), "750.00")
+        self.assertEqual(str(self.to_account.balance), "350.00")

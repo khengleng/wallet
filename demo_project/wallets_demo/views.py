@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from dj_wallet.models import Transaction, Wallet
 
-from .models import ApprovalRequest, User
+from .models import ApprovalRequest, TreasuryAccount, TreasuryTransferRequest, User
 from .rbac import (
     BACKOFFICE_ROLES,
     CHECKER_ROLES,
@@ -124,6 +124,77 @@ def approval_decision(request, request_id: int):
     except Exception as exc:
         messages.error(request, f"Decision failed: {exc}")
     return redirect("backoffice")
+
+
+@login_required
+def treasury_dashboard(request):
+    if not user_has_any_role(request.user, BACKOFFICE_ROLES):
+        raise PermissionDenied("You do not have access to treasury.")
+
+    if request.method == "POST":
+        if not user_has_any_role(request.user, MAKER_ROLES):
+            raise PermissionDenied("You do not have maker role for treasury requests.")
+        try:
+            from_account = TreasuryAccount.objects.get(id=request.POST.get("from_account"))
+            to_account = TreasuryAccount.objects.get(id=request.POST.get("to_account"))
+            amount = _parse_amount(request.POST.get("amount"))
+            reason = request.POST.get("reason", "")
+            maker_note = request.POST.get("maker_note", "")
+            req = TreasuryTransferRequest.objects.create(
+                maker=request.user,
+                from_account=from_account,
+                to_account=to_account,
+                amount=amount,
+                reason=reason,
+                maker_note=maker_note,
+            )
+            messages.success(
+                request, f"Treasury transfer request #{req.id} submitted for approval."
+            )
+            return redirect("treasury_dashboard")
+        except Exception as exc:
+            messages.error(request, f"Treasury request failed: {exc}")
+
+    accounts = TreasuryAccount.objects.filter(is_active=True).order_by("name")
+    pending_requests = TreasuryTransferRequest.objects.filter(
+        status=TreasuryTransferRequest.STATUS_PENDING
+    )[:25]
+    my_requests = TreasuryTransferRequest.objects.filter(maker=request.user)[:25]
+    return render(
+        request,
+        "wallets_demo/treasury.html",
+        {
+            "accounts": accounts,
+            "pending_requests": pending_requests,
+            "my_requests": my_requests,
+            "can_make_treasury_request": user_has_any_role(request.user, MAKER_ROLES),
+            "can_check_treasury_request": user_has_any_role(request.user, CHECKER_ROLES),
+        },
+    )
+
+
+@login_required
+def treasury_decision(request, request_id: int):
+    if request.method != "POST":
+        return redirect("treasury_dashboard")
+    if not user_has_any_role(request.user, CHECKER_ROLES):
+        raise PermissionDenied("You do not have checker role.")
+
+    req = get_object_or_404(TreasuryTransferRequest, id=request_id)
+    decision = request.POST.get("decision")
+    checker_note = request.POST.get("checker_note", "")
+    try:
+        if decision == "approve":
+            req.approve(request.user, checker_note=checker_note)
+            messages.success(request, f"Treasury request #{req.id} approved.")
+        elif decision == "reject":
+            req.reject(request.user, checker_note=checker_note)
+            messages.success(request, f"Treasury request #{req.id} rejected.")
+        else:
+            messages.error(request, "Invalid decision.")
+    except Exception as exc:
+        messages.error(request, f"Treasury decision failed: {exc}")
+    return redirect("treasury_dashboard")
 
 
 @login_required

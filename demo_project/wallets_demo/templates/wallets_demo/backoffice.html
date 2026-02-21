@@ -6,6 +6,7 @@
 <div class="card">
     <h2>Backoffice Console</h2>
     <p class="text-muted">Roles: {{ role_names|join:", " }}</p>
+    <p><a class="btn btn-outline" href="{% url 'treasury_dashboard' %}">Open Treasury Console</a></p>
     <div class="flex gap-2 mt-4">
         <span class="badge badge-info">Users: {{ total_users }}</span>
         <span class="badge badge-info">Wallets: {{ total_wallets }}</span>

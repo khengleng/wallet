@@ -30,6 +30,12 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("dj_wallet", "view_transfer"),
             ("dj_wallet", "add_transfer"),
             ("dj_wallet", "change_transfer"),
+            ("wallets_demo", "view_treasuryaccount"),
+            ("wallets_demo", "add_treasuryaccount"),
+            ("wallets_demo", "change_treasuryaccount"),
+            ("wallets_demo", "view_treasurytransferrequest"),
+            ("wallets_demo", "add_treasurytransferrequest"),
+            ("wallets_demo", "change_treasurytransferrequest"),
         ),
     ),
     "admin": RoleDefinition(
@@ -40,6 +46,9 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
             ("dj_wallet", "view_transfer"),
+            ("wallets_demo", "view_treasuryaccount"),
+            ("wallets_demo", "view_treasurytransferrequest"),
+            ("wallets_demo", "change_treasurytransferrequest"),
         ),
     ),
     "finance": RoleDefinition(
@@ -50,6 +59,9 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("dj_wallet", "add_transaction"),
             ("dj_wallet", "change_transaction"),
             ("dj_wallet", "view_transfer"),
+            ("wallets_demo", "view_treasuryaccount"),
+            ("wallets_demo", "view_treasurytransferrequest"),
+            ("wallets_demo", "add_treasurytransferrequest"),
         ),
     ),
     "customer_service": RoleDefinition(
@@ -59,6 +71,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
             ("dj_wallet", "view_transfer"),
+            ("wallets_demo", "view_treasuryaccount"),
         ),
     ),
     "risk": RoleDefinition(
@@ -68,6 +81,9 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
             ("dj_wallet", "view_transfer"),
+            ("wallets_demo", "view_treasuryaccount"),
+            ("wallets_demo", "view_treasurytransferrequest"),
+            ("wallets_demo", "change_treasurytransferrequest"),
         ),
     ),
     "operation": RoleDefinition(
@@ -76,6 +92,9 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "view_user"),
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
+            ("wallets_demo", "view_treasuryaccount"),
+            ("wallets_demo", "view_treasurytransferrequest"),
+            ("wallets_demo", "add_treasurytransferrequest"),
         ),
     ),
     "sales": RoleDefinition(
@@ -84,6 +103,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "view_user"),
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
+            ("wallets_demo", "view_treasuryaccount"),
         ),
     ),
 }
