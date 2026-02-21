@@ -219,6 +219,7 @@ Django Wallets uses a component-based architecture where logic is encapsulated i
 This repository now includes deployment and architecture scaffolding for high-scale operation:
 
 - Target microservices architecture: `docs/architecture/microservices-target.md`
+- Mobile microfrontend preparation blueprint: `docs/architecture/mobile-microfrontend-blueprint.md`
 - Extracted ledger microservice: `services/wallet_ledger_service`
 - Extracted API gateway: `services/api_gateway_service`
 - Extracted identity service: `services/identity_service`
