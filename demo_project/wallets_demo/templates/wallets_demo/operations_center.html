@@ -29,7 +29,8 @@
     <div class="card">
         <h3>Create Merchant</h3>
         <p class="text-muted">Leave Merchant Code empty to auto-generate based on prefix
-            <code>{{ operation_settings.merchant_id_prefix }}</code>.</p>
+            <code>{{ operation_settings.merchant_id_prefix }}</code>.
+        </p>
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_create" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -37,15 +38,13 @@
                         placeholder="Auto-generate if blank" /></div>
                 <div class="form-group"><label>Merchant Name</label><input type="text" name="merchant_name" required />
                 </div>
-                <div class="form-group"><label>Settlement Currency</label><select name="settlement_currency">{% for c in
-                        supported_currencies %}<option>{{ c }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Settlement Currency</label><select name="settlement_currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Wallet Type</label><select name="wallet_type">
                         <option value="B">Business (B)</option>
                         <option value="G">Government (G)</option>
                     </select></div>
                 <div class="form-group"><label>Owner User (optional)</label><select name="owner_user_id">
-                        <option value="">-- none --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username
-                            }}</option>{% endfor %}
+                        <option value="">-- none --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username}}</option>{% endfor %}
                     </select></div>
                 <div class="form-group"><label>Contact Email</label><input type="email" name="contact_email" /></div>
                 <div class="form-group"><label>Contact Phone</label><input type="text" name="contact_phone" /></div>
@@ -99,9 +98,7 @@
                         <td>{{ m.wallet_type }}</td>
                         <td>{% if m.owner %}{{ m.owner.username }}{% else %}-{% endif %}</td>
                         <td>{{ m.contact_email|mask_email }} / {{ m.contact_phone|mask_phone }}</td>
-                        <td style="font-size:0.78rem;">{% with cap=m.wallet_capability %}B2B:{% if cap.supports_b2b
-                            %}Y{% else %}N{% endif %} B2C:{% if cap.supports_b2c %}Y{% else %}N{% endif %} C2B:{% if
-                            cap.supports_c2b %}Y{% else %}N{% endif %}{% endwith %}</td>
+                        <td style="font-size:0.78rem;">{% with cap=m.wallet_capability %}B2B:{% if cap.supports_b2b%}Y{% else %}N{% endif %} B2C:{% if cap.supports_b2c %}Y{% else %}N{% endif %} C2B:{% if cap.supports_c2b %}Y{% else %}N{% endif %}{% endwith %}</td>
                         <td>{% with p=m.loyalty_program %}{% if p.is_enabled %}On{% else %}Off{% endif %}{% endwith %}
                         </td>
                         <td>
@@ -156,21 +153,16 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="cashflow_event_create" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants
-                        %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
-                <div class="form-group"><label>Flow Type</label><select name="flow_type">{% for value,label in
-                        flow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants%}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Flow Type</label><select name="flow_type">{% for value,label in flow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>User (for B2C/C2B)</label><select name="user_id">
-                        <option value="">-- optional --</option>{% for u in users %}<option value="{{ u.id }}">{{
-                            u.username }}</option>{% endfor %}
+                        <option value="">-- optional --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}
                     </select></div>
                 <div class="form-group"><label>Counterparty Merchant (for B2B)</label><select
                         name="counterparty_merchant_id">
-                        <option value="">-- optional --</option>{% for m in merchants %}<option value="{{ m.id }}">{{
-                            m.code }}</option>{% endfor %}
+                        <option value="">-- optional --</option>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}
                     </select></div>
-                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies
-                        %}<option>{{ c }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies%}<option>{{ c }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount"
                         required /></div>
                 <div class="form-group"><label>Reference</label><input type="text" name="reference" /></div>
@@ -228,8 +220,7 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_kyb_submit" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants
-                        %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants%}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Legal Name</label><input type="text" name="legal_name" required /></div>
                 <div class="form-group"><label>Registration Number</label><input type="text"
                         name="registration_number" /></div>
@@ -265,23 +256,19 @@
                     <tr>
                         <td>#{{ req.id }}</td>
                         <td>{{ req.merchant.code }}</td>
-                        <td>{% if req.status == "approved" %}<span class="badge-active">{{ req.status }}</span>{% elif
-                            req.status == "rejected" %}<span class="badge-blocked">{{ req.status }}</span>{% else
-                            %}<span class="badge-pending">{{ req.status }}</span>{% endif %}</td>
+                        <td>{% if req.status == "approved" %}<span class="badge-active">{{ req.status }}</span>{% elif req.status == "rejected" %}<span class="badge-blocked">{{ req.status }}</span>{% else%}<span class="badge-pending">{{ req.status }}</span>{% endif %}</td>
                         <td>{{ req.legal_name }}</td>
                         <td>{{ req.registration_number|default:"-" }}</td>
                         <td>{{ req.maker.username }}</td>
                         <td>{% if req.checker %}{{ req.checker.username }}{% else %}-{% endif %}</td>
-                        <td>{% if req.status == "pending" %}<form method="post" style="display:flex;gap:0.3rem;">{%
-                                csrf_token %}<input type="hidden" name="form_type"
+                        <td>{% if req.status == "pending" %}<form method="post" style="display:flex;gap:0.3rem;">{% csrf_token %}<input type="hidden" name="form_type"
                                     value="merchant_kyb_decision" /><input type="hidden" name="kyb_request_id"
                                     value="{{ req.id }}" /><select name="decision">
                                     <option value="approved">Approve</option>
                                     <option value="rejected">Reject</option>
                                 </select><input type="text" name="checker_note" placeholder="Note"
                                     style="max-width:120px;" /><button class="btn btn-outline"
-                                    type="submit">Submit</button></form>{% else %}{{ req.checker_note|default:"-" }}{%
-                            endif %}</td>
+                                    type="submit">Submit</button></form>{% else %}{{ req.checker_note|default:"-" }}{% endif %}</td>
                     </tr>
                     {% empty %}<tr>
                         <td colspan="8" class="text-muted" style="text-align:center;">No KYB requests yet.</td>
@@ -301,10 +288,8 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_fee_rule_upsert" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants
-                        %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
-                <div class="form-group"><label>Flow Type</label><select name="flow_type">{% for value,label in
-                        flow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants%}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Flow Type</label><select name="flow_type">{% for value,label in flow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Percent (bps)</label><input type="number" min="0" name="percent_bps"
                         value="0" /></div>
                 <div class="form-group"><label>Fixed Fee</label><input type="number" step="0.01" min="0"
@@ -353,8 +338,7 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_risk_update" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants
-                        %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants%}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Single Txn Limit</label><input type="number" step="0.01" min="0.01"
                         name="single_txn_limit" required /></div>
                 <div class="form-group"><label>Daily Txn Limit</label><input type="number" min="1"
@@ -409,8 +393,7 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_api_rotate" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants
-                        %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants%}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Scopes (csv)</label><input type="text" name="scopes_csv"
                         value="wallet:read,payout:read,webhook:write" /></div>
                 <div class="form-group"><label>Webhook URL</label><input type="url" name="webhook_url"
@@ -439,8 +422,7 @@
                         <td>{{ cred.scopes_csv }}</td>
                         <td>{{ cred.webhook_url|default:"-" }}</td>
                         <td>{% if cred.is_active %}<span class="badge-active">Y</span>{% else %}N{% endif %}</td>
-                        <td style="font-size:0.78rem;">{% if cred.last_rotated_at %}{{ cred.last_rotated_at|date:"d M Y
-                            H:i" }}{% else %}-{% endif %}</td>
+                        <td style="font-size:0.78rem;">{% if cred.last_rotated_at %}{{ cred.last_rotated_at|date:"d M Y H:i" }}{% else %}-{% endif %}</td>
                     </tr>
                     {% empty %}<tr>
                         <td colspan="6" class="text-muted" style="text-align:center;">No API credentials yet.</td>
@@ -454,8 +436,7 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_webhook_validate" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Credential</label><select name="credential_id" required>{% for cred in
-                        api_credentials %}<option value="{{ cred.id }}">{{ cred.merchant.code }} - {{ cred.key_id }}
+                <div class="form-group"><label>Credential</label><select name="credential_id" required>{% for cred in api_credentials %}<option value="{{ cred.id }}">{{ cred.merchant.code }} - {{ cred.key_id }}
                         </option>{% endfor %}</select></div>
                 <div class="form-group"><label>Event Type</label><input type="text" name="event_type"
                         value="payment.status" /></div>
@@ -507,10 +488,8 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_settlement_create" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants
-                        %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
-                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies
-                        %}<option>{{ c }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants%}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies%}<option>{{ c }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Period Start</label><input type="date" name="period_start" /></div>
                 <div class="form-group"><label>Period End</label><input type="date" name="period_end" /></div>
             </div>
@@ -565,9 +544,7 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="settlement_payout_submit" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Settlement</label><select name="settlement_id" required>{% for s in
-                        settlements %}<option value="{{ s.id }}">{{ s.settlement_no }} – {{ s.merchant.code }} – {{
-                            s.net_amount }} {{ s.currency }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Settlement</label><select name="settlement_id" required>{% for s in settlements %}<option value="{{ s.id }}">{{ s.settlement_no }} – {{ s.merchant.code }} – {{ s.net_amount }} {{ s.currency }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Payout Channel</label><select name="payout_channel">
                         <option value="bank_transfer">Bank Transfer</option>
                         <option value="api">API</option>
@@ -630,8 +607,7 @@
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
                 <div class="form-group"><label>Source</label><input type="text" name="source"
                         value="internal_vs_settlement" /></div>
-                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies
-                        %}<option>{{ c }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies%}<option>{{ c }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Period Start</label><input type="date" name="period_start" /></div>
                 <div class="form-group"><label>Period End</label><input type="date" name="period_end" /></div>
                 <div class="form-group"><label>External Count</label><input type="number" min="0" name="external_count"
@@ -729,10 +705,9 @@
             {% csrf_token %}<input type="hidden" name="form_type" value="dispute_refund_submit" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
                 <div class="form-group"><label>Case</label><select name="case_id" required>{% for item in cases %}
-                        <option value="{{ item.id }}">{{ item.case_no }} ({{ item.case_type }})</option>{% endfor
-                        %}</select></div>
-                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies
-                        %}<option>{{ c }}</option>{% endfor %}</select></div>
+                        <option value="{{ item.id }}">{{ item.case_no }} ({{ item.case_type }})</option>{% endfor%}
+                    </select></div>
+                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies%}<option>{{ c }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount"
                         required /></div>
                 <div class="form-group"><label>Source Cashflow Event ID</label><input type="number" min="1"
@@ -764,16 +739,14 @@
                         <td>{{ rr.customer.username }}</td>
                         <td>{{ rr.amount }} {{ rr.currency }}</td>
                         <td>{{ rr.status }}</td>
-                        <td>{% if rr.status == "pending" %}<form method="post" style="display:flex;gap:0.3rem;">{%
-                                csrf_token %}<input type="hidden" name="form_type"
+                        <td>{% if rr.status == "pending" %}<form method="post" style="display:flex;gap:0.3rem;">{% csrf_token %}<input type="hidden" name="form_type"
                                     value="dispute_refund_decision" /><input type="hidden" name="refund_request_id"
                                     value="{{ rr.id }}" /><select name="decision">
                                     <option value="approve">Approve &amp; Execute</option>
                                     <option value="reject">Reject</option>
                                 </select><input type="text" name="checker_note" placeholder="Note"
                                     style="max-width:120px;" /><button class="btn btn-outline"
-                                    type="submit">Submit</button></form>{% else %}{{ rr.checker_note|default:"-" }}{%
-                            endif %}</td>
+                                    type="submit">Submit</button></form>{% else %}{{ rr.checker_note|default:"-" }}{% endif %}</td>
                     </tr>
                     {% empty %}<tr>
                         <td colspan="7" class="text-muted" style="text-align:center;">No refund requests yet.</td>
@@ -788,10 +761,9 @@
             {% csrf_token %}<input type="hidden" name="form_type" value="chargeback_create" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
                 <div class="form-group"><label>Case</label><select name="case_id" required>{% for item in cases %}
-                        <option value="{{ item.id }}">{{ item.case_no }} ({{ item.case_type }})</option>{% endfor
-                        %}</select></div>
-                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies
-                        %}<option>{{ c }}</option>{% endfor %}</select></div>
+                        <option value="{{ item.id }}">{{ item.case_no }} ({{ item.case_type }})</option>{% endfor%}
+                    </select></div>
+                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies%}<option>{{ c }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount"
                         required /></div>
                 <div class="form-group"><label>Reason Code</label><input type="text" name="reason_code"
@@ -860,16 +832,12 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="case_create" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Case Type</label><select name="case_type">{% for value,label in
-                        case_type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
-                <div class="form-group"><label>Priority</label><select name="case_priority">{% for value,label in
-                        case_priority_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
+                <div class="form-group"><label>Case Type</label><select name="case_type">{% for value,label in case_type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Priority</label><select name="case_priority">{% for value,label in case_priority_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select>
                 </div>
-                <div class="form-group"><label>Customer</label><select name="case_customer_id" required>{% for u in
-                        users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Customer</label><select name="case_customer_id" required>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Merchant (optional)</label><select name="case_merchant_id">
-                        <option value="">-- none --</option>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code
-                            }} - {{ m.name }}</option>{% endfor %}
+                        <option value="">-- none --</option>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code}} - {{ m.name }}</option>{% endfor %}
                     </select></div>
                 <div class="form-group" style="grid-column:1/-1;"><label>Title</label><input type="text"
                         name="case_title" required /></div>
@@ -908,8 +876,7 @@
                         <td>
                             <form method="post" style="display:flex;gap:0.3rem;">{% csrf_token %}<input type="hidden"
                                     name="form_type" value="case_update" /><input type="hidden" name="case_id"
-                                    value="{{ item.id }}" /><select name="status">{% for value,label in
-                                    case_status_choices %}<option value="{{ value }}" {% if item.status==value %}
+                                    value="{{ item.id }}" /><select name="status">{% for value,label in case_status_choices %}<option value="{{ value }}" {% if item.status==value %}
                                         selected{% endif %}>{{ label }}</option>{% endfor %}</select><select
                                     name="assigned_to">
                                     <option value="">-- unassigned --</option>{% for u in users %}<option
@@ -1072,8 +1039,7 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="accounting_period_close_upsert" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies
-                        %}<option>{{ c }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies%}<option>{{ c }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Action</label><select name="close_action">
                         <option value="close">Close</option>
                         <option value="reopen">Reopen</option>

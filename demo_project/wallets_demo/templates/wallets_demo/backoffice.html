@@ -12,8 +12,7 @@
         <a class="btn btn-outline" href="{% url 'accounting_dashboard' %}">Accounting Console</a>
         <a class="btn btn-outline" href="{% url 'fx_management' %}">FX Management</a>
         {% endif %}
-        {% if can_manage_rbac %}<a class="btn btn-outline" href="{% url 'rbac_management' %}">Manage RBAC Roles</a>{%
-        endif %}
+        {% if can_manage_rbac %}<a class="btn btn-outline" href="{% url 'rbac_management' %}">Manage RBAC Roles</a>{% endif %}
         {% if can_export_audit %}
         <a class="btn btn-outline" href="{% url 'backoffice_audit_export' %}?format=jsonl&days=7">Export Audit
             (JSONL)</a>
@@ -24,8 +23,7 @@
         <span class="badge-active" style="padding:0.4rem 0.8rem;">Users: {{ total_users }}</span>
         <span class="badge-active" style="padding:0.4rem 0.8rem;">Wallets: {{ total_wallets }}</span>
         {% if total_pending_approvals > 0 %}
-        <span class="badge-blocked" style="padding:0.4rem 0.8rem;">⚠ Pending Approvals: {{ total_pending_approvals
-            }}</span>
+        <span class="badge-blocked" style="padding:0.4rem 0.8rem;">⚠ Pending Approvals: {{ total_pending_approvals}}</span>
         {% else %}
         <span class="badge-closed" style="padding:0.4rem 0.8rem;">Pending Approvals: 0</span>
         {% endif %}
@@ -35,9 +33,7 @@
 <div class="tab-bar">
     <button class="tab-btn active" data-tab="bo-tab-maker" onclick="switchTab(this,'bo-tab-maker')">📋 My
         Requests</button>
-    <button class="tab-btn" data-tab="bo-tab-checker" onclick="switchTab(this,'bo-tab-checker')">✅ Checker Queue {% if
-        total_pending_approvals > 0 %}<span class="badge-blocked" style="margin-left:0.25rem;">{{
-            total_pending_approvals }}</span>{% endif %}</button>
+    <button class="tab-btn" data-tab="bo-tab-checker" onclick="switchTab(this,'bo-tab-checker')">✅ Checker Queue {% if total_pending_approvals > 0 %}<span class="badge-blocked" style="margin-left:0.25rem;">{{ total_pending_approvals }}</span>{% endif %}</button>
     <button class="tab-btn" data-tab="bo-tab-txn" onclick="switchTab(this,'bo-tab-txn')">📊 Recent Transactions</button>
 </div>
 

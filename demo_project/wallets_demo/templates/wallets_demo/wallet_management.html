@@ -135,17 +135,12 @@
         </table>
         {% if customer_cifs.paginator.num_pages > 1 %}
         <div style="display:flex; gap:0.5rem; margin-top:1rem; align-items:center;">
-            <span class="text-muted" style="font-size:0.85rem;">Page {{ customer_cifs.number }} of {{
-                customer_cifs.paginator.num_pages }}</span>
+            <span class="text-muted" style="font-size:0.85rem;">Page {{ customer_cifs.number }} of {{ customer_cifs.paginator.num_pages }}</span>
             {% if customer_cifs.has_previous %}
-            <a class="btn btn-outline"
-                href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.previous_page_number }}">←
-                Prev</a>
+            href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.previous_page_number }}">← Prev</a>
             {% endif %}
             {% if customer_cifs.has_next %}
-            <a class="btn btn-outline"
-                href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.next_page_number }}">Next
-                →</a>
+            href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.next_page_number }}">Next →</a>
             {% endif %}
         </div>
         {% endif %}
@@ -180,8 +175,7 @@
                 </div>
                 <div class="form-group">
                     <label>Currency</label>
-                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor
-                        %}</select>
+                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor%}</select>
                 </div>
                 <button type="submit" class="btn btn-primary" style="width:100%;">Open Customer Wallet</button>
             </form>
@@ -197,14 +191,12 @@
                 <div class="form-group">
                     <label>Merchant</label>
                     <select name="merchant_id" required>
-                        {% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} ({{ m.wallet_type }})</option>{%
-                        endfor %}
+                        {% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} ({{ m.wallet_type }})</option>{% endfor %}
                     </select>
                 </div>
                 <div class="form-group">
                     <label>Currency</label>
-                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor
-                        %}</select>
+                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor%}</select>
                 </div>
                 <button type="submit" class="btn btn-primary" style="width:100%;">Open Merchant Wallet</button>
             </form>
@@ -220,15 +212,12 @@
                 <div class="form-group">
                     <label>Customer CIF</label>
                     <select name="cif_id" required>
-                        {% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} – {{ cif.legal_name
-                            }} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{%
-                        endfor %}
+                        {% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} – {{ cif.legal_name}} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{% endfor %}
                     </select>
                 </div>
                 <div class="form-group">
                     <label>Currency</label>
-                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor
-                        %}</select>
+                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor%}</select>
                 </div>
                 <div class="form-group">
                     <label>Adjustment Type</label>
@@ -258,8 +247,7 @@
                 </div>
                 <div class="form-group">
                     <label>Currency</label>
-                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor
-                        %}</select>
+                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor%}</select>
                 </div>
                 <div class="form-group">
                     <label>Adjustment Type</label>
@@ -301,17 +289,13 @@
                 <div class="form-group">
                     <label>Customer CIF (for user scope)</label>
                     <select name="cif_id">
-                        {% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} – {{ cif.legal_name
-                            }} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{%
-                        endfor %}
+                        {% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} – {{ cif.legal_name}} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{% endfor %}
                     </select>
                 </div>
                 <div class="form-group">
                     <label>Merchant (for merchant scope)</label>
-                    <select name="merchant_id">
-                        {% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} – {{ m.name }}</option>{% empty
-                        %}<option value="">No merchant found</option>{% endfor %}
-                    </select>
+                    {% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} – {{ m.name }}</option>{% empty %}
+                    <option value="">No merchant found</option>{% endfor %}
                 </div>
                 <div class="form-group">
                     <label>Wallet Slug</label>
@@ -347,10 +331,8 @@
                     <tr>
                         <td><code>{{ wallet.id }}</code></td>
                         <td>{% if holder %}{{ holder.username }}{% else %}#{{ wallet.holder_id }}{% endif %}</td>
-                        <td>{% if cif %}<code>{{ cif.cif_no }}</code>{% else %}<span class="text-muted">—</span>{% endif
-                            %}</td>
-                        <td>{% if holder %}{{ holder.get_wallet_type_display|default:holder.wallet_type }}{% else %}—{%
-                            endif %}</td>
+                        <td>{% if cif %}<code>{{ cif.cif_no }}</code>{% else %}<span class="text-muted">—</span>{% endif%}</td>
+                        <td>{% if holder %}{{ holder.get_wallet_type_display|default:holder.wallet_type }}{% else %}—{% endif %}</td>
                         <td>{{ wallet.slug }}</td>
                         <td>{{ wallet.meta.currency|default:"USD" }}</td>
                         <td style="font-weight:600;">{{ wallet.balance }}</td>

@@ -59,10 +59,8 @@
             {% for code, name in all_currencies %}
             <label
                 style="display:flex; align-items:center; gap:0.5rem; padding:0.6rem 0.75rem; border:1px solid var(--border); border-radius:0.5rem; cursor:pointer; transition:background 0.15s; {% if code in active_currencies %}background:rgba(99,102,241,0.08); border-color:var(--primary);{% endif %}">
-                <input type="checkbox" name="enabled_currencies" value="{{ code }}" {% if code in active_currencies
-                    %}checked{% endif %} style="width:auto; accent-color:var(--primary);" />
-                <span><strong>{{ code }}</strong>&nbsp;<span class="text-muted" style="font-size:0.8rem;">{{ name
-                        }}</span></span>
+                <input type="checkbox" name="enabled_currencies" value="{{ code }}" {% if code in active_currencies%}checked{% endif %} style="width:auto; accent-color:var(--primary);" />
+                <span><strong>{{ code }}</strong>&nbsp;<span class="text-muted" style="font-size:0.8rem;">{{ name}}</span></span>
             </label>
             {% endfor %}
         </div>
