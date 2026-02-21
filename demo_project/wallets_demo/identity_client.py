@@ -43,8 +43,18 @@ def _call(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         with urlopen(req, timeout=_timeout()) as response:
             raw = response.read().decode("utf-8")
-    except (HTTPError, URLError) as exc:
-        raise IdentityServiceError(f"Identity service call failed: {path}") from exc
+    except HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8")[:300]
+        except Exception:
+            detail = ""
+        suffix = f" status={exc.code}"
+        if detail:
+            suffix += f" body={detail}"
+        raise IdentityServiceError(f"Identity service call failed: {path};{suffix}") from exc
+    except URLError as exc:
+        raise IdentityServiceError(f"Identity service call failed: {path}; reason={exc.reason}") from exc
     try:
         return json.loads(raw) if raw else {}
     except json.JSONDecodeError as exc:

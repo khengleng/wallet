@@ -35,6 +35,7 @@ from .models import (
     TransactionMonitoringAlert,
     OperationCase,
     OperationCaseNote,
+    OperationSetting,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -90,6 +91,12 @@ class TreasuryTransferRequestAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "created_at")
     search_fields = ("maker__username", "checker__username", "reason")
+
+
+@admin.register(OperationSetting)
+class OperationSettingAdmin(admin.ModelAdmin):
+    list_display = ("organization_name", "merchant_id_prefix", "wallet_id_prefix", "transaction_id_prefix", "updated_at", "updated_by")
+    readonly_fields = ("singleton_key", "created_at", "updated_at")
 
 
 class JournalLineInline(admin.TabularInline):

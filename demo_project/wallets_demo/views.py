@@ -5,9 +5,12 @@ import hashlib
 import hmac
 import io
 import json
+import logging
 import secrets
 import time
+import re
 from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from django.contrib import messages
 from django.conf import settings
@@ -68,6 +71,7 @@ from .models import (
     MerchantWalletCapability,
     OperationCase,
     OperationCaseNote,
+    OperationSetting,
     ReconciliationBreak,
     ReconciliationRun,
     SanctionScreeningRecord,
@@ -76,6 +80,7 @@ from .models import (
     TreasuryTransferRequest,
     TransactionMonitoringAlert,
     User,
+    default_service_transaction_prefixes,
     FLOW_B2B,
     FLOW_B2C,
     FLOW_C2B,
@@ -102,6 +107,7 @@ ACCOUNTING_CHECKER_ROLES,
 )
 
 APP_START_MONOTONIC = time.monotonic()
+logger = logging.getLogger(__name__)
 
 
 def _parse_amount(raw_value: str) -> Decimal:
@@ -132,6 +138,117 @@ def _wallet_slug(currency: str) -> str:
     return currency.lower()
 
 
+_PREFIX_PATTERN = re.compile(r"[^A-Z0-9_]")
+SERVICE_PREFIX_KEYS = tuple(default_service_transaction_prefixes().keys())
+
+
+def _operation_settings() -> OperationSetting:
+    try:
+        return OperationSetting.get_solo()
+    except Exception:
+        # Fallback for pre-migration/runtime bootstrap windows.
+        return OperationSetting(
+            organization_name="DJ Wallet",
+            merchant_id_prefix="MCH",
+            wallet_id_prefix="WAL",
+            transaction_id_prefix="TXN",
+            service_transaction_prefixes=default_service_transaction_prefixes(),
+            cif_id_prefix="CIF",
+            journal_entry_prefix="JE",
+            case_no_prefix="CASE",
+            settlement_no_prefix="SETTLE",
+            payout_ref_prefix="PAYOUT",
+            recon_no_prefix="RECON",
+            chargeback_no_prefix="CB",
+            access_review_no_prefix="AR",
+        )
+
+
+def _clean_prefix(raw_prefix: str, fallback: str) -> str:
+    candidate = _PREFIX_PATTERN.sub("", (raw_prefix or "").strip().upper())
+    if not candidate:
+        return fallback
+    return candidate[:16]
+
+
+def _new_prefixed_ref(prefix: str) -> str:
+    return f"{prefix}-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def _new_prefixed_ref_with_entropy(prefix: str) -> str:
+    return f"{prefix}-{timezone.now().strftime('%Y%m%d%H%M%S%f')}-{secrets.token_hex(2).upper()}"
+
+
+def _new_merchant_code() -> str:
+    settings_row = _operation_settings()
+    prefix = _clean_prefix(settings_row.merchant_id_prefix, "MCH")
+    for _ in range(10):
+        code = _new_prefixed_ref_with_entropy(prefix)
+        if not Merchant.objects.filter(code=code).exists():
+            return code
+    raise ValidationError("Unable to generate unique merchant ID.")
+
+
+def _new_cif_no() -> str:
+    settings_row = _operation_settings()
+    prefix = _clean_prefix(settings_row.cif_id_prefix, "CIF")
+    for _ in range(10):
+        cif_no = _new_prefixed_ref_with_entropy(prefix)
+        if not CustomerCIF.objects.filter(cif_no=cif_no).exists():
+            return cif_no
+    raise ValidationError("Unable to generate unique CIF number.")
+
+
+def _append_transaction_id(meta: dict | None) -> dict:
+    payload = dict(meta or {})
+    if payload.get("transaction_id"):
+        return payload
+    settings_row = _operation_settings()
+    service_type = (
+        (payload.get("service_type") or "").strip().lower()
+        or (payload.get("flow_type") or "").strip().lower()
+    )
+    if not service_type:
+        raw_type = (payload.get("type") or "").strip().lower()
+        if raw_type == "merchant_loyalty_accrual":
+            service_type = "loyalty_accrual"
+        elif raw_type == "merchant_loyalty_redemption":
+            service_type = "loyalty_redemption"
+        elif raw_type:
+            service_type = raw_type
+
+    service_prefixes = (
+        settings_row.service_transaction_prefixes
+        if isinstance(settings_row.service_transaction_prefixes, dict)
+        else {}
+    )
+    selected_prefix = service_prefixes.get(service_type, "")
+    prefix = _clean_prefix(selected_prefix or settings_row.transaction_id_prefix, "TXN")
+    if service_type:
+        payload["transaction_service_type"] = service_type
+    payload["transaction_id"] = _new_prefixed_ref_with_entropy(prefix)
+    return payload
+
+
+def _ensure_wallet_business_id(wallet: Wallet) -> Wallet:
+    meta = _wallet_meta(wallet)
+    if not meta.get("wallet_id"):
+        settings_row = _operation_settings()
+        prefix = _clean_prefix(settings_row.wallet_id_prefix, "WAL")
+        meta["wallet_id"] = f"{prefix}-{wallet.id:010d}"
+        wallet.meta = meta
+        wallet.save(update_fields=["meta"])
+    return wallet
+
+
+def _wallet_deposit(wallet_service, wallet: Wallet, amount: Decimal, *, meta: dict | None = None):
+    return wallet_service.deposit(wallet, amount, meta=_append_transaction_id(meta))
+
+
+def _wallet_withdraw(wallet_service, wallet: Wallet, amount: Decimal, *, meta: dict | None = None):
+    return wallet_service.withdraw(wallet, amount, meta=_append_transaction_id(meta))
+
+
 def _wallet_meta(wallet: Wallet) -> dict:
     if isinstance(wallet.meta, dict):
         return wallet.meta
@@ -149,7 +266,7 @@ def _wallet_for_currency(user: User, currency: str):
     meta["wallet_type"] = user.wallet_type
     wallet.meta = meta
     wallet.save(update_fields=["meta"])
-    return wallet
+    return _ensure_wallet_business_id(wallet)
 
 
 def _fx_to_base(amount: Decimal, from_currency: str) -> Decimal | None:
@@ -299,23 +416,66 @@ def _keycloak_realm_base_url() -> str:
 
 
 def _keycloak_auth_url(state: str, nonce: str) -> str:
-    return identity_oidc_auth_url(
-        state=state,
-        nonce=nonce,
-        redirect_uri=settings.KEYCLOAK_REDIRECT_URI,
-        scope=settings.KEYCLOAK_SCOPES,
-    )
+    try:
+        return identity_oidc_auth_url(
+            state=state,
+            nonce=nonce,
+            redirect_uri=settings.KEYCLOAK_REDIRECT_URI,
+            scope=settings.KEYCLOAK_SCOPES,
+        )
+    except Exception:
+        query = urlencode(
+            {
+                "client_id": settings.KEYCLOAK_CLIENT_ID,
+                "response_type": "code",
+                "scope": settings.KEYCLOAK_SCOPES,
+                "redirect_uri": settings.KEYCLOAK_REDIRECT_URI,
+                "state": state,
+                "nonce": nonce,
+            }
+        )
+        logger.warning("Identity service auth-url failed; falling back to direct Keycloak.")
+        return f"{_keycloak_realm_base_url()}/protocol/openid-connect/auth?{query}"
 
 
 def _keycloak_token_exchange(code: str) -> dict:
-    return identity_oidc_token_exchange(
-        code=code,
-        redirect_uri=settings.KEYCLOAK_REDIRECT_URI,
-    )
+    try:
+        return identity_oidc_token_exchange(
+            code=code,
+            redirect_uri=settings.KEYCLOAK_REDIRECT_URI,
+        )
+    except Exception:
+        data = urlencode(
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": settings.KEYCLOAK_CLIENT_ID,
+                "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
+                "redirect_uri": settings.KEYCLOAK_REDIRECT_URI,
+            }
+        ).encode("utf-8")
+        request = Request(
+            f"{_keycloak_realm_base_url()}/protocol/openid-connect/token",
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        logger.warning("Identity service token exchange failed; falling back to direct Keycloak.")
+        with urlopen(request, timeout=10) as response:
+            return json.loads(response.read())
 
 
 def _keycloak_userinfo(access_token: str) -> dict:
-    return identity_oidc_userinfo(access_token=access_token)
+    try:
+        return identity_oidc_userinfo(access_token=access_token)
+    except Exception:
+        request = Request(
+            f"{_keycloak_realm_base_url()}/protocol/openid-connect/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        logger.warning("Identity service userinfo failed; falling back to direct Keycloak.")
+        with urlopen(request, timeout=10) as response:
+            return json.loads(response.read())
 
 
 def _find_or_create_user_from_claims(claims: dict) -> User:
@@ -485,7 +645,8 @@ def keycloak_callback(request):
         user = _find_or_create_user_from_claims(claims)
         access_claims = decode_access_token_claims(access_token)
         sync_user_roles_from_keycloak_claims(user, access_claims)
-    except Exception:
+    except Exception as exc:
+        logger.exception("Keycloak callback failed: %s", str(exc))
         _track(
             request,
             "auth_login_failed",
@@ -534,11 +695,22 @@ def portal_logout(request):
     auth_logout(request)
     if _use_keycloak_oidc() and id_token:
         post_logout = settings.KEYCLOAK_POST_LOGOUT_REDIRECT_URI or settings.KEYCLOAK_REDIRECT_URI
-        logout_url = identity_oidc_logout_url(
-            id_token_hint=id_token,
-            post_logout_redirect_uri=post_logout,
-            client_id=settings.KEYCLOAK_CLIENT_ID,
-        )
+        try:
+            logout_url = identity_oidc_logout_url(
+                id_token_hint=id_token,
+                post_logout_redirect_uri=post_logout,
+                client_id=settings.KEYCLOAK_CLIENT_ID,
+            )
+        except Exception:
+            query = urlencode(
+                {
+                    "id_token_hint": id_token,
+                    "post_logout_redirect_uri": post_logout,
+                    "client_id": settings.KEYCLOAK_CLIENT_ID,
+                }
+            )
+            logger.warning("Identity service logout-url failed; falling back to direct Keycloak.")
+            logout_url = f"{_keycloak_realm_base_url()}/protocol/openid-connect/logout?{query}"
         return redirect(logout_url)
     return redirect("login")
 
@@ -952,31 +1124,38 @@ def fx_management(request):
 
 
 def _new_entry_no() -> str:
-    return f"JE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+    settings_row = _operation_settings()
+    return _new_prefixed_ref(_clean_prefix(settings_row.journal_entry_prefix, "JE"))
 
 
 def _new_case_no() -> str:
-    return f"CASE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+    settings_row = _operation_settings()
+    return _new_prefixed_ref(_clean_prefix(settings_row.case_no_prefix, "CASE"))
 
 
 def _new_settlement_no() -> str:
-    return f"SETTLE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+    settings_row = _operation_settings()
+    return _new_prefixed_ref(_clean_prefix(settings_row.settlement_no_prefix, "SETTLE"))
 
 
 def _new_payout_ref() -> str:
-    return f"PAYOUT-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+    settings_row = _operation_settings()
+    return _new_prefixed_ref(_clean_prefix(settings_row.payout_ref_prefix, "PAYOUT"))
 
 
 def _new_recon_no() -> str:
-    return f"RECON-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+    settings_row = _operation_settings()
+    return _new_prefixed_ref(_clean_prefix(settings_row.recon_no_prefix, "RECON"))
 
 
 def _new_chargeback_no() -> str:
-    return f"CB-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+    settings_row = _operation_settings()
+    return _new_prefixed_ref(_clean_prefix(settings_row.chargeback_no_prefix, "CB"))
 
 
 def _new_access_review_no() -> str:
-    return f"AR-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+    settings_row = _operation_settings()
+    return _new_prefixed_ref(_clean_prefix(settings_row.access_review_no_prefix, "AR"))
 
 
 def _hash_api_secret(secret: str) -> str:
@@ -1087,7 +1266,7 @@ def _merchant_loyalty_wallet(user: User, merchant: Merchant):
     meta["wallet_type"] = user.wallet_type
     wallet.meta = meta
     wallet.save(update_fields=["meta"])
-    return wallet
+    return _ensure_wallet_business_id(wallet)
 
 
 def _merchant_wallet_for_currency(merchant: Merchant, currency: str):
@@ -1098,7 +1277,7 @@ def _merchant_wallet_for_currency(merchant: Merchant, currency: str):
     meta["wallet_type"] = merchant.wallet_type
     wallet.meta = meta
     wallet.save(update_fields=["meta"])
-    return wallet
+    return _ensure_wallet_business_id(wallet)
 
 
 @login_required
@@ -1284,8 +1463,10 @@ def operations_center(request):
                 settlement_currency = _normalize_currency(request.POST.get("settlement_currency"))
                 owner_id = request.POST.get("owner_user_id")
                 owner = User.objects.filter(id=owner_id).first() if owner_id else None
-                if not code or not name:
-                    raise ValidationError("Merchant code and name are required.")
+                if not name:
+                    raise ValidationError("Merchant name is required.")
+                if not code:
+                    code = _new_merchant_code()
                 merchant = Merchant.objects.create(
                     code=code,
                     name=name,
@@ -1749,12 +1930,12 @@ def operations_center(request):
                 customer_wallet = _wallet_for_currency(refund.customer, refund.currency)
                 try:
                     with transaction.atomic():
-                        wallet_service.withdraw(
+                        _wallet_withdraw(wallet_service, 
                             merchant_wallet,
                             refund.amount,
                             meta={"type": "refund", "refund_request_id": refund.id},
                         )
-                        wallet_service.deposit(
+                        _wallet_deposit(wallet_service, 
                             customer_wallet,
                             refund.amount,
                             meta={"type": "refund", "refund_request_id": refund.id},
@@ -2571,7 +2752,7 @@ def operations_center(request):
                     customer_wallet = _merchant_loyalty_wallet(customer, merchant)
                     if event_type == MerchantLoyaltyEvent.TYPE_ACCRUAL:
                         points = (amount * program.earn_rate).quantize(Decimal("0.01"))
-                        wallet_service.deposit(
+                        _wallet_deposit(wallet_service, 
                             customer_wallet,
                             points,
                             meta={
@@ -2583,7 +2764,7 @@ def operations_center(request):
                         )
                     else:
                         points = amount.quantize(Decimal("0.01"))
-                        wallet_service.withdraw(
+                        _wallet_withdraw(wallet_service, 
                             customer_wallet,
                             points,
                             meta={
@@ -2657,12 +2838,12 @@ def operations_center(request):
                     if flow_type == FLOW_B2C:
                         to_user = User.objects.get(id=request.POST.get("user_id"))
                         user_wallet = _wallet_for_currency(to_user, currency)
-                        wallet_service.withdraw(
+                        _wallet_withdraw(wallet_service, 
                             merchant_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
                         )
-                        wallet_service.deposit(
+                        _wallet_deposit(wallet_service, 
                             user_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
@@ -2670,12 +2851,12 @@ def operations_center(request):
                     elif flow_type == FLOW_C2B:
                         from_user = User.objects.get(id=request.POST.get("user_id"))
                         user_wallet = _wallet_for_currency(from_user, currency)
-                        wallet_service.withdraw(
+                        _wallet_withdraw(wallet_service, 
                             user_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
                         )
-                        wallet_service.deposit(
+                        _wallet_deposit(wallet_service, 
                             merchant_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
@@ -2690,12 +2871,12 @@ def operations_center(request):
                         if not other_capability.supports_b2b:
                             raise ValidationError("Counterparty merchant does not support B2B.")
                         cp_wallet = _merchant_wallet_for_currency(counterparty_merchant, currency)
-                        wallet_service.withdraw(
+                        _wallet_withdraw(wallet_service, 
                             merchant_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
                         )
-                        wallet_service.deposit(
+                        _wallet_deposit(wallet_service, 
                             cp_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
@@ -2705,12 +2886,12 @@ def operations_center(request):
                             raise ValidationError("Selected merchant wallet type must be Government (G).")
                         from_user = User.objects.get(id=request.POST.get("user_id"))
                         user_wallet = _wallet_for_currency(from_user, currency)
-                        wallet_service.withdraw(
+                        _wallet_withdraw(wallet_service, 
                             user_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
                         )
-                        wallet_service.deposit(
+                        _wallet_deposit(wallet_service, 
                             merchant_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
@@ -2720,12 +2901,12 @@ def operations_center(request):
                             raise ValidationError("Selected merchant wallet type must be Government (G).")
                         to_user = User.objects.get(id=request.POST.get("user_id"))
                         user_wallet = _wallet_for_currency(to_user, currency)
-                        wallet_service.withdraw(
+                        _wallet_withdraw(wallet_service, 
                             merchant_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
                         )
-                        wallet_service.deposit(
+                        _wallet_deposit(wallet_service, 
                             user_wallet,
                             amount,
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
@@ -2898,6 +3079,7 @@ def operations_center(request):
             "access_reviews": access_reviews,
             "journal_entries": JournalEntry.objects.order_by("-created_at")[:200],
             "users": User.objects.order_by("username")[:300],
+            "operation_settings": _operation_settings(),
             "supported_currencies": _supported_currencies(),
             "flow_choices": FLOW_CHOICES,
             "case_type_choices": OperationCase.TYPE_CHOICES,
@@ -2918,7 +3100,22 @@ def merchant_portal(request):
     else:
         merchants_qs = Merchant.objects.select_related("owner").filter(owner=request.user).order_by("code")
         if not merchants_qs.exists():
-            raise PermissionDenied("You do not have access to merchant portal.")
+            messages.info(
+                request,
+                "No merchant profile is linked to your account yet. Please contact admin/operations.",
+            )
+            return render(
+                request,
+                "wallets_demo/merchant_portal.html",
+                {
+                    "merchants": [],
+                    "settlement_map": {},
+                    "payout_map": {},
+                    "credential_map": {},
+                    "webhook_map": {},
+                    "can_manage_all": False,
+                },
+            )
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -2974,9 +3171,26 @@ def merchant_portal(request):
 
 @login_required
 def wallet_management(request):
-    management_roles = ("super_admin", "admin", "operation", "finance", "customer_service", "risk")
+    management_roles = (
+        "super_admin",
+        "admin",
+        "operation",
+        "finance",
+        "customer_service",
+        "risk",
+        "treasury",
+        "sales",
+    )
     if not user_has_any_role(request.user, management_roles):
-        raise PermissionDenied("You do not have access to wallet management.")
+        messages.info(
+            request,
+            "Wallet management is available for back-office roles. Contact admin to grant access.",
+        )
+        return render(
+            request,
+            "wallets_demo/wallet_management.html",
+            {"can_manage_wallet_management": False},
+        )
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -3106,9 +3320,19 @@ def wallet_management(request):
                 wallet = _wallet_for_currency(target_user, currency)
                 with transaction.atomic():
                     if adjustment_type == "deposit":
-                        wallet_service.deposit(wallet, amount, meta={"reason": reason, "currency": currency})
+                        _wallet_deposit(
+                            wallet_service,
+                            wallet,
+                            amount,
+                            meta={"reason": reason, "currency": currency, "service_type": "wallet_adjustment"},
+                        )
                     elif adjustment_type == "withdraw":
-                        wallet_service.withdraw(wallet, amount, meta={"reason": reason, "currency": currency})
+                        _wallet_withdraw(
+                            wallet_service,
+                            wallet,
+                            amount,
+                            meta={"reason": reason, "currency": currency, "service_type": "wallet_adjustment"},
+                        )
                     else:
                         raise ValidationError("Invalid adjustment type.")
                 _audit(
@@ -3149,8 +3373,6 @@ def wallet_management(request):
                 mobile_no = (request.POST.get("mobile_no") or "").strip()
                 email = (request.POST.get("email") or "").strip()
                 status = (request.POST.get("status") or CustomerCIF.STATUS_ACTIVE).strip().lower()
-                if not cif_no:
-                    raise ValidationError("CIF number is required.")
                 if not legal_name:
                     raise ValidationError("Legal name is required.")
                 if status not in {
@@ -3165,7 +3387,7 @@ def wallet_management(request):
                 customer_cif, created = CustomerCIF.objects.get_or_create(
                     user=target_user,
                     defaults={
-                        "cif_no": cif_no,
+                        "cif_no": cif_no or _new_cif_no(),
                         "legal_name": legal_name,
                         "mobile_no": mobile_no,
                         "email": email,
@@ -3174,6 +3396,8 @@ def wallet_management(request):
                     },
                 )
                 if not created:
+                    if not cif_no:
+                        cif_no = customer_cif.cif_no
                     if customer_cif.cif_no != cif_no:
                         raise ValidationError(
                             f"CIF number is immutable for {target_user.username}. "
@@ -3234,9 +3458,19 @@ def wallet_management(request):
                 wallet = _merchant_wallet_for_currency(merchant, currency)
                 with transaction.atomic():
                     if adjustment_type == "deposit":
-                        wallet_service.deposit(wallet, amount, meta={"reason": reason, "currency": currency})
+                        _wallet_deposit(
+                            wallet_service,
+                            wallet,
+                            amount,
+                            meta={"reason": reason, "currency": currency, "service_type": "wallet_adjustment"},
+                        )
                     elif adjustment_type == "withdraw":
-                        wallet_service.withdraw(wallet, amount, meta={"reason": reason, "currency": currency})
+                        _wallet_withdraw(
+                            wallet_service,
+                            wallet,
+                            amount,
+                            meta={"reason": reason, "currency": currency, "service_type": "wallet_adjustment"},
+                        )
                     else:
                         raise ValidationError("Invalid adjustment type.")
                 _audit(
@@ -3311,12 +3545,14 @@ def wallet_management(request):
         request,
         "wallets_demo/wallet_management.html",
         {
+            "can_manage_wallet_management": True,
             "users": User.objects.order_by("username")[:300],
             "users_for_cif": User.objects.order_by("username")[:300],
             "customer_cifs": cifs_page,
             "cif_status_choices": CustomerCIF.STATUS_CHOICES,
             "selected_cif_status": cif_status,
             "cif_query": cif_query,
+            "operation_settings": _operation_settings(),
             "merchants": Merchant.objects.order_by("code")[:200],
             "supported_currencies": _supported_currencies(),
             "user_wallet_rows": [
@@ -3373,6 +3609,86 @@ def rbac_management(request):
         {
             "users": users,
             "role_items": role_items,
+        },
+    )
+
+
+@login_required
+def operations_settings(request):
+    if not user_has_any_role(request.user, ("super_admin",)):
+        raise PermissionDenied("Only super admin can manage operation settings.")
+
+    settings_row = _operation_settings()
+    prefix_fields = (
+        "merchant_id_prefix",
+        "wallet_id_prefix",
+        "transaction_id_prefix",
+        "cif_id_prefix",
+        "journal_entry_prefix",
+        "case_no_prefix",
+        "settlement_no_prefix",
+        "payout_ref_prefix",
+        "recon_no_prefix",
+        "chargeback_no_prefix",
+        "access_review_no_prefix",
+    )
+    default_service_prefixes = default_service_transaction_prefixes()
+    current_service_prefixes = (
+        settings_row.service_transaction_prefixes
+        if isinstance(settings_row.service_transaction_prefixes, dict)
+        else {}
+    )
+    merged_service_prefixes = {
+        key: _clean_prefix(current_service_prefixes.get(key, ""), default_value)
+        for key, default_value in default_service_prefixes.items()
+    }
+
+    if request.method == "POST":
+        try:
+            settings_row.organization_name = (request.POST.get("organization_name") or "").strip() or "DJ Wallet"
+            for field in prefix_fields:
+                raw_value = request.POST.get(field) or getattr(settings_row, field)
+                setattr(settings_row, field, _clean_prefix(raw_value, getattr(settings_row, field)))
+            settings_row.service_transaction_prefixes = {
+                key: _clean_prefix(
+                    request.POST.get(f"service_prefix_{key}") or merged_service_prefixes.get(key, ""),
+                    default_service_prefixes[key],
+                )
+                for key in SERVICE_PREFIX_KEYS
+            }
+            settings_row.updated_by = request.user
+            settings_row.full_clean()
+            settings_row.save()
+            messages.success(request, "Operation settings updated.")
+            return redirect("operations_settings")
+        except Exception as exc:
+            messages.error(request, f"Unable to update operation settings: {exc}")
+
+    preview = {
+        "Merchant ID": _new_merchant_code(),
+        "Wallet ID": f"{_clean_prefix(settings_row.wallet_id_prefix, 'WAL')}-0000000042",
+        "Transaction ID": _new_prefixed_ref_with_entropy(
+            _clean_prefix(settings_row.transaction_id_prefix, "TXN")
+        ),
+        "CIF ID": _new_cif_no(),
+        "Case No": _new_case_no(),
+        "Settlement No": _new_settlement_no(),
+        "Payout Ref": _new_payout_ref(),
+    }
+    preview_service_txn = {
+        key: _new_prefixed_ref_with_entropy(
+            _clean_prefix(merged_service_prefixes.get(key, ""), default_service_prefixes[key])
+        )
+        for key in ("deposit", "withdraw", "transfer", "b2b", "b2c", "c2b", "p2g", "g2p", "refund")
+    }
+    return render(
+        request,
+        "wallets_demo/operations_settings.html",
+        {
+            "operation_settings": settings_row,
+            "preview": preview,
+            "service_prefixes": merged_service_prefixes,
+            "preview_service_txn": preview_service_txn,
         },
     )
 
@@ -3459,10 +3775,14 @@ def deposit(request):
             with transaction.atomic():
                 wallet = _wallet_for_currency(request.user, selected_currency)
                 wallet_service = get_wallet_service()
-                wallet_service.deposit(
+                _wallet_deposit(wallet_service, 
                     wallet,
                     amount,
-                    meta={"description": description, "currency": selected_currency},
+                    meta={
+                        "description": description,
+                        "currency": selected_currency,
+                        "service_type": "deposit",
+                    },
                 )
             messages.success(request, f"Successfully deposited {amount} {selected_currency}.")
             _track(
@@ -3528,10 +3848,14 @@ def withdraw(request):
 
             with transaction.atomic():
                 wallet_service = get_wallet_service()
-                wallet_service.withdraw(
+                _wallet_withdraw(wallet_service, 
                     wallet,
                     amount,
-                    meta={"description": description, "currency": selected_currency},
+                    meta={
+                        "description": description,
+                        "currency": selected_currency,
+                        "service_type": "withdraw",
+                    },
                 )
             messages.success(request, f"Successfully withdrew {amount} {selected_currency}.")
             _track(
@@ -3615,15 +3939,23 @@ def transfer(request):
             with transaction.atomic():
                 recipient_wallet = _wallet_for_currency(recipient, selected_currency)
                 wallet_service = get_wallet_service()
-                wallet_service.withdraw(
+                _wallet_withdraw(wallet_service, 
                     sender_wallet,
                     amount,
-                    meta={"description": description, "currency": selected_currency},
+                    meta={
+                        "description": description,
+                        "currency": selected_currency,
+                        "service_type": "transfer",
+                    },
                 )
-                wallet_service.deposit(
+                _wallet_deposit(wallet_service, 
                     recipient_wallet,
                     amount,
-                    meta={"description": description, "currency": selected_currency},
+                    meta={
+                        "description": description,
+                        "currency": selected_currency,
+                        "service_type": "transfer",
+                    },
                 )
             messages.success(
                 request,
@@ -3682,7 +4014,7 @@ def register(request):
                 base_currency = _normalize_currency(getattr(settings, "PLATFORM_BASE_CURRENCY", "USD"))
                 wallet = _wallet_for_currency(user, base_currency)
                 wallet_service = get_wallet_service()
-                wallet_service.deposit(
+                _wallet_deposit(wallet_service, 
                     wallet,
                     Decimal("100"),
                     meta={"description": "Welcome Bonus", "currency": base_currency},

@@ -1,0 +1,72 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}Day-1 Operation Setup - DJ Wallet{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Day-1 Operation Setup</h2>
+    <p class="text-muted">Configure base references and service-specific transaction prefixes for operations go-live.</p>
+</div>
+
+<div class="card">
+    <h3>Core Prefix Settings</h3>
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-group">
+            <label>Organization Name</label>
+            <input type="text" name="organization_name" maxlength="128" value="{{ operation_settings.organization_name }}" required />
+        </div>
+        <div class="form-group"><label>Merchant ID Prefix</label><input type="text" name="merchant_id_prefix" value="{{ operation_settings.merchant_id_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>CIF ID Prefix</label><input type="text" name="cif_id_prefix" value="{{ operation_settings.cif_id_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Wallet ID Prefix</label><input type="text" name="wallet_id_prefix" value="{{ operation_settings.wallet_id_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Default Transaction ID Prefix</label><input type="text" name="transaction_id_prefix" value="{{ operation_settings.transaction_id_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Journal Entry Prefix</label><input type="text" name="journal_entry_prefix" value="{{ operation_settings.journal_entry_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Case Prefix</label><input type="text" name="case_no_prefix" value="{{ operation_settings.case_no_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Settlement Prefix</label><input type="text" name="settlement_no_prefix" value="{{ operation_settings.settlement_no_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Payout Prefix</label><input type="text" name="payout_ref_prefix" value="{{ operation_settings.payout_ref_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Reconciliation Prefix</label><input type="text" name="recon_no_prefix" value="{{ operation_settings.recon_no_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Chargeback Prefix</label><input type="text" name="chargeback_no_prefix" value="{{ operation_settings.chargeback_no_prefix }}" maxlength="16" required /></div>
+        <div class="form-group"><label>Access Review Prefix</label><input type="text" name="access_review_no_prefix" value="{{ operation_settings.access_review_no_prefix }}" maxlength="16" required /></div>
+
+        <h3 style="margin-top:1rem;">Transaction Prefix by Service Type</h3>
+        <p class="text-muted">Each service/flow can have its own transaction prefix.</p>
+        {% for service_key, prefix in service_prefixes.items %}
+            <div class="form-group">
+                <label>{{ service_key|upper }} Prefix</label>
+                <input type="text" name="service_prefix_{{ service_key }}" value="{{ prefix }}" maxlength="16" required />
+            </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary">Save Operation Setup</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Reference Preview</h3>
+    <table>
+        <thead><tr><th>Reference</th><th>Sample</th></tr></thead>
+        <tbody>
+            {% for label, sample in preview.items %}
+            <tr>
+                <td>{{ label }}</td>
+                <td><code>{{ sample }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Service Transaction Preview</h3>
+    <table>
+        <thead><tr><th>Service Type</th><th>Sample Transaction ID</th></tr></thead>
+        <tbody>
+            {% for service_key, sample in preview_service_txn.items %}
+            <tr>
+                <td>{{ service_key|upper }}</td>
+                <td><code>{{ sample }}</code></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

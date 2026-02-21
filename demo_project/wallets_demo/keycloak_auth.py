@@ -5,6 +5,8 @@ import json
 import time
 from typing import Any
 
+from django.conf import settings
+
 from .identity_client import introspect_access_token as identity_introspect_access_token
 from .rbac import assign_roles, seed_role_groups
 
@@ -59,6 +61,10 @@ def map_keycloak_claims_to_rbac_roles(claims: dict[str, Any]) -> list[str]:
 
 def sync_user_roles_from_keycloak_claims(user, claims: dict[str, Any]) -> list[str]:
     mapped_roles = map_keycloak_claims_to_rbac_roles(claims)
+    # Preserve existing privileges when IdP token does not include role claims.
+    # This avoids accidental role stripping for admin users on incomplete claims.
+    if not mapped_roles:
+        return list(user.groups.values_list("name", flat=True))
     seed_role_groups()
     assign_roles(user, mapped_roles)
 

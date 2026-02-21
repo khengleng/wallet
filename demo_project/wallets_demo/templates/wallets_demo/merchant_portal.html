@@ -9,6 +9,12 @@
     <p class="text-muted">Self-service merchant operations: settlement, payout status, API scopes, webhook events.</p>
 </div>
 
+{% if not merchants %}
+<div class="card">
+    <p class="text-muted">No merchant account is linked to your user yet.</p>
+</div>
+{% endif %}
+
 {% for m in merchants %}
 <div class="card">
     <h3>{{ m.code }} - {{ m.name }}</h3>

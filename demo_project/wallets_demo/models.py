@@ -22,6 +22,25 @@ FLOW_CHOICES = (
     (FLOW_G2P, "G2P"),
 )
 
+
+def default_service_transaction_prefixes() -> dict:
+    return {
+        "deposit": "DEP",
+        "withdraw": "WDR",
+        "transfer": "TRF",
+        "fx_exchange": "FX",
+        "wallet_adjustment": "ADJ",
+        "refund": "RFD",
+        "loyalty_accrual": "LAC",
+        "loyalty_redemption": "LRD",
+        "b2b": "B2B",
+        "b2c": "B2C",
+        "c2b": "C2B",
+        "p2g": "P2G",
+        "g2p": "G2P",
+    }
+
+
 WALLET_TYPE_PERSONAL = "P"
 WALLET_TYPE_BUSINESS = "B"
 WALLET_TYPE_CUSTOMER = "C"
@@ -47,6 +66,51 @@ class User(WalletMixin, AbstractUser):
 
     def has_any_role(self, role_names: list[str] | tuple[str, ...]) -> bool:
         return user_has_any_role(self, role_names)
+
+
+class OperationSetting(models.Model):
+    singleton_key = models.PositiveSmallIntegerField(default=1, unique=True, editable=False)
+    organization_name = models.CharField(max_length=128, default="DJ Wallet")
+    merchant_id_prefix = models.CharField(max_length=16, default="MCH")
+    wallet_id_prefix = models.CharField(max_length=16, default="WAL")
+    transaction_id_prefix = models.CharField(max_length=16, default="TXN")
+    service_transaction_prefixes = models.JSONField(
+        default=default_service_transaction_prefixes,
+        blank=True,
+    )
+    cif_id_prefix = models.CharField(max_length=16, default="CIF")
+    journal_entry_prefix = models.CharField(max_length=16, default="JE")
+    case_no_prefix = models.CharField(max_length=16, default="CASE")
+    settlement_no_prefix = models.CharField(max_length=16, default="SETTLE")
+    payout_ref_prefix = models.CharField(max_length=16, default="PAYOUT")
+    recon_no_prefix = models.CharField(max_length=16, default="RECON")
+    chargeback_no_prefix = models.CharField(max_length=16, default="CB")
+    access_review_no_prefix = models.CharField(max_length=16, default="AR")
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="updated_operation_settings",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Operation setting"
+        verbose_name_plural = "Operation settings"
+
+    def save(self, *args, **kwargs):
+        self.singleton_key = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls) -> "OperationSetting":
+        obj, _created = cls.objects.get_or_create(singleton_key=1)
+        return obj
+
+    def __str__(self):
+        return f"{self.organization_name} operation setup"
 
 
 class ApprovalRequest(models.Model):
