@@ -341,6 +341,11 @@ def portal_login(request):
             )
         state = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(32)
+        state_history = request.session.get("oidc_state_history", [])
+        if not isinstance(state_history, list):
+            state_history = []
+        state_history = (state_history + [state])[-5:]
+        request.session["oidc_state_history"] = state_history
         request.session["oidc_state"] = state
         request.session["oidc_nonce"] = nonce
         return redirect(_keycloak_auth_url(state, nonce))
@@ -376,22 +381,26 @@ def keycloak_callback(request):
         return redirect("login")
 
     expected_state = request.session.get("oidc_state", "")
+    state_history = request.session.get("oidc_state_history", [])
+    if not isinstance(state_history, list):
+        state_history = []
     provided_state = request.GET.get("state", "")
     code = request.GET.get("code", "")
     if not code:
         if request.user.is_authenticated:
             return redirect("dashboard")
-        messages.error(request, "Invalid login callback state.")
-        return redirect("login")
+        return redirect("/login/?start=1")
 
-    if expected_state and expected_state != provided_state:
+    if expected_state and expected_state != provided_state and provided_state not in state_history:
         if request.user.is_authenticated:
             return redirect("dashboard")
-        messages.error(request, "Invalid login callback state.")
-        return redirect("login")
+        return redirect("/login/?start=1")
 
     try:
         request.session.pop("oidc_state", None)
+        if provided_state in state_history:
+            state_history = [s for s in state_history if s != provided_state]
+            request.session["oidc_state_history"] = state_history
         request.session.pop("oidc_nonce", None)
         token_payload = _keycloak_token_exchange(code)
         access_token = token_payload.get("access_token", "")
