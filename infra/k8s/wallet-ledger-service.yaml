@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallet-ledger-service
+spec:
+  selector:
+    app: wallet-ledger-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallet-ledger-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: wallet-ledger-service
+  template:
+    metadata:
+      labels:
+        app: wallet-ledger-service
+    spec:
+      containers:
+        - name: wallet-ledger-service
+          image: your-registry/wallet-ledger-service:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-ledger-secrets
+                  key: DATABASE_URL
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: wallet-ledger-service-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: wallet-ledger-service
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: wallet-ledger-service-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: wallet-ledger-service
+  minReplicas: 3
+  maxReplicas: 40
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65

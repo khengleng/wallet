@@ -214,6 +214,21 @@ Django Wallets uses a component-based architecture where logic is encapsulated i
 - **`ExchangeService`**: Internal conversions between a holder's different wallets.
 - **`PurchaseService`**: High-level logic for processing product payments.
 
+## Microservices and HA Readiness
+
+This repository now includes deployment and architecture scaffolding for high-scale operation:
+
+- Target microservices architecture: `docs/architecture/microservices-target.md`
+- Extracted ledger microservice: `services/wallet_ledger_service`
+- Production environment template: `.env.production.example`
+- Local multi-service infrastructure (PostgreSQL/Redis/RabbitMQ): `infra/docker-compose.microservices.yml`
+- Kubernetes deployment/HPA/PDB baseline: `infra/k8s/wallet-api.yaml`
+
+Production defaults enforce:
+- explicit `SECRET_KEY`
+- explicit `DATABASE_URL` (PostgreSQL) for production
+- explicit `ALLOWED_HOSTS` (wildcard not allowed)
+
 ---
 
 ## 🛠️ Available Methods Reference

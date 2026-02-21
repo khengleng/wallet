@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallet-api
+spec:
+  selector:
+    app: wallet-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallet-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: wallet-api
+  template:
+    metadata:
+      labels:
+        app: wallet-api
+    spec:
+      containers:
+        - name: api
+          image: your-registry/wallet-api:latest
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ENVIRONMENT
+              value: production
+            - name: DEBUG
+              value: "False"
+            - name: ALLOWED_HOSTS
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-secrets
+                  key: ALLOWED_HOSTS
+            - name: CSRF_TRUSTED_ORIGINS
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-secrets
+                  key: CSRF_TRUSTED_ORIGINS
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-secrets
+                  key: SECRET_KEY
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-secrets
+                  key: DATABASE_URL
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: wallet-api-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: wallet-api
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: wallet-api-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: wallet-api
+  minReplicas: 3
+  maxReplicas: 30
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65

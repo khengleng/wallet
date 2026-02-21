@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -15,19 +16,31 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv(
-    "SECRET_KEY",
-    "django-insecure-djub!8np1uhh29v!akwb92znr7qhtlc$6r*77z4db827x^ax)z",
-)
+SECRET_KEY = os.getenv("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+IS_PRODUCTION = os.getenv("ENVIRONMENT", "").lower() in {
+    "prod",
+    "production",
+} or not DEBUG
+
+if not SECRET_KEY and IS_PRODUCTION:
+    raise ImproperlyConfigured("SECRET_KEY must be set in production.")
+
+if not SECRET_KEY:
+    SECRET_KEY = "dev-only-secret-key"
 
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv("ALLOWED_HOSTS", "*").split(",")
     if host.strip()
 ]
+
+if IS_PRODUCTION and (not ALLOWED_HOSTS or ALLOWED_HOSTS == ["*"]):
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS must be explicitly set in production and cannot be '*'."
+    )
 
 
 # Application definition
@@ -91,6 +104,10 @@ if DATABASE_URL:
     DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
     DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 else:
+    if IS_PRODUCTION:
+        raise ImproperlyConfigured(
+            "DATABASE_URL must be set in production (PostgreSQL required)."
+        )
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -157,3 +174,13 @@ CSRF_TRUSTED_ORIGINS = [
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    CSRF_COOKIE_HTTPONLY = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    X_FRAME_OPTIONS = "DENY"
+    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"

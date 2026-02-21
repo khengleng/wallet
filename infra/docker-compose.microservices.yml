@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  wallet-ledger-service:
+    build:
+      context: ../services/wallet_ledger_service
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+  api:
+    build:
+      context: ..
+    command: >
+      sh -c "cd demo_project &&
+             python manage.py migrate --noinput &&
+             gunicorn demo_project_app.wsgi:application -c ../gunicorn.conf.py"
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "False"
+      SECRET_KEY: local-dev-secret-replace
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      CSRF_TRUSTED_ORIGINS: http://localhost:8000
+      WEB_CONCURRENCY: "2"
+      GUNICORN_THREADS: "4"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - wallet-ledger-service
+      - postgres
+      - redis
+      - rabbitmq
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wallet
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+volumes:
+  pgdata:
