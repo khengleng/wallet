@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 {% load rbac_tags %}
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -196,11 +197,24 @@
             font-weight: 600;
         }
 
-        .badge-success { background: #dcfce7; color: #166534; }
-        .badge-danger { background: #fee2e2; color: #991b1b; }
-        .badge-info { background: #e0f2fe; color: #075985; }
+        .badge-success {
+            background: #dcfce7;
+            color: #166534;
+        }
 
-        h1, h2, h3 {
+        .badge-danger {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .badge-info {
+            background: #e0f2fe;
+            color: #075985;
+        }
+
+        h1,
+        h2,
+        h3 {
             margin-bottom: 1rem;
         }
 
@@ -215,7 +229,9 @@
             font-size: 0.875rem;
         }
 
-        input, select, textarea {
+        input,
+        select,
+        textarea {
             width: 100%;
             padding: 0.75rem;
             border: 1px solid var(--border);
@@ -237,17 +253,49 @@
             margin-bottom: 1rem;
         }
 
-        .alert-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
-        .alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .alert-success {
+            background: #dcfce7;
+            color: #166534;
+            border: 1px solid #bbf7d0;
+        }
 
-        .flex { display: flex; }
-        .justify-between { justify-content: space-between; }
-        .align-center { align-items: center; }
-        .gap-2 { gap: 0.5rem; }
-        .mt-4 { margin-top: 1rem; }
-        .text-muted { color: var(--text-muted); }
-        .text-2xl { font-size: 1.5rem; }
-        .font-bold { font-weight: 700; }
+        .alert-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+        }
+
+        .flex {
+            display: flex;
+        }
+
+        .justify-between {
+            justify-content: space-between;
+        }
+
+        .align-center {
+            align-items: center;
+        }
+
+        .gap-2 {
+            gap: 0.5rem;
+        }
+
+        .mt-4 {
+            margin-top: 1rem;
+        }
+
+        .text-muted {
+            color: var(--text-muted);
+        }
+
+        .text-2xl {
+            font-size: 1.5rem;
+        }
+
+        .font-bold {
+            font-weight: 700;
+        }
 
         table {
             width: 100%;
@@ -255,7 +303,8 @@
             margin-top: 1rem;
         }
 
-        th, td {
+        th,
+        td {
             padding: 1rem;
             text-align: left;
             border-bottom: 1px solid var(--border);
@@ -268,7 +317,9 @@
             text-transform: uppercase;
         }
 
-        tr:last-child td { border-bottom: none; }
+        tr:last-child td {
+            border-bottom: none;
+        }
 
         @media (max-width: 960px) {
             .portal-layout {
@@ -287,21 +338,38 @@
             }
         }
 
-        {% block extra_style %}{% endblock %}
+            {
+            % block extra_style %
+        }
+
+            {
+            % endblock %
+        }
     </style>
 </head>
+
 <body>
     <nav class="navbar">
         <a href="{% url 'dashboard' %}" class="logo">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"></path>
+                <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
+                <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
+            </svg>
             DJ Wallet
         </a>
         <div class="nav-links">
             {% if user.is_authenticated %}
-                <span class="font-bold">{{ user.username }}</span>
+            <span class="font-bold">{{ user.username }}</span>
+            <form action="{% url 'logout' %}" method="post" style="display: inline; margin-left: 1rem;">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Sign
+                    Out</button>
+            </form>
             {% else %}
-                <a href="{% url 'login' %}">Login</a>
-                <a href="{% url 'register' %}" class="btn btn-primary">Sign Up</a>
+            <a href="{% url 'login' %}">Login</a>
+            <a href="{% url 'register' %}" class="btn btn-primary">Sign Up</a>
             {% endif %}
         </div>
     </nav>
@@ -310,27 +378,41 @@
     <div class="portal-layout">
         <aside class="sidebar">
             <nav>
-                <a class="sidebar-link{% if request.resolver_match.url_name == 'dashboard' %} active{% endif %}" href="{% url 'dashboard' %}">Dashboard</a>
-                <a class="sidebar-link{% if request.resolver_match.url_name == 'transfer' %} active{% endif %}" href="{% url 'transfer' %}">Transfer</a>
-                <a class="sidebar-link{% if request.resolver_match.url_name == 'deposit' %} active{% endif %}" href="{% url 'deposit' %}">Deposit</a>
-                <a class="sidebar-link{% if request.resolver_match.url_name == 'withdraw' %} active{% endif %}" href="{% url 'withdraw' %}">Withdraw</a>
-                <a class="sidebar-link{% if request.resolver_match.url_name == 'wallet_fx_exchange' %} active{% endif %}" href="{% url 'wallet_fx_exchange' %}">FX Exchange</a>
-                <a class="sidebar-link{% if request.resolver_match.url_name == 'merchant_portal' %} active{% endif %}" href="{% url 'merchant_portal' %}">Merchant Self-Service</a>
-                <a class="sidebar-link{% if request.resolver_match.url_name == 'wallet_management' %} active{% endif %}" href="{% url 'wallet_management' %}">Customer & Wallet Admin</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'dashboard' %} active{% endif %}"
+                    href="{% url 'dashboard' %}">Dashboard</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'transfer' %} active{% endif %}"
+                    href="{% url 'transfer' %}">Transfer</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'deposit' %} active{% endif %}"
+                    href="{% url 'deposit' %}">Deposit</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'withdraw' %} active{% endif %}"
+                    href="{% url 'withdraw' %}">Withdraw</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'wallet_fx_exchange' %} active{% endif %}"
+                    href="{% url 'wallet_fx_exchange' %}">FX Exchange</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'merchant_portal' %} active{% endif %}"
+                    href="{% url 'merchant_portal' %}">Merchant Self-Service</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'wallet_management' %} active{% endif %}"
+                    href="{% url 'wallet_management' %}">Customer & Wallet Admin</a>
 
                 {% if user|has_any_role:"admin,super_admin,finance,treasury,customer_service,risk,operation,sales" %}
-                    <div class="sidebar-section-title">Back Office</div>
-                    <a class="sidebar-link{% if request.resolver_match.url_name == 'backoffice' %} active{% endif %}" href="{% url 'backoffice' %}">Back Office Home</a>
-                    <a class="sidebar-link{% if request.resolver_match.url_name == 'operations_center' %} active{% endif %}" href="{% url 'operations_center' %}">Merchant & Case Ops</a>
-                    <a class="sidebar-link{% if request.resolver_match.url_name == 'treasury_dashboard' %} active{% endif %}" href="{% url 'treasury_dashboard' %}">Company Funds</a>
-                    <a class="sidebar-link{% if request.resolver_match.url_name == 'accounting_dashboard' %} active{% endif %}" href="{% url 'accounting_dashboard' %}">Finance & Ledger</a>
-                    <a class="sidebar-link{% if request.resolver_match.url_name == 'fx_management' %} active{% endif %}" href="{% url 'fx_management' %}">Exchange Rate Admin</a>
-                    {% if user|has_any_role:"admin,super_admin" %}
-                    <a class="sidebar-link{% if request.resolver_match.url_name == 'rbac_management' %} active{% endif %}" href="{% url 'rbac_management' %}">User Roles & Access</a>
-                    {% if user|has_role:"super_admin" %}
-                    <a class="sidebar-link{% if request.resolver_match.url_name == 'operations_settings' %} active{% endif %}" href="{% url 'operations_settings' %}">Day-1 Operation Setup</a>
-                    {% endif %}
-                    {% endif %}
+                <div class="sidebar-section-title">Back Office</div>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'backoffice' %} active{% endif %}"
+                    href="{% url 'backoffice' %}">Back Office Home</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'operations_center' %} active{% endif %}"
+                    href="{% url 'operations_center' %}">Merchant & Case Ops</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'treasury_dashboard' %} active{% endif %}"
+                    href="{% url 'treasury_dashboard' %}">Company Funds</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'accounting_dashboard' %} active{% endif %}"
+                    href="{% url 'accounting_dashboard' %}">Finance & Ledger</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'fx_management' %} active{% endif %}"
+                    href="{% url 'fx_management' %}">Exchange Rate Admin</a>
+                {% if user|has_any_role:"admin,super_admin" %}
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'rbac_management' %} active{% endif %}"
+                    href="{% url 'rbac_management' %}">User Roles & Access</a>
+                {% if user|has_role:"super_admin" %}
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'operations_settings' %} active{% endif %}"
+                    href="{% url 'operations_settings' %}">System Setting</a>
+                {% endif %}
+                {% endif %}
                 {% endif %}
             </nav>
 
@@ -339,24 +421,24 @@
                 <div class="font-bold" style="margin-bottom: 0.8rem;">{{ user.username }}</div>
                 <form action="{% url 'logout' %}" method="post">
                     {% csrf_token %}
-                    <button type="submit" class="btn btn-outline" style="width: 100%;">Logout</button>
+                    <button type="submit" class="btn btn-outline" style="width: 100%;">Sign Out</button>
                 </form>
             </div>
         </aside>
 
         <main class="content-area">
-    {% else %}
-    <div class="container">
-    {% endif %}
-            {% if messages %}
+            {% else %}
+            <div class="container">
+                {% endif %}
+                {% if messages %}
                 {% for message in messages %}
-                    <div class="alert alert-{{ message.tags }}">
-                        {{ message }}
-                    </div>
+                <div class="alert alert-{{ message.tags }}">
+                    {{ message }}
+                </div>
                 {% endfor %}
-            {% endif %}
-            {% block content %}{% endblock %}
-    {% if user.is_authenticated %}
+                {% endif %}
+                {% block content %}{% endblock %}
+                {% if user.is_authenticated %}
         </main>
     </div>
     {% else %}
@@ -367,4 +449,5 @@
         &copy; 2026 DJ Wallet System. Built with Django & dj-wallet.
     </footer>
 </body>
+
 </html>
