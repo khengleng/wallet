@@ -26,10 +26,12 @@
         </form>
         {% endif %}
 
+        {% if auth_mode != "keycloak_oidc" %}
         <p class="mt-4 text-muted" style="text-align: center; font-size: 0.875rem;">
             Don't have an account? <a href="{% url 'register' %}"
                 style="color: var(--primary); font-weight: 600; text-decoration: none;">Sign up</a>
         </p>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

@@ -1156,6 +1156,10 @@ def transfer(request):
 
 
 def register(request):
+    if _use_keycloak_oidc():
+        messages.info(request, "Registration is managed by SSO. Continue with Keycloak.")
+        return redirect("login")
+
     if request.method == "POST":
         username = request.POST.get("username")
         email = request.POST.get("email")
