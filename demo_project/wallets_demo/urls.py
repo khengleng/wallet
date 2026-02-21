@@ -10,6 +10,7 @@ urlpatterns = [
     path('backoffice/rbac/', views.rbac_management, name='rbac_management'),
     path('backoffice/fx/', views.fx_management, name='fx_management'),
     path('backoffice/operations/', views.operations_center, name='operations_center'),
+    path('merchant/portal/', views.merchant_portal, name='merchant_portal'),
     path('backoffice/wallets/', views.wallet_management, name='wallet_management'),
     path('backoffice/accounting/', views.accounting_dashboard, name='accounting_dashboard'),
     path(

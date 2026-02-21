@@ -2,14 +2,19 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .models import (
+    AccessReviewRecord,
+    AccountingPeriodClose,
     AnalyticsEvent,
     ApprovalRequest,
     BackofficeAuditLog,
     ChartOfAccount,
+    ChargebackCase,
+    ChargebackEvidence,
     CustomerCIF,
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
+    JournalBackdateApproval,
     JournalLine,
     LoginLockout,
     Merchant,
@@ -21,10 +26,13 @@ from .models import (
     MerchantLoyaltyProgram,
     MerchantRiskProfile,
     MerchantSettlementRecord,
+    MerchantWebhookEvent,
     MerchantWalletCapability,
     ReconciliationBreak,
     ReconciliationRun,
+    SanctionScreeningRecord,
     SettlementPayout,
+    TransactionMonitoringAlert,
     OperationCase,
     OperationCaseNote,
     TreasuryAccount,
@@ -267,7 +275,7 @@ class MerchantRiskProfileAdmin(admin.ModelAdmin):
 
 @admin.register(MerchantApiCredential)
 class MerchantApiCredentialAdmin(admin.ModelAdmin):
-    list_display = ("merchant", "key_id", "is_active", "webhook_url", "last_rotated_at", "updated_at")
+    list_display = ("merchant", "key_id", "scopes_csv", "is_active", "webhook_url", "last_rotated_at", "updated_at")
     list_filter = ("is_active",)
     search_fields = ("merchant__code", "key_id", "webhook_url")
     readonly_fields = ("secret_hash",)
@@ -362,6 +370,109 @@ class ReconciliationBreakAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "issue_type", "created_at")
     search_fields = ("run__run_no", "merchant__code", "reference", "note")
+
+
+@admin.register(ChargebackCase)
+class ChargebackCaseAdmin(admin.ModelAdmin):
+    list_display = (
+        "chargeback_no",
+        "case",
+        "merchant",
+        "customer",
+        "reason_code",
+        "amount",
+        "currency",
+        "status",
+        "assigned_to",
+        "due_at",
+        "created_at",
+    )
+    list_filter = ("status", "currency", "reason_code", "created_at")
+    search_fields = ("chargeback_no", "case__case_no", "merchant__code", "customer__username")
+
+
+@admin.register(ChargebackEvidence)
+class ChargebackEvidenceAdmin(admin.ModelAdmin):
+    list_display = ("chargeback", "document_type", "document_url", "uploaded_by", "created_at")
+    list_filter = ("document_type", "created_at")
+    search_fields = ("chargeback__chargeback_no", "document_type", "document_url")
+
+
+@admin.register(AccountingPeriodClose)
+class AccountingPeriodCloseAdmin(admin.ModelAdmin):
+    list_display = (
+        "period_start",
+        "period_end",
+        "currency",
+        "is_closed",
+        "closed_by",
+        "closed_at",
+        "created_by",
+        "updated_at",
+    )
+    list_filter = ("currency", "is_closed", "period_start", "period_end")
+    search_fields = ("currency",)
+
+
+@admin.register(JournalBackdateApproval)
+class JournalBackdateApprovalAdmin(admin.ModelAdmin):
+    list_display = (
+        "entry",
+        "requested_date",
+        "status",
+        "maker",
+        "checker",
+        "decided_at",
+        "created_at",
+    )
+    list_filter = ("status", "requested_date", "created_at")
+    search_fields = ("entry__entry_no", "reason", "maker__username", "checker__username")
+
+
+@admin.register(SanctionScreeningRecord)
+class SanctionScreeningRecordAdmin(admin.ModelAdmin):
+    list_display = ("user", "provider", "status", "score", "reference", "screened_by", "created_at")
+    list_filter = ("provider", "status", "created_at")
+    search_fields = ("user__username", "reference")
+
+
+@admin.register(TransactionMonitoringAlert)
+class TransactionMonitoringAlertAdmin(admin.ModelAdmin):
+    list_display = (
+        "alert_type",
+        "severity",
+        "status",
+        "user",
+        "merchant",
+        "case",
+        "assigned_to",
+        "created_at",
+    )
+    list_filter = ("alert_type", "severity", "status", "created_at")
+    search_fields = ("alert_type", "note", "user__username", "merchant__code", "case__case_no")
+
+
+@admin.register(MerchantWebhookEvent)
+class MerchantWebhookEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "credential",
+        "event_type",
+        "nonce",
+        "signature_valid",
+        "replay_detected",
+        "status",
+        "response_code",
+        "created_at",
+    )
+    list_filter = ("signature_valid", "replay_detected", "status", "created_at")
+    search_fields = ("credential__merchant__code", "nonce", "event_type")
+
+
+@admin.register(AccessReviewRecord)
+class AccessReviewRecordAdmin(admin.ModelAdmin):
+    list_display = ("review_no", "user", "issue_type", "status", "reviewer", "resolved_at", "created_at")
+    list_filter = ("issue_type", "status", "created_at")
+    search_fields = ("review_no", "user__username", "details")
 
 
 @admin.register(OperationCase)

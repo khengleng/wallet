@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load privacy_tags %}
 
 {% block title %}Operations Center - DJ Wallet{% endblock %}
 
@@ -62,6 +63,7 @@
                 <th>Status</th>
                 <th>Wallet Type</th>
                 <th>Owner</th>
+                <th>Contact</th>
                 <th>Capabilities</th>
                 <th>Loyalty</th>
                 <th>Action</th>
@@ -75,6 +77,7 @@
                     <td>{{ m.status }}</td>
                     <td>{{ m.wallet_type }}</td>
                     <td>{% if m.owner %}{{ m.owner.username }}{% else %}-{% endif %}</td>
+                    <td>{{ m.contact_email|mask_email }} / {{ m.contact_phone|mask_phone }}</td>
                     <td>
                         {% with cap=m.wallet_capability %}
                             B2B:{% if cap.supports_b2b %}Y{% else %}N{% endif %},
@@ -125,7 +128,7 @@
                     </td>
                 </tr>
             {% empty %}
-                <tr><td colspan="8" class="text-muted" style="text-align:center;">No merchants yet.</td></tr>
+                <tr><td colspan="9" class="text-muted" style="text-align:center;">No merchants yet.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -262,23 +265,25 @@
         {% csrf_token %}
         <input type="hidden" name="form_type" value="merchant_api_rotate" />
         <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Scopes (csv)</label><input type="text" name="scopes_csv" value="wallet:read,payout:read,webhook:write" /></div>
         <div class="form-group"><label>Webhook URL</label><input type="url" name="webhook_url" placeholder="https://merchant.example/webhook" /></div>
         <div class="form-group"><label><input type="checkbox" name="is_active" checked /> Credential Active</label></div>
         <button class="btn btn-primary" type="submit">Rotate API Credential</button>
     </form>
     <table>
-        <thead><tr><th>Merchant</th><th>Key ID</th><th>Webhook</th><th>Active</th><th>Last Rotated</th></tr></thead>
+        <thead><tr><th>Merchant</th><th>Key ID</th><th>Scopes</th><th>Webhook</th><th>Active</th><th>Last Rotated</th></tr></thead>
         <tbody>
             {% for cred in api_credentials %}
                 <tr>
                     <td>{{ cred.merchant.code }}</td>
                     <td>{{ cred.key_id }}</td>
+                    <td>{{ cred.scopes_csv }}</td>
                     <td>{{ cred.webhook_url|default:"-" }}</td>
                     <td>{% if cred.is_active %}Y{% else %}N{% endif %}</td>
                     <td>{% if cred.last_rotated_at %}{{ cred.last_rotated_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</td>
                 </tr>
             {% empty %}
-                <tr><td colspan="5" class="text-muted" style="text-align:center;">No API credentials yet.</td></tr>
+                <tr><td colspan="6" class="text-muted" style="text-align:center;">No API credentials yet.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -489,6 +494,294 @@
             {% endfor %}
         </tbody>
     </table>
+</div>
+
+<div class="card">
+    <h3>Chargeback Operations</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="chargeback_create" />
+        <div class="form-group"><label>Case</label><select name="case_id" required>{% for item in cases %}<option value="{{ item.id }}">{{ item.case_no }} ({{ item.case_type }})</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount" required /></div>
+        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Reason Code</label><input type="text" name="reason_code" placeholder="e.g. 10.4" /></div>
+        <div class="form-group"><label>Network Reference</label><input type="text" name="network_reference" /></div>
+        <div class="form-group"><label>Due At (YYYY-MM-DDTHH:MM:SS)</label><input type="text" name="due_at" /></div>
+        <div class="form-group"><label>Source Cashflow Event ID (optional)</label><input type="number" min="1" name="source_cashflow_event_id" /></div>
+        <button class="btn btn-primary" type="submit">Create Chargeback</button>
+    </form>
+    <table>
+        <thead><tr><th>No</th><th>Case</th><th>Merchant</th><th>Amount</th><th>Reason</th><th>Status</th><th>Assigned</th><th>Action</th></tr></thead>
+        <tbody>
+            {% for cb in chargebacks %}
+                <tr>
+                    <td>{{ cb.chargeback_no }}</td>
+                    <td>{{ cb.case.case_no }}</td>
+                    <td>{{ cb.merchant.code }}</td>
+                    <td>{{ cb.amount }} {{ cb.currency }}</td>
+                    <td>{{ cb.reason_code|default:"-" }}</td>
+                    <td>{{ cb.status }}</td>
+                    <td>{% if cb.assigned_to %}{{ cb.assigned_to.username }}{% else %}-{% endif %}</td>
+                    <td>
+                        <form method="post" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_type" value="chargeback_update" />
+                            <input type="hidden" name="chargeback_id" value="{{ cb.id }}" />
+                            <select name="status">
+                                <option value="open"{% if cb.status == "open" %} selected{% endif %}>Open</option>
+                                <option value="represented"{% if cb.status == "represented" %} selected{% endif %}>Represented</option>
+                                <option value="pre_arbitration"{% if cb.status == "pre_arbitration" %} selected{% endif %}>Pre-Arbitration</option>
+                                <option value="won"{% if cb.status == "won" %} selected{% endif %}>Won</option>
+                                <option value="lost"{% if cb.status == "lost" %} selected{% endif %}>Lost</option>
+                                <option value="closed"{% if cb.status == "closed" %} selected{% endif %}>Closed</option>
+                            </select>
+                            <select name="assigned_to"><option value="">-- keep --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select>
+                            <button class="btn btn-outline" type="submit">Update</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="8" class="text-muted" style="text-align:center;">No chargebacks yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="chargeback_evidence_add" />
+        <div class="form-group"><label>Chargeback</label><select name="chargeback_id" required>{% for cb in chargebacks %}<option value="{{ cb.id }}">{{ cb.chargeback_no }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Document Type</label><input type="text" name="document_type" value="receipt" /></div>
+        <div class="form-group"><label>Document URL</label><input type="url" name="document_url" required /></div>
+        <div class="form-group"><label>Note</label><input type="text" name="note" /></div>
+        <button class="btn btn-primary" type="submit">Upload Evidence</button>
+    </form>
+    <table>
+        <thead><tr><th>Time</th><th>Chargeback</th><th>Type</th><th>URL</th><th>By</th></tr></thead>
+        <tbody>
+            {% for ev in chargeback_evidences %}
+                <tr>
+                    <td>{{ ev.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ ev.chargeback.chargeback_no }}</td>
+                    <td>{{ ev.document_type }}</td>
+                    <td>{{ ev.document_url }}</td>
+                    <td>{{ ev.uploaded_by.username }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="5" class="text-muted" style="text-align:center;">No chargeback evidence yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Ledger Hardening Controls</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="accounting_period_close_upsert" />
+        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Period Start</label><input type="date" name="period_start" required /></div>
+        <div class="form-group"><label>Period End</label><input type="date" name="period_end" required /></div>
+        <div class="form-group"><label>Action</label><select name="close_action"><option value="close">Close</option><option value="reopen">Reopen</option></select></div>
+        <button class="btn btn-primary" type="submit">Apply Period Action</button>
+    </form>
+    <table>
+        <thead><tr><th>Period</th><th>Currency</th><th>Closed</th><th>Closed By</th><th>Closed At</th></tr></thead>
+        <tbody>
+            {% for p in accounting_periods %}
+                <tr>
+                    <td>{{ p.period_start }} to {{ p.period_end }}</td>
+                    <td>{{ p.currency }}</td>
+                    <td>{% if p.is_closed %}Y{% else %}N{% endif %}</td>
+                    <td>{% if p.closed_by %}{{ p.closed_by.username }}{% else %}-{% endif %}</td>
+                    <td>{% if p.closed_at %}{{ p.closed_at|date:"Y-m-d H:i" }}{% else %}-{% endif %}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="5" class="text-muted" style="text-align:center;">No accounting periods configured.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="journal_backdate_request" />
+        <div class="form-group"><label>Journal Entry</label><select name="entry_id">{% for je in journal_entries %}<option value="{{ je.id }}">{{ je.entry_no }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Requested Date</label><input type="date" name="requested_date" required /></div>
+        <div class="form-group"><label>Reason</label><input type="text" name="reason" /></div>
+        <button class="btn btn-primary" type="submit">Request Backdate Approval</button>
+    </form>
+    <table>
+        <thead><tr><th>Entry</th><th>Date</th><th>Status</th><th>Maker</th><th>Checker</th><th>Action</th></tr></thead>
+        <tbody>
+            {% for ba in backdate_approvals %}
+                <tr>
+                    <td>{{ ba.entry.entry_no }}</td>
+                    <td>{{ ba.requested_date }}</td>
+                    <td>{{ ba.status }}</td>
+                    <td>{{ ba.maker.username }}</td>
+                    <td>{% if ba.checker %}{{ ba.checker.username }}{% else %}-{% endif %}</td>
+                    <td>
+                        {% if ba.status == "pending" %}
+                            <form method="post" class="flex gap-2">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="journal_backdate_decision" />
+                                <input type="hidden" name="approval_id" value="{{ ba.id }}" />
+                                <select name="decision"><option value="approve">Approve</option><option value="reject">Reject</option></select>
+                                <input type="text" name="checker_note" placeholder="Checker note" />
+                                <button class="btn btn-outline" type="submit">Submit</button>
+                            </form>
+                        {% else %}
+                            {{ ba.checker_note|default:"-" }}
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" class="text-muted" style="text-align:center;">No backdate approvals yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Risk / AML Operations</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="sanction_screening_run" />
+        <div class="form-group"><label>User</label><select name="user_id" required>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Provider</label><input type="text" name="provider" value="internal" /></div>
+        <div class="form-group"><label>Reference</label><input type="text" name="reference" /></div>
+        <div class="form-group"><label>Score (0-1)</label><input type="number" step="0.0001" min="0" max="1" name="score" value="0.1000" /></div>
+        <div class="form-group"><label>Note</label><input type="text" name="note" /></div>
+        <button class="btn btn-primary" type="submit">Run Screening</button>
+    </form>
+    <table>
+        <thead><tr><th>Time</th><th>User</th><th>Provider</th><th>Score</th><th>Status</th><th>Ref</th></tr></thead>
+        <tbody>
+            {% for sr in sanction_screenings %}
+                <tr>
+                    <td>{{ sr.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ sr.user.username }}</td>
+                    <td>{{ sr.provider }}</td>
+                    <td>{{ sr.score }}</td>
+                    <td>{{ sr.status }}</td>
+                    <td>{{ sr.reference|default:"-" }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" class="text-muted" style="text-align:center;">No sanction screenings yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <table>
+        <thead><tr><th>ID</th><th>Type</th><th>Severity</th><th>Status</th><th>User</th><th>Merchant</th><th>Case</th><th>Action</th></tr></thead>
+        <tbody>
+            {% for al in monitoring_alerts %}
+                <tr>
+                    <td>#{{ al.id }}</td>
+                    <td>{{ al.alert_type }}</td>
+                    <td>{{ al.severity }}</td>
+                    <td>{{ al.status }}</td>
+                    <td>{% if al.user %}{{ al.user.username }}{% else %}-{% endif %}</td>
+                    <td>{% if al.merchant %}{{ al.merchant.code }}{% else %}-{% endif %}</td>
+                    <td>{% if al.case %}{{ al.case.case_no }}{% else %}-{% endif %}</td>
+                    <td>
+                        <form method="post" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_type" value="monitoring_alert_update" />
+                            <input type="hidden" name="alert_id" value="{{ al.id }}" />
+                            <select name="status">
+                                <option value="open"{% if al.status == "open" %} selected{% endif %}>Open</option>
+                                <option value="in_review"{% if al.status == "in_review" %} selected{% endif %}>In Review</option>
+                                <option value="closed"{% if al.status == "closed" %} selected{% endif %}>Closed</option>
+                            </select>
+                            <select name="assigned_to"><option value="">-- keep --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select>
+                            <input type="text" name="note" placeholder="Analyst note" />
+                            <button class="btn btn-outline" type="submit">Update</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="8" class="text-muted" style="text-align:center;">No monitoring alerts yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Webhook Signature & Replay Dashboard</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="merchant_webhook_validate" />
+        <div class="form-group"><label>Credential</label><select name="credential_id" required>{% for cred in api_credentials %}<option value="{{ cred.id }}">{{ cred.merchant.code }} - {{ cred.key_id }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Event Type</label><input type="text" name="event_type" value="payment.status" /></div>
+        <div class="form-group"><label>Nonce</label><input type="text" name="nonce" required /></div>
+        <div class="form-group"><label>Payload</label><textarea name="payload" rows="3" required></textarea></div>
+        <div class="form-group"><label>Signature</label><input type="text" name="signature" required /></div>
+        <button class="btn btn-primary" type="submit">Validate Webhook</button>
+    </form>
+    <table>
+        <thead><tr><th>Time</th><th>Merchant</th><th>Nonce</th><th>Sig Valid</th><th>Replay</th><th>Status</th><th>Code</th></tr></thead>
+        <tbody>
+            {% for we in webhook_events %}
+                <tr>
+                    <td>{{ we.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ we.credential.merchant.code }}</td>
+                    <td>{{ we.nonce }}</td>
+                    <td>{% if we.signature_valid %}Y{% else %}N{% endif %}</td>
+                    <td>{% if we.replay_detected %}Y{% else %}N{% endif %}</td>
+                    <td>{{ we.status }}</td>
+                    <td>{{ we.response_code }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="7" class="text-muted" style="text-align:center;">No webhook events yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Access Review (SoD) & Compliance Ops</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="access_review_run" />
+        <button class="btn btn-primary" type="submit">Run SoD Access Review</button>
+    </form>
+    <table>
+        <thead><tr><th>Review</th><th>User</th><th>Issue</th><th>Status</th><th>Reviewer</th><th>Action</th></tr></thead>
+        <tbody>
+            {% for ar in access_reviews %}
+                <tr>
+                    <td>{{ ar.review_no }}</td>
+                    <td>{{ ar.user.username }}</td>
+                    <td>{{ ar.issue_type }}</td>
+                    <td>{{ ar.status }}</td>
+                    <td>{% if ar.reviewer %}{{ ar.reviewer.username }}{% else %}-{% endif %}</td>
+                    <td>
+                        <form method="post" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_type" value="access_review_update" />
+                            <input type="hidden" name="review_id" value="{{ ar.id }}" />
+                            <select name="status">
+                                <option value="open"{% if ar.status == "open" %} selected{% endif %}>Open</option>
+                                <option value="resolved"{% if ar.status == "resolved" %} selected{% endif %}>Resolved</option>
+                            </select>
+                            <button class="btn btn-outline" type="submit">Update</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" class="text-muted" style="text-align:center;">No access reviews yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="data_retention_purge" />
+        <div class="form-group"><label>Retention days</label><input type="number" name="days" min="1" value="365" /></div>
+        <div class="form-group"><label><input type="checkbox" name="dry_run" checked /> Dry run</label></div>
+        <button class="btn btn-primary" type="submit">Run Data Retention</button>
+    </form>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="release_readiness_check" />
+        <button class="btn btn-outline" type="submit">Run Release Readiness Snapshot</button>
+    </form>
 </div>
 
 <div class="card">

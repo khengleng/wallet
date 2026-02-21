@@ -36,12 +36,17 @@ from .keycloak_auth import (
 )
 from .models import (
     ApprovalRequest,
+    AccessReviewRecord,
+    AccountingPeriodClose,
     BackofficeAuditLog,
     ChartOfAccount,
+    ChargebackCase,
+    ChargebackEvidence,
     CustomerCIF,
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
+    JournalBackdateApproval,
     JournalLine,
     LoginLockout,
     Merchant,
@@ -53,14 +58,17 @@ from .models import (
     MerchantLoyaltyProgram,
     MerchantRiskProfile,
     MerchantSettlementRecord,
+    MerchantWebhookEvent,
     MerchantWalletCapability,
     OperationCase,
     OperationCaseNote,
     ReconciliationBreak,
     ReconciliationRun,
+    SanctionScreeningRecord,
     SettlementPayout,
     TreasuryAccount,
     TreasuryTransferRequest,
+    TransactionMonitoringAlert,
     User,
     FLOW_B2B,
     FLOW_B2C,
@@ -573,6 +581,24 @@ def metrics(request):
         "# HELP wallet_web_fx_rates_active Active FX rates.",
         "# TYPE wallet_web_fx_rates_active gauge",
         f"wallet_web_fx_rates_active {FxRate.objects.filter(is_active=True).count()}",
+        "# HELP wallet_ops_settlements_pending_count Pending settlement drafts.",
+        "# TYPE wallet_ops_settlements_pending_count gauge",
+        f"wallet_ops_settlements_pending_count {MerchantSettlementRecord.objects.filter(status=MerchantSettlementRecord.STATUS_DRAFT).count()}",
+        "# HELP wallet_ops_payouts_failed_count Failed settlement payouts.",
+        "# TYPE wallet_ops_payouts_failed_count gauge",
+        f"wallet_ops_payouts_failed_count {SettlementPayout.objects.filter(status=SettlementPayout.STATUS_FAILED).count()}",
+        "# HELP wallet_ops_refunds_pending_count Pending dispute refund requests.",
+        "# TYPE wallet_ops_refunds_pending_count gauge",
+        f"wallet_ops_refunds_pending_count {DisputeRefundRequest.objects.filter(status=DisputeRefundRequest.STATUS_PENDING).count()}",
+        "# HELP wallet_ops_recon_breaks_open_count Open reconciliation breaks.",
+        "# TYPE wallet_ops_recon_breaks_open_count gauge",
+        f"wallet_ops_recon_breaks_open_count {ReconciliationBreak.objects.filter(status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW]).count()}",
+        "# HELP wallet_ops_alerts_open_high_count Open high severity monitoring alerts.",
+        "# TYPE wallet_ops_alerts_open_high_count gauge",
+        f"wallet_ops_alerts_open_high_count {TransactionMonitoringAlert.objects.filter(status=TransactionMonitoringAlert.STATUS_OPEN, severity='high').count()}",
+        "# HELP wallet_ops_cases_sla_breach_count Open operation cases older than SLA threshold.",
+        "# TYPE wallet_ops_cases_sla_breach_count gauge",
+        f"wallet_ops_cases_sla_breach_count {OperationCase.objects.filter(status__in=[OperationCase.STATUS_OPEN, OperationCase.STATUS_IN_PROGRESS, OperationCase.STATUS_ESCALATED], created_at__lt=timezone.now()-timedelta(hours=int(getattr(settings, 'OPS_CASE_SLA_HOURS', 24)))).count()}",
     ]
     return HttpResponse("\n".join(lines) + "\n", content_type="text/plain; version=0.0.4")
 
@@ -947,6 +973,14 @@ def _new_recon_no() -> str:
     return f"RECON-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
 
 
+def _new_chargeback_no() -> str:
+    return f"CB-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def _new_access_review_no() -> str:
+    return f"AR-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
 def _hash_api_secret(secret: str) -> str:
     secret_key = (settings.SECRET_KEY or "wallet-secret").encode("utf-8")
     return hmac.new(secret_key, secret.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -1022,6 +1056,24 @@ def _parse_iso_date(raw: str | None, *, default: date) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise ValidationError("Invalid date format. Use YYYY-MM-DD.") from exc
+
+
+def _mask_email(value: str) -> str:
+    if "@" not in value:
+        return value
+    local, domain = value.split("@", 1)
+    if len(local) <= 2:
+        local_masked = "*" * len(local)
+    else:
+        local_masked = f"{local[0]}{'*' * (len(local) - 2)}{local[-1]}"
+    return f"{local_masked}@{domain}"
+
+
+def _mask_phone(value: str) -> str:
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) < 4:
+        return "*" * len(digits)
+    return f"{'*' * (len(digits) - 4)}{digits[-4:]}"
 
 
 def _merchant_loyalty_wallet_slug(merchant_code: str) -> str:
@@ -1493,11 +1545,13 @@ def operations_center(request):
                 )
                 merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
                 webhook_url = (request.POST.get("webhook_url") or "").strip()
+                scopes_csv = (request.POST.get("scopes_csv") or "wallet:read,payout:read,webhook:write").strip()
                 credential, created = MerchantApiCredential.objects.get_or_create(
                     merchant=merchant,
                     defaults={
                         "key_id": f"mk_{secrets.token_hex(8)}",
                         "secret_hash": "",
+                        "scopes_csv": scopes_csv,
                         "created_by": request.user,
                         "updated_by": request.user,
                         "webhook_url": webhook_url,
@@ -1506,6 +1560,7 @@ def operations_center(request):
                 raw_secret = secrets.token_urlsafe(32)
                 credential.secret_hash = _hash_api_secret(raw_secret)
                 credential.key_id = f"mk_{secrets.token_hex(8)}"
+                credential.scopes_csv = scopes_csv
                 credential.webhook_url = webhook_url
                 credential.is_active = request.POST.get("is_active") == "on"
                 credential.last_rotated_at = timezone.now()
@@ -1986,6 +2041,407 @@ def operations_center(request):
                 messages.success(request, f"Reconciliation break #{recon_break.id} updated.")
                 return redirect("operations_center")
 
+            if form_type == "chargeback_create":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "risk", "customer_service"),
+                )
+                case = OperationCase.objects.select_related("merchant", "customer").get(
+                    id=request.POST.get("case_id")
+                )
+                if case.merchant is None:
+                    raise ValidationError("Case must be linked to a merchant for chargeback.")
+                amount = _parse_amount(request.POST.get("amount"))
+                currency = _normalize_currency(request.POST.get("currency"))
+                due_at = None
+                due_raw = (request.POST.get("due_at") or "").strip()
+                if due_raw:
+                    due_at = timezone.make_aware(datetime.fromisoformat(due_raw))
+                source_event = MerchantCashflowEvent.objects.filter(
+                    id=request.POST.get("source_cashflow_event_id")
+                ).first()
+                chargeback = ChargebackCase.objects.create(
+                    chargeback_no=_new_chargeback_no(),
+                    case=case,
+                    merchant=case.merchant,
+                    customer=case.customer,
+                    source_cashflow_event=source_event,
+                    reason_code=(request.POST.get("reason_code") or "").strip(),
+                    amount=amount,
+                    currency=currency,
+                    network_reference=(request.POST.get("network_reference") or "").strip(),
+                    due_at=due_at,
+                    created_by=request.user,
+                    assigned_to=request.user,
+                )
+                case.case_type = OperationCase.TYPE_DISPUTE
+                case.status = OperationCase.STATUS_ESCALATED
+                case.save(update_fields=["case_type", "status", "updated_at"])
+                _audit(
+                    request,
+                    "chargeback.create",
+                    target_type="ChargebackCase",
+                    target_id=str(chargeback.id),
+                    metadata={"chargeback_no": chargeback.chargeback_no, "case_no": case.case_no},
+                )
+                messages.success(request, f"Chargeback {chargeback.chargeback_no} created.")
+                return redirect("operations_center")
+
+            if form_type == "chargeback_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "risk"),
+                )
+                chargeback = ChargebackCase.objects.get(id=request.POST.get("chargeback_id"))
+                status = (request.POST.get("status") or "").strip()
+                if status not in {
+                    ChargebackCase.STATUS_OPEN,
+                    ChargebackCase.STATUS_REPRESENTED,
+                    ChargebackCase.STATUS_PRE_ARBITRATION,
+                    ChargebackCase.STATUS_WON,
+                    ChargebackCase.STATUS_LOST,
+                    ChargebackCase.STATUS_CLOSED,
+                }:
+                    raise ValidationError("Invalid chargeback status.")
+                chargeback.status = status
+                assigned_to_id = request.POST.get("assigned_to")
+                chargeback.assigned_to = (
+                    User.objects.filter(id=assigned_to_id).first() if assigned_to_id else chargeback.assigned_to
+                )
+                chargeback.save(update_fields=["status", "assigned_to", "updated_at"])
+                _audit(
+                    request,
+                    "chargeback.update",
+                    target_type="ChargebackCase",
+                    target_id=str(chargeback.id),
+                    metadata={"status": status},
+                )
+                messages.success(request, f"Chargeback {chargeback.chargeback_no} updated.")
+                return redirect("operations_center")
+
+            if form_type == "chargeback_evidence_add":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "risk", "customer_service"),
+                )
+                chargeback = ChargebackCase.objects.get(id=request.POST.get("chargeback_id"))
+                doc_url = (request.POST.get("document_url") or "").strip()
+                if not doc_url:
+                    raise ValidationError("Document URL is required.")
+                ChargebackEvidence.objects.create(
+                    chargeback=chargeback,
+                    document_type=(request.POST.get("document_type") or "receipt").strip(),
+                    document_url=doc_url,
+                    note=(request.POST.get("note") or "").strip(),
+                    uploaded_by=request.user,
+                )
+                messages.success(request, f"Evidence uploaded for {chargeback.chargeback_no}.")
+                return redirect("operations_center")
+
+            if form_type == "accounting_period_close_upsert":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "risk"),
+                )
+                period_start = _parse_iso_date(
+                    request.POST.get("period_start"),
+                    default=timezone.localdate().replace(day=1),
+                )
+                period_end = _parse_iso_date(
+                    request.POST.get("period_end"),
+                    default=timezone.localdate(),
+                )
+                if period_start > period_end:
+                    raise ValidationError("Period start cannot be after period end.")
+                currency = _normalize_currency(request.POST.get("currency"))
+                period, _created = AccountingPeriodClose.objects.get_or_create(
+                    period_start=period_start,
+                    period_end=period_end,
+                    currency=currency,
+                    defaults={"created_by": request.user},
+                )
+                close_action = (request.POST.get("close_action") or "close").strip().lower()
+                if close_action == "close":
+                    period.is_closed = True
+                    period.closed_by = request.user
+                    period.closed_at = timezone.now()
+                elif close_action == "reopen":
+                    period.is_closed = False
+                    period.closed_by = None
+                    period.closed_at = None
+                else:
+                    raise ValidationError("Invalid period action.")
+                period.save(update_fields=["is_closed", "closed_by", "closed_at", "updated_at"])
+                messages.success(request, f"Accounting period updated: {period}.")
+                return redirect("operations_center")
+
+            if form_type == "journal_backdate_request":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "operation"),
+                )
+                entry = JournalEntry.objects.get(id=request.POST.get("entry_id"))
+                requested_date = _parse_iso_date(
+                    request.POST.get("requested_date"),
+                    default=entry.created_at.date(),
+                )
+                approval, _created = JournalBackdateApproval.objects.get_or_create(
+                    entry=entry,
+                    defaults={
+                        "requested_date": requested_date,
+                        "reason": (request.POST.get("reason") or "").strip(),
+                        "maker": request.user,
+                    },
+                )
+                if approval.status != JournalBackdateApproval.STATUS_PENDING:
+                    raise ValidationError("Backdate approval already decided.")
+                approval.requested_date = requested_date
+                approval.reason = (request.POST.get("reason") or approval.reason).strip()
+                approval.save(update_fields=["requested_date", "reason"])
+                messages.success(request, f"Backdate request submitted for {entry.entry_no}.")
+                return redirect("operations_center")
+
+            if form_type == "journal_backdate_decision":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk"),
+                )
+                approval = JournalBackdateApproval.objects.select_related("entry").get(
+                    id=request.POST.get("approval_id")
+                )
+                if approval.status != JournalBackdateApproval.STATUS_PENDING:
+                    raise ValidationError("Backdate request already decided.")
+                decision = (request.POST.get("decision") or "").strip().lower()
+                if decision not in {"approve", "reject"}:
+                    raise ValidationError("Invalid backdate decision.")
+                approval.status = (
+                    JournalBackdateApproval.STATUS_APPROVED
+                    if decision == "approve"
+                    else JournalBackdateApproval.STATUS_REJECTED
+                )
+                approval.checker = request.user
+                approval.checker_note = (request.POST.get("checker_note") or "").strip()
+                approval.decided_at = timezone.now()
+                approval.save(
+                    update_fields=["status", "checker", "checker_note", "decided_at"]
+                )
+                messages.success(
+                    request, f"Backdate request for {approval.entry.entry_no} {approval.status}."
+                )
+                return redirect("operations_center")
+
+            if form_type == "sanction_screening_run":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk", "operation"),
+                )
+                target_user = User.objects.get(id=request.POST.get("user_id"))
+                score = Decimal(request.POST.get("score") or "0")
+                if score >= Decimal("0.90"):
+                    status = SanctionScreeningRecord.STATUS_CONFIRMED_MATCH
+                elif score >= Decimal("0.60"):
+                    status = SanctionScreeningRecord.STATUS_POTENTIAL_MATCH
+                else:
+                    status = SanctionScreeningRecord.STATUS_CLEAR
+                screening = SanctionScreeningRecord.objects.create(
+                    user=target_user,
+                    provider=(request.POST.get("provider") or "internal").strip(),
+                    reference=(request.POST.get("reference") or "").strip(),
+                    score=score,
+                    status=status,
+                    details_json={
+                        "note": (request.POST.get("note") or "").strip(),
+                    },
+                    screened_by=request.user,
+                )
+                if status != SanctionScreeningRecord.STATUS_CLEAR:
+                    case = OperationCase.objects.create(
+                        case_no=_new_case_no(),
+                        case_type=OperationCase.TYPE_INCIDENT,
+                        priority=OperationCase.PRIORITY_HIGH,
+                        title=f"AML alert for {target_user.username}",
+                        description=f"Sanction screening status {status}.",
+                        customer=target_user,
+                        assigned_to=request.user,
+                        created_by=request.user,
+                    )
+                    TransactionMonitoringAlert.objects.create(
+                        alert_type="sanction_screening",
+                        severity="high",
+                        user=target_user,
+                        status=TransactionMonitoringAlert.STATUS_OPEN,
+                        note=f"Screening {status}",
+                        case=case,
+                        created_by=request.user,
+                        assigned_to=request.user,
+                    )
+                messages.success(request, f"Sanction screening recorded for {target_user.username}.")
+                return redirect("operations_center")
+
+            if form_type == "monitoring_alert_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk", "operation"),
+                )
+                alert = TransactionMonitoringAlert.objects.get(id=request.POST.get("alert_id"))
+                status = (request.POST.get("status") or "").strip().lower()
+                if status not in {
+                    TransactionMonitoringAlert.STATUS_OPEN,
+                    TransactionMonitoringAlert.STATUS_IN_REVIEW,
+                    TransactionMonitoringAlert.STATUS_CLOSED,
+                }:
+                    raise ValidationError("Invalid monitoring alert status.")
+                alert.status = status
+                alert.note = (request.POST.get("note") or alert.note).strip()
+                assigned_to_id = request.POST.get("assigned_to")
+                alert.assigned_to = (
+                    User.objects.filter(id=assigned_to_id).first() if assigned_to_id else alert.assigned_to
+                )
+                alert.save(update_fields=["status", "note", "assigned_to", "updated_at"])
+                messages.success(request, f"Monitoring alert #{alert.id} updated.")
+                return redirect("operations_center")
+
+            if form_type == "merchant_webhook_validate":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "finance", "risk"),
+                )
+                credential = MerchantApiCredential.objects.get(id=request.POST.get("credential_id"))
+                nonce = (request.POST.get("nonce") or "").strip()
+                payload = (request.POST.get("payload") or "").strip()
+                signature = (request.POST.get("signature") or "").strip()
+                if not nonce or not payload:
+                    raise ValidationError("Nonce and payload are required.")
+                payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+                replay_detected = MerchantWebhookEvent.objects.filter(
+                    credential=credential, nonce=nonce
+                ).exists()
+                expected_sig = hmac.new(
+                    credential.secret_hash.encode("utf-8"),
+                    f"{nonce}:{payload_hash}".encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                signature_valid = hmac.compare_digest(expected_sig, signature)
+                if replay_detected:
+                    event = MerchantWebhookEvent.objects.filter(
+                        credential=credential, nonce=nonce
+                    ).first()
+                else:
+                    event = MerchantWebhookEvent.objects.create(
+                        credential=credential,
+                        event_type=(request.POST.get("event_type") or "callback").strip(),
+                        nonce=nonce,
+                        payload_hash=payload_hash,
+                        signature=signature,
+                        signature_valid=signature_valid,
+                        replay_detected=False,
+                        status="accepted" if signature_valid else "rejected",
+                        response_code=200 if signature_valid else 409,
+                    )
+                messages.success(
+                    request,
+                    (
+                        f"Webhook event #{event.id} processed: "
+                        f"signature_valid={signature_valid}, replay_detected={replay_detected}"
+                    ),
+                )
+                return redirect("operations_center")
+
+            if form_type == "access_review_run":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk"),
+                )
+                total_flagged = 0
+                for user in User.objects.all():
+                    roles = set(user.role_names)
+                    if roles.intersection(set(MAKER_ROLES)) and roles.intersection(set(CHECKER_ROLES)):
+                        AccessReviewRecord.objects.create(
+                            review_no=_new_access_review_no(),
+                            user=user,
+                            issue_type="segregation_of_duty",
+                            details="User has both maker and checker roles.",
+                            status=AccessReviewRecord.STATUS_OPEN,
+                        )
+                        total_flagged += 1
+                messages.success(request, f"Access review completed. Flagged users: {total_flagged}.")
+                return redirect("operations_center")
+
+            if form_type == "access_review_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk"),
+                )
+                review = AccessReviewRecord.objects.get(id=request.POST.get("review_id"))
+                status = (request.POST.get("status") or "").strip().lower()
+                if status not in {AccessReviewRecord.STATUS_OPEN, AccessReviewRecord.STATUS_RESOLVED}:
+                    raise ValidationError("Invalid access review status.")
+                review.status = status
+                if status == AccessReviewRecord.STATUS_RESOLVED:
+                    review.reviewer = request.user
+                    review.resolved_at = timezone.now()
+                review.save(update_fields=["status", "reviewer", "resolved_at"])
+                messages.success(request, f"Access review {review.review_no} updated.")
+                return redirect("operations_center")
+
+            if form_type == "data_retention_purge":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk"),
+                )
+                days = int(request.POST.get("days") or 365)
+                dry_run = request.POST.get("dry_run") == "on"
+                cutoff = timezone.now() - timedelta(days=days)
+                analytics_qs = AnalyticsEvent.objects.filter(created_at__lt=cutoff)
+                lockout_qs = LoginLockout.objects.filter(updated_at__lt=cutoff)
+                audit_qs = BackofficeAuditLog.objects.filter(created_at__lt=cutoff)
+                counts = {
+                    "analytics": analytics_qs.count(),
+                    "lockouts": lockout_qs.count(),
+                    "audit_logs": audit_qs.count(),
+                }
+                if not dry_run:
+                    analytics_qs.delete()
+                    lockout_qs.delete()
+                    # Keep audit logs immutable by policy; do not delete, only report.
+                messages.success(
+                    request,
+                    (
+                        f"Retention {'dry-run' if dry_run else 'execute'}: "
+                        f"analytics={counts['analytics']}, lockouts={counts['lockouts']}, "
+                        f"audit_logs={counts['audit_logs']} (audit logs retained)."
+                    ),
+                )
+                return redirect("operations_center")
+
+            if form_type == "release_readiness_check":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "risk", "finance"),
+                )
+                pending_refunds = DisputeRefundRequest.objects.filter(
+                    status=DisputeRefundRequest.STATUS_PENDING
+                ).count()
+                failed_payouts = SettlementPayout.objects.filter(
+                    status=SettlementPayout.STATUS_FAILED
+                ).count()
+                open_recon_breaks = ReconciliationBreak.objects.filter(
+                    status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW]
+                ).count()
+                open_high_alerts = TransactionMonitoringAlert.objects.filter(
+                    status=TransactionMonitoringAlert.STATUS_OPEN,
+                    severity="high",
+                ).count()
+                messages.success(
+                    request,
+                    (
+                        "Release readiness snapshot: "
+                        f"pending_refunds={pending_refunds}, failed_payouts={failed_payouts}, "
+                        f"open_recon_breaks={open_recon_breaks}, open_high_alerts={open_high_alerts}."
+                    ),
+                )
+                return redirect("operations_center")
+
             if form_type == "case_create":
                 _require_role_or_perm(request.user, roles=operation_roles)
                 customer = User.objects.get(id=request.POST.get("case_customer_id"))
@@ -2279,7 +2735,7 @@ def operations_center(request):
                     else:
                         raise ValidationError("Unsupported flow type.")
 
-                    MerchantCashflowEvent.objects.create(
+                    created_event = MerchantCashflowEvent.objects.create(
                         merchant=merchant,
                         flow_type=flow_type,
                         amount=amount,
@@ -2293,6 +2749,34 @@ def operations_center(request):
                         note=note,
                         created_by=request.user,
                     )
+                    risk_profile = _merchant_risk_profile(merchant)
+                    if risk_profile.is_high_risk or (
+                        risk_profile.require_manual_review_above > Decimal("0")
+                        and amount >= risk_profile.require_manual_review_above
+                    ):
+                        case = OperationCase.objects.create(
+                            case_no=_new_case_no(),
+                            case_type=OperationCase.TYPE_INCIDENT,
+                            priority=OperationCase.PRIORITY_HIGH,
+                            title=f"Monitoring alert for {merchant.code}",
+                            description=f"Cashflow {flow_type.upper()} amount {amount} {currency}",
+                            customer=from_user or to_user or request.user,
+                            merchant=merchant,
+                            assigned_to=request.user,
+                            created_by=request.user,
+                        )
+                        TransactionMonitoringAlert.objects.create(
+                            alert_type="transaction_threshold",
+                            severity="high" if risk_profile.is_high_risk else "medium",
+                            user=from_user or to_user,
+                            merchant=merchant,
+                            cashflow_event=created_event,
+                            status=TransactionMonitoringAlert.STATUS_OPEN,
+                            note=f"Auto-created from cashflow event {created_event.id}",
+                            case=case,
+                            created_by=request.user,
+                            assigned_to=request.user,
+                        )
                 _audit(
                     request,
                     "merchant.cashflow.execute",
@@ -2365,6 +2849,30 @@ def operations_center(request):
     reconciliation_breaks = ReconciliationBreak.objects.select_related(
         "run", "merchant", "assigned_to", "resolved_by"
     ).order_by("-created_at")[:100]
+    chargebacks = ChargebackCase.objects.select_related(
+        "case", "merchant", "customer", "assigned_to"
+    ).order_by("-created_at")[:100]
+    chargeback_evidences = ChargebackEvidence.objects.select_related(
+        "chargeback", "uploaded_by"
+    ).order_by("-created_at")[:100]
+    accounting_periods = AccountingPeriodClose.objects.select_related(
+        "created_by", "closed_by"
+    ).order_by("-period_start")[:60]
+    backdate_approvals = JournalBackdateApproval.objects.select_related(
+        "entry", "maker", "checker"
+    ).order_by("-created_at")[:100]
+    sanction_screenings = SanctionScreeningRecord.objects.select_related(
+        "user", "screened_by"
+    ).order_by("-created_at")[:100]
+    monitoring_alerts = TransactionMonitoringAlert.objects.select_related(
+        "user", "merchant", "case", "assigned_to"
+    ).order_by("-created_at")[:100]
+    webhook_events = MerchantWebhookEvent.objects.select_related(
+        "credential", "credential__merchant"
+    ).order_by("-created_at")[:100]
+    access_reviews = AccessReviewRecord.objects.select_related(
+        "user", "reviewer"
+    ).order_by("-created_at")[:100]
     return render(
         request,
         "wallets_demo/operations_center.html",
@@ -2382,6 +2890,15 @@ def operations_center(request):
             "payouts": payouts,
             "reconciliation_runs": reconciliation_runs,
             "reconciliation_breaks": reconciliation_breaks,
+            "chargebacks": chargebacks,
+            "chargeback_evidences": chargeback_evidences,
+            "accounting_periods": accounting_periods,
+            "backdate_approvals": backdate_approvals,
+            "sanction_screenings": sanction_screenings,
+            "monitoring_alerts": monitoring_alerts,
+            "webhook_events": webhook_events,
+            "access_reviews": access_reviews,
+            "journal_entries": JournalEntry.objects.order_by("-created_at")[:200],
             "users": User.objects.order_by("username")[:300],
             "supported_currencies": _supported_currencies(),
             "flow_choices": FLOW_CHOICES,
@@ -2389,6 +2906,70 @@ def operations_center(request):
             "case_priority_choices": OperationCase.PRIORITY_CHOICES,
             "case_status_choices": OperationCase.STATUS_CHOICES,
             "event_type_choices": MerchantLoyaltyEvent.TYPE_CHOICES,
+        },
+    )
+
+
+@login_required
+def merchant_portal(request):
+    can_manage_all = user_has_any_role(
+        request.user, ("super_admin", "admin", "operation", "sales", "finance")
+    )
+    if can_manage_all:
+        merchants_qs = Merchant.objects.select_related("owner").order_by("code")
+    else:
+        merchants_qs = Merchant.objects.select_related("owner").filter(owner=request.user).order_by("code")
+        if not merchants_qs.exists():
+            raise PermissionDenied("You do not have access to merchant portal.")
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "").strip().lower()
+        try:
+            merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+            if not can_manage_all and merchant.owner_id != request.user.id:
+                raise PermissionDenied("You cannot manage this merchant.")
+
+            if form_type == "merchant_portal_update_webhook":
+                credential = MerchantApiCredential.objects.filter(merchant=merchant).first()
+                if credential is None:
+                    raise ValidationError("Merchant credential is not initialized.")
+                credential.webhook_url = (request.POST.get("webhook_url") or "").strip()
+                credential.scopes_csv = (
+                    request.POST.get("scopes_csv") or credential.scopes_csv
+                ).strip()
+                credential.save(update_fields=["webhook_url", "scopes_csv", "updated_at"])
+                messages.success(request, f"Webhook/scopes updated for {merchant.code}.")
+                return redirect("merchant_portal")
+        except Exception as exc:
+            messages.error(request, f"Merchant portal operation failed: {exc}")
+
+    merchants = list(merchants_qs[:200])
+    settlement_map = {
+        m.id: MerchantSettlementRecord.objects.filter(merchant=m).order_by("-created_at")[:10]
+        for m in merchants
+    }
+    payout_map = {
+        m.id: SettlementPayout.objects.filter(settlement__merchant=m).order_by("-created_at")[:10]
+        for m in merchants
+    }
+    credential_map = {
+        c.merchant_id: c
+        for c in MerchantApiCredential.objects.filter(merchant_id__in=[m.id for m in merchants])
+    }
+    webhook_map = {
+        m.id: MerchantWebhookEvent.objects.filter(credential__merchant=m).order_by("-created_at")[:10]
+        for m in merchants
+    }
+    return render(
+        request,
+        "wallets_demo/merchant_portal.html",
+        {
+            "merchants": merchants,
+            "settlement_map": settlement_map,
+            "payout_map": payout_map,
+            "credential_map": credential_map,
+            "webhook_map": webhook_map,
+            "can_manage_all_merchants": can_manage_all,
         },
     )
 

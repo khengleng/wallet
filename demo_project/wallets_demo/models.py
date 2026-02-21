@@ -436,6 +436,22 @@ class JournalEntry(models.Model):
             raise ValidationError("Journal entry is not balanced.")
         if self.lines.exclude(account__currency=self.currency).exists():
             raise ValidationError("All journal lines must match entry currency.")
+        entry_date = self.created_at.date()
+        closed_period_exists = AccountingPeriodClose.objects.filter(
+            currency=self.currency,
+            is_closed=True,
+            period_start__lte=entry_date,
+            period_end__gte=entry_date,
+        ).exists()
+        if closed_period_exists:
+            raise ValidationError("Accounting period is closed for this entry date.")
+        if entry_date < timezone.localdate():
+            approval = JournalBackdateApproval.objects.filter(
+                entry=self,
+                status=JournalBackdateApproval.STATUS_APPROVED,
+            ).first()
+            if approval is None:
+                raise ValidationError("Backdated entries require approved backdate approval.")
 
         self.status = self.STATUS_POSTED
         self.posted_by = actor
@@ -937,6 +953,7 @@ class MerchantApiCredential(models.Model):
     )
     key_id = models.CharField(max_length=64, unique=True)
     secret_hash = models.CharField(max_length=128)
+    scopes_csv = models.CharField(max_length=255, blank=True, default="wallet:read,payout:read,webhook:write")
     webhook_url = models.URLField(blank=True, default="")
     is_active = models.BooleanField(default=True)
     last_rotated_at = models.DateTimeField(null=True, blank=True)
@@ -1200,6 +1217,302 @@ class ReconciliationBreak(models.Model):
 
     def __str__(self):
         return f"{self.run.run_no}:{self.status}:{self.issue_type}"
+
+
+class ChargebackCase(models.Model):
+    STATUS_OPEN = "open"
+    STATUS_REPRESENTED = "represented"
+    STATUS_PRE_ARBITRATION = "pre_arbitration"
+    STATUS_WON = "won"
+    STATUS_LOST = "lost"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_REPRESENTED, "Represented"),
+        (STATUS_PRE_ARBITRATION, "Pre-Arbitration"),
+        (STATUS_WON, "Won"),
+        (STATUS_LOST, "Lost"),
+        (STATUS_CLOSED, "Closed"),
+    )
+
+    chargeback_no = models.CharField(max_length=40, unique=True)
+    case = models.ForeignKey(
+        "OperationCase", on_delete=models.PROTECT, related_name="chargebacks"
+    )
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.PROTECT, related_name="chargebacks"
+    )
+    customer = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="chargebacks"
+    )
+    source_cashflow_event = models.ForeignKey(
+        MerchantCashflowEvent,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="chargebacks",
+    )
+    reason_code = models.CharField(max_length=32, blank=True, default="")
+    amount = models.DecimalField(max_digits=20, decimal_places=2)
+    currency = models.CharField(max_length=12, default="USD")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    network_reference = models.CharField(max_length=64, blank=True, default="")
+    due_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_chargeback_cases"
+    )
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="assigned_chargeback_cases",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.chargeback_no}:{self.status}"
+
+
+class ChargebackEvidence(models.Model):
+    chargeback = models.ForeignKey(
+        ChargebackCase, on_delete=models.CASCADE, related_name="evidences"
+    )
+    document_type = models.CharField(max_length=64, default="receipt")
+    document_url = models.URLField()
+    note = models.CharField(max_length=255, blank=True, default="")
+    uploaded_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="uploaded_chargeback_evidences"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.chargeback.chargeback_no}:{self.document_type}"
+
+
+class AccountingPeriodClose(models.Model):
+    period_start = models.DateField()
+    period_end = models.DateField()
+    currency = models.CharField(max_length=12, default="USD")
+    is_closed = models.BooleanField(default=False, db_index=True)
+    closed_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="closed_accounting_periods",
+    )
+    closed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_accounting_periods"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-period_start", "-id")
+        unique_together = ("period_start", "period_end", "currency")
+
+    def __str__(self):
+        return f"{self.period_start}:{self.period_end}:{self.currency}:{self.is_closed}"
+
+
+class JournalBackdateApproval(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    )
+
+    entry = models.OneToOneField(
+        JournalEntry, on_delete=models.CASCADE, related_name="backdate_approval"
+    )
+    requested_date = models.DateField()
+    reason = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    maker = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="made_backdate_approvals"
+    )
+    checker = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="checked_backdate_approvals",
+    )
+    checker_note = models.CharField(max_length=255, blank=True, default="")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.entry.entry_no}:{self.status}"
+
+
+class SanctionScreeningRecord(models.Model):
+    STATUS_CLEAR = "clear"
+    STATUS_POTENTIAL_MATCH = "potential_match"
+    STATUS_CONFIRMED_MATCH = "confirmed_match"
+    STATUS_CHOICES = (
+        (STATUS_CLEAR, "Clear"),
+        (STATUS_POTENTIAL_MATCH, "Potential Match"),
+        (STATUS_CONFIRMED_MATCH, "Confirmed Match"),
+    )
+
+    user = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="sanction_screenings"
+    )
+    provider = models.CharField(max_length=64, default="internal")
+    reference = models.CharField(max_length=64, blank=True, default="")
+    score = models.DecimalField(max_digits=8, decimal_places=4, default=Decimal("0"))
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_CLEAR, db_index=True)
+    details_json = models.JSONField(default=dict, blank=True)
+    screened_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="performed_sanction_screenings",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.user.username}:{self.status}:{self.provider}"
+
+
+class TransactionMonitoringAlert(models.Model):
+    STATUS_OPEN = "open"
+    STATUS_IN_REVIEW = "in_review"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_REVIEW, "In Review"),
+        (STATUS_CLOSED, "Closed"),
+    )
+
+    alert_type = models.CharField(max_length=64, default="velocity")
+    severity = models.CharField(max_length=16, default="medium")
+    user = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="monitoring_alerts",
+    )
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="monitoring_alerts",
+    )
+    cashflow_event = models.ForeignKey(
+        MerchantCashflowEvent,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="monitoring_alerts",
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    note = models.CharField(max_length=255, blank=True, default="")
+    case = models.ForeignKey(
+        "OperationCase",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="monitoring_alerts",
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="created_monitoring_alerts",
+    )
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="assigned_monitoring_alerts",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.alert_type}:{self.severity}:{self.status}"
+
+
+class MerchantWebhookEvent(models.Model):
+    credential = models.ForeignKey(
+        MerchantApiCredential, on_delete=models.PROTECT, related_name="webhook_events"
+    )
+    event_type = models.CharField(max_length=64, default="callback")
+    nonce = models.CharField(max_length=64, db_index=True)
+    payload_hash = models.CharField(max_length=64)
+    signature = models.CharField(max_length=128, blank=True, default="")
+    signature_valid = models.BooleanField(default=False)
+    replay_detected = models.BooleanField(default=False)
+    status = models.CharField(max_length=16, default="received")
+    response_code = models.PositiveSmallIntegerField(default=200)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        unique_together = (("credential", "nonce"),)
+
+    def __str__(self):
+        return f"{self.credential.merchant.code}:{self.nonce}:{self.status}"
+
+
+class AccessReviewRecord(models.Model):
+    STATUS_OPEN = "open"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_RESOLVED, "Resolved"),
+    )
+
+    review_no = models.CharField(max_length=40, unique=True)
+    user = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="access_review_records"
+    )
+    issue_type = models.CharField(max_length=64, default="segregation_of_duty")
+    details = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    reviewer = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reviewed_access_records",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.review_no}:{self.status}"
 
 
 class OperationCase(models.Model):

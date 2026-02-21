@@ -7,26 +7,34 @@ from django.urls import reverse
 from dj_wallet.models import Wallet
 
 from .models import (
+    AccessReviewRecord,
+    AccountingPeriodClose,
     ApprovalRequest,
     BackofficeAuditLog,
     ChartOfAccount,
+    ChargebackCase,
+    ChargebackEvidence,
     CustomerCIF,
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
+    JournalBackdateApproval,
     JournalLine,
     Merchant,
+    MerchantApiCredential,
     MerchantCashflowEvent,
     MerchantFeeRule,
     MerchantKYBRequest,
     MerchantLoyaltyProgram,
     MerchantRiskProfile,
     MerchantSettlementRecord,
+    MerchantWebhookEvent,
     MerchantWalletCapability,
     OperationCase,
     ReconciliationBreak,
     ReconciliationRun,
     SettlementPayout,
+    TransactionMonitoringAlert,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -769,3 +777,168 @@ class MerchantOpsWorkflowTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         br.refresh_from_db()
         self.assertEqual(br.status, ReconciliationBreak.STATUS_RESOLVED)
+
+
+class OperationalHardeningTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.admin = User.objects.create_user(username="hard_admin", password="pass12345")
+        self.owner = User.objects.create_user(
+            username="merchant_owner",
+            email="merchant_owner@example.com",
+            password="pass12345",
+        )
+        self.customer = User.objects.create_user(username="hard_customer", password="pass12345")
+        assign_roles(self.admin, ["admin"])
+        assign_roles(self.owner, ["sales"])
+        self.customer.deposit(100)
+        self.merchant = Merchant.objects.create(
+            code="MHARD1",
+            name="Merchant Hard",
+            owner=self.owner,
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+        MerchantWalletCapability.objects.create(merchant=self.merchant)
+        MerchantLoyaltyProgram.objects.create(merchant=self.merchant)
+        MerchantRiskProfile.objects.create(
+            merchant=self.merchant,
+            daily_txn_limit=1000,
+            daily_amount_limit=Decimal("9999999"),
+            single_txn_limit=Decimal("999999"),
+            reserve_ratio_bps=0,
+            require_manual_review_above=Decimal("0"),
+            updated_by=self.admin,
+        )
+        self.case = OperationCase.objects.create(
+            case_no="CASE-HARD-1",
+            case_type=OperationCase.TYPE_DISPUTE,
+            priority=OperationCase.PRIORITY_HIGH,
+            title="Hard case",
+            customer=self.customer,
+            merchant=self.merchant,
+            assigned_to=self.admin,
+            created_by=self.admin,
+        )
+        self.credential = MerchantApiCredential.objects.create(
+            merchant=self.merchant,
+            key_id="mk_hard_1",
+            secret_hash="abc123",
+            scopes_csv="wallet:read,webhook:write",
+            webhook_url="https://merchant.example/callback",
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+
+    def test_owner_can_open_merchant_portal(self):
+        self.client.login(username="merchant_owner", password="pass12345")
+        response = self.client.get(reverse("merchant_portal"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Merchant Portal")
+
+    def test_chargeback_create_and_evidence(self):
+        self.client.login(username="hard_admin", password="pass12345")
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "chargeback_create",
+                "case_id": self.case.id,
+                "amount": "9.00",
+                "currency": "USD",
+                "reason_code": "10.4",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        cb = ChargebackCase.objects.get(case=self.case)
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "chargeback_evidence_add",
+                "chargeback_id": cb.id,
+                "document_type": "receipt",
+                "document_url": "https://files.example/receipt.pdf",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(ChargebackEvidence.objects.filter(chargeback=cb).exists())
+
+    def test_accounting_period_close_blocks_post(self):
+        cash = ChartOfAccount.objects.create(
+            code="1011",
+            name="Cash",
+            account_type=ChartOfAccount.TYPE_ASSET,
+            currency="USD",
+        )
+        liability = ChartOfAccount.objects.create(
+            code="2011",
+            name="Liability",
+            account_type=ChartOfAccount.TYPE_LIABILITY,
+            currency="USD",
+        )
+        entry = JournalEntry.objects.create(entry_no="JE-HARD-1", created_by=self.admin, currency="USD")
+        JournalLine.objects.create(entry=entry, account=cash, debit="100.00", credit="0")
+        JournalLine.objects.create(entry=entry, account=liability, debit="0", credit="100.00")
+        today = entry.created_at.date()
+        AccountingPeriodClose.objects.create(
+            period_start=today,
+            period_end=today,
+            currency="USD",
+            is_closed=True,
+            closed_by=self.admin,
+            closed_at=entry.created_at,
+            created_by=self.admin,
+        )
+        with self.assertRaises(ValidationError):
+            entry.post(self.admin)
+
+    def test_webhook_replay_detection_safe(self):
+        self.client.login(username="hard_admin", password="pass12345")
+        payload = '{"event":"ok"}'
+        import hashlib
+        import hmac
+
+        payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        signature = hmac.new(
+            self.credential.secret_hash.encode("utf-8"),
+            f"nonce-1:{payload_hash}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        first = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "merchant_webhook_validate",
+                "credential_id": self.credential.id,
+                "event_type": "payment.status",
+                "nonce": "nonce-1",
+                "payload": payload,
+                "signature": signature,
+            },
+        )
+        self.assertEqual(first.status_code, 302)
+        second = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "merchant_webhook_validate",
+                "credential_id": self.credential.id,
+                "event_type": "payment.status",
+                "nonce": "nonce-1",
+                "payload": payload,
+                "signature": signature,
+            },
+        )
+        self.assertEqual(second.status_code, 302)
+        self.assertEqual(
+            MerchantWebhookEvent.objects.filter(credential=self.credential, nonce="nonce-1").count(),
+            1,
+        )
+
+    def test_access_review_creates_sod_finding(self):
+        checker_user = User.objects.create_user(username="sod_user", password="pass12345")
+        assign_roles(checker_user, ["finance", "risk"])
+        self.client.login(username="hard_admin", password="pass12345")
+        response = self.client.post(reverse("operations_center"), {"form_type": "access_review_run"})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            AccessReviewRecord.objects.filter(user=checker_user, issue_type="segregation_of_duty").exists()
+        )

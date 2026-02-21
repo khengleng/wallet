@@ -315,6 +315,7 @@
                 <a class="sidebar-link{% if request.resolver_match.url_name == 'deposit' %} active{% endif %}" href="{% url 'deposit' %}">Deposit</a>
                 <a class="sidebar-link{% if request.resolver_match.url_name == 'withdraw' %} active{% endif %}" href="{% url 'withdraw' %}">Withdraw</a>
                 <a class="sidebar-link{% if request.resolver_match.url_name == 'wallet_fx_exchange' %} active{% endif %}" href="{% url 'wallet_fx_exchange' %}">FX Exchange</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'merchant_portal' %} active{% endif %}" href="{% url 'merchant_portal' %}">Merchant Portal</a>
 
                 {% if user|has_any_role:"admin,super_admin,finance,treasury,customer_service,risk,operation,sales" %}
                     <div class="sidebar-section-title">Back Office</div>
