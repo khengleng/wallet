@@ -10,6 +10,7 @@ from .models import (
     JournalLine,
     LoginLockout,
     Merchant,
+    MerchantCashflowEvent,
     MerchantLoyaltyEvent,
     MerchantLoyaltyProgram,
     MerchantWalletCapability,
@@ -23,8 +24,8 @@ from .models import (
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
-    list_display = ("username", "email", "is_staff", "is_superuser", "is_active")
-    list_filter = ("is_staff", "is_superuser", "is_active", "groups")
+    list_display = ("username", "email", "wallet_type", "is_staff", "is_superuser", "is_active")
+    list_filter = ("wallet_type", "is_staff", "is_superuser", "is_active", "groups")
 
 
 @admin.register(ApprovalRequest)
@@ -149,8 +150,8 @@ class FxRateAdmin(admin.ModelAdmin):
 
 @admin.register(Merchant)
 class MerchantAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "status", "settlement_currency", "owner", "updated_at")
-    list_filter = ("status", "settlement_currency")
+    list_display = ("code", "name", "status", "wallet_type", "settlement_currency", "is_government", "owner", "updated_at")
+    list_filter = ("status", "wallet_type", "settlement_currency", "is_government")
     search_fields = ("code", "name", "contact_email")
 
 
@@ -191,6 +192,23 @@ class MerchantLoyaltyEventAdmin(admin.ModelAdmin):
     )
     list_filter = ("event_type", "flow_type", "currency", "created_at")
     search_fields = ("merchant__code", "customer__username", "reference")
+
+
+@admin.register(MerchantCashflowEvent)
+class MerchantCashflowEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "merchant",
+        "flow_type",
+        "amount",
+        "currency",
+        "from_user",
+        "to_user",
+        "counterparty_merchant",
+        "reference",
+        "created_at",
+    )
+    list_filter = ("flow_type", "currency", "created_at")
+    search_fields = ("merchant__code", "reference", "from_user__username", "to_user__username")
 
 
 @admin.register(OperationCase)

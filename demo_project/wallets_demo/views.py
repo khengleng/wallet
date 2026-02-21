@@ -39,6 +39,7 @@ from .models import (
     JournalLine,
     LoginLockout,
     Merchant,
+    MerchantCashflowEvent,
     MerchantLoyaltyEvent,
     MerchantLoyaltyProgram,
     MerchantWalletCapability,
@@ -53,6 +54,10 @@ from .models import (
     FLOW_G2P,
     FLOW_P2G,
     FLOW_CHOICES,
+    WALLET_TYPE_BUSINESS,
+    WALLET_TYPE_CUSTOMER,
+    WALLET_TYPE_GOVERNMENT,
+    WALLET_TYPE_PERSONAL,
 )
 from .rbac import (
 ACCOUNTING_CHECKER_ROLES,
@@ -113,8 +118,9 @@ def _wallet_for_currency(user: User, currency: str):
     meta = _wallet_meta(wallet)
     if meta.get("currency") != currency:
         meta["currency"] = currency
-        wallet.meta = meta
-        wallet.save(update_fields=["meta"])
+    meta["wallet_type"] = user.wallet_type
+    wallet.meta = meta
+    wallet.save(update_fields=["meta"])
     return wallet
 
 
@@ -869,6 +875,18 @@ def _merchant_loyalty_wallet(user: User, merchant: Merchant):
     meta = wallet.meta if isinstance(wallet.meta, dict) else {}
     meta["currency"] = "POINT"
     meta["merchant_code"] = merchant.code
+    meta["wallet_type"] = user.wallet_type
+    wallet.meta = meta
+    wallet.save(update_fields=["meta"])
+    return wallet
+
+
+def _merchant_wallet_for_currency(merchant: Merchant, currency: str):
+    wallet = merchant.get_wallet(_wallet_slug(currency))
+    meta = wallet.meta if isinstance(wallet.meta, dict) else {}
+    meta["currency"] = currency
+    meta["merchant_code"] = merchant.code
+    meta["wallet_type"] = merchant.wallet_type
     wallet.meta = meta
     wallet.save(update_fields=["meta"])
     return wallet
@@ -1063,12 +1081,15 @@ def operations_center(request):
                     code=code,
                     name=name,
                     settlement_currency=settlement_currency,
+                    wallet_type=(request.POST.get("wallet_type") or WALLET_TYPE_BUSINESS).strip().upper(),
                     contact_email=(request.POST.get("contact_email") or "").strip(),
                     contact_phone=(request.POST.get("contact_phone") or "").strip(),
                     owner=owner,
                     created_by=request.user,
                     updated_by=request.user,
                 )
+                merchant.is_government = merchant.wallet_type == WALLET_TYPE_GOVERNMENT
+                merchant.save(update_fields=["is_government"])
                 MerchantLoyaltyProgram.objects.create(
                     merchant=merchant,
                     is_enabled=request.POST.get("loyalty_enabled") == "on",
@@ -1091,6 +1112,54 @@ def operations_center(request):
                     metadata={"code": merchant.code, "currency": settlement_currency},
                 )
                 messages.success(request, f"Merchant {merchant.code} created.")
+                return redirect("operations_center")
+
+            if form_type == "merchant_update":
+                _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "sales", "finance"))
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant.status = (request.POST.get("status") or merchant.status).strip()
+                merchant.wallet_type = (
+                    request.POST.get("wallet_type") or merchant.wallet_type
+                ).strip().upper()
+                merchant.is_government = merchant.wallet_type == WALLET_TYPE_GOVERNMENT
+                merchant.contact_email = (request.POST.get("contact_email") or merchant.contact_email).strip()
+                merchant.contact_phone = (request.POST.get("contact_phone") or merchant.contact_phone).strip()
+                owner_id = request.POST.get("owner_user_id")
+                merchant.owner = User.objects.filter(id=owner_id).first() if owner_id else None
+                merchant.updated_by = request.user
+                merchant.save(
+                    update_fields=[
+                        "status",
+                        "is_government",
+                        "wallet_type",
+                        "contact_email",
+                        "contact_phone",
+                        "owner",
+                        "updated_by",
+                        "updated_at",
+                    ]
+                )
+                capability, _created = MerchantWalletCapability.objects.get_or_create(merchant=merchant)
+                capability.supports_b2b = request.POST.get("supports_b2b") == "on"
+                capability.supports_b2c = request.POST.get("supports_b2c") == "on"
+                capability.supports_c2b = request.POST.get("supports_c2b") == "on"
+                capability.supports_p2g = request.POST.get("supports_p2g") == "on"
+                capability.supports_g2p = request.POST.get("supports_g2p") == "on"
+                capability.save()
+                program, _created = MerchantLoyaltyProgram.objects.get_or_create(merchant=merchant)
+                program.is_enabled = request.POST.get("loyalty_enabled") == "on"
+                program.earn_rate = Decimal(request.POST.get("earn_rate") or str(program.earn_rate))
+                program.redeem_rate = Decimal(request.POST.get("redeem_rate") or str(program.redeem_rate))
+                program.full_clean()
+                program.save()
+                _audit(
+                    request,
+                    "merchant.update",
+                    target_type="Merchant",
+                    target_id=str(merchant.id),
+                    metadata={"code": merchant.code, "status": merchant.status},
+                )
+                messages.success(request, f"Merchant {merchant.code} updated.")
                 return redirect("operations_center")
 
             if form_type == "case_create":
@@ -1120,6 +1189,32 @@ def operations_center(request):
                     metadata={"case_no": case.case_no, "case_type": case.case_type},
                 )
                 messages.success(request, f"Case {case.case_no} created.")
+                return redirect("operations_center")
+
+            if form_type == "user_wallet_type_update":
+                _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "customer_service"))
+                target_user = User.objects.get(id=request.POST.get("user_id"))
+                wallet_type = (request.POST.get("wallet_type") or target_user.wallet_type).strip().upper()
+                if wallet_type not in {
+                    WALLET_TYPE_PERSONAL,
+                    WALLET_TYPE_BUSINESS,
+                    WALLET_TYPE_CUSTOMER,
+                    WALLET_TYPE_GOVERNMENT,
+                }:
+                    raise ValidationError("Unsupported wallet type.")
+                target_user.wallet_type = wallet_type
+                target_user.save(update_fields=["wallet_type"])
+                _audit(
+                    request,
+                    "user.wallet_type.update",
+                    target_type="User",
+                    target_id=str(target_user.id),
+                    metadata={"wallet_type": wallet_type},
+                )
+                messages.success(
+                    request,
+                    f"Wallet type for {target_user.username} updated to {wallet_type}.",
+                )
                 return redirect("operations_center")
 
             if form_type == "case_update":
@@ -1225,12 +1320,149 @@ def operations_center(request):
                 )
                 messages.success(request, f"Loyalty {event_type} recorded for {customer.username}.")
                 return redirect("operations_center")
+
+            if form_type == "cashflow_event_create":
+                _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "finance", "risk"))
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                capability, _created = MerchantWalletCapability.objects.get_or_create(merchant=merchant)
+                flow_type = (request.POST.get("flow_type") or FLOW_B2C).strip().lower()
+                if not capability.supports_flow(flow_type):
+                    raise ValidationError(f"Flow {flow_type.upper()} is disabled for {merchant.code}.")
+
+                amount = _parse_amount(request.POST.get("amount"))
+                currency = _normalize_currency(request.POST.get("currency"))
+                reference = (request.POST.get("reference") or "").strip()
+                note = (request.POST.get("note") or "").strip()
+                from_user = None
+                to_user = None
+                counterparty_merchant = None
+
+                merchant_wallet = _merchant_wallet_for_currency(merchant, currency)
+                wallet_service = get_wallet_service()
+                with transaction.atomic():
+                    if flow_type == FLOW_B2C:
+                        to_user = User.objects.get(id=request.POST.get("user_id"))
+                        user_wallet = _wallet_for_currency(to_user, currency)
+                        wallet_service.withdraw(
+                            merchant_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                        wallet_service.deposit(
+                            user_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                    elif flow_type == FLOW_C2B:
+                        from_user = User.objects.get(id=request.POST.get("user_id"))
+                        user_wallet = _wallet_for_currency(from_user, currency)
+                        wallet_service.withdraw(
+                            user_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                        wallet_service.deposit(
+                            merchant_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                    elif flow_type == FLOW_B2B:
+                        counterparty_merchant = Merchant.objects.get(
+                            id=request.POST.get("counterparty_merchant_id")
+                        )
+                        other_capability, _created = MerchantWalletCapability.objects.get_or_create(
+                            merchant=counterparty_merchant
+                        )
+                        if not other_capability.supports_b2b:
+                            raise ValidationError("Counterparty merchant does not support B2B.")
+                        cp_wallet = _merchant_wallet_for_currency(counterparty_merchant, currency)
+                        wallet_service.withdraw(
+                            merchant_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                        wallet_service.deposit(
+                            cp_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                    elif flow_type == FLOW_P2G:
+                        if merchant.wallet_type != WALLET_TYPE_GOVERNMENT:
+                            raise ValidationError("Selected merchant wallet type must be Government (G).")
+                        from_user = User.objects.get(id=request.POST.get("user_id"))
+                        user_wallet = _wallet_for_currency(from_user, currency)
+                        wallet_service.withdraw(
+                            user_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                        wallet_service.deposit(
+                            merchant_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                    elif flow_type == FLOW_G2P:
+                        if merchant.wallet_type != WALLET_TYPE_GOVERNMENT:
+                            raise ValidationError("Selected merchant wallet type must be Government (G).")
+                        to_user = User.objects.get(id=request.POST.get("user_id"))
+                        user_wallet = _wallet_for_currency(to_user, currency)
+                        wallet_service.withdraw(
+                            merchant_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                        wallet_service.deposit(
+                            user_wallet,
+                            amount,
+                            meta={"flow_type": flow_type, "reference": reference, "note": note},
+                        )
+                    else:
+                        raise ValidationError("Unsupported flow type.")
+
+                    MerchantCashflowEvent.objects.create(
+                        merchant=merchant,
+                        flow_type=flow_type,
+                        amount=amount,
+                        currency=currency,
+                        from_user=from_user,
+                        to_user=to_user,
+                        counterparty_merchant=counterparty_merchant,
+                        reference=reference,
+                        note=note,
+                        created_by=request.user,
+                    )
+                _audit(
+                    request,
+                    "merchant.cashflow.execute",
+                    target_type="Merchant",
+                    target_id=str(merchant.id),
+                    metadata={
+                        "flow_type": flow_type,
+                        "amount": str(amount),
+                        "currency": currency,
+                        "reference": reference,
+                    },
+                )
+                messages.success(
+                    request,
+                    f"Cashflow {flow_type.upper()} posted for merchant {merchant.code}.",
+                )
+                return redirect("operations_center")
         except Exception as exc:
             messages.error(request, f"Operation failed: {exc}")
 
-    merchants = Merchant.objects.select_related("owner").order_by("code")[:200]
+    merchants = list(Merchant.objects.select_related("owner").order_by("code")[:200])
+    for merchant in merchants:
+        MerchantLoyaltyProgram.objects.get_or_create(merchant=merchant)
+        MerchantWalletCapability.objects.get_or_create(merchant=merchant)
     cases = OperationCase.objects.select_related("customer", "merchant", "assigned_to").order_by("-created_at")[:100]
     loyalty_events = MerchantLoyaltyEvent.objects.select_related("merchant", "customer").order_by("-created_at")[:100]
+    cashflow_events = (
+        MerchantCashflowEvent.objects.select_related(
+            "merchant", "from_user", "to_user", "counterparty_merchant"
+        )
+        .order_by("-created_at")[:100]
+    )
     return render(
         request,
         "wallets_demo/operations_center.html",
@@ -1238,6 +1470,7 @@ def operations_center(request):
             "merchants": merchants,
             "cases": cases,
             "loyalty_events": loyalty_events,
+            "cashflow_events": cashflow_events,
             "users": User.objects.order_by("username")[:300],
             "supported_currencies": _supported_currencies(),
             "flow_choices": FLOW_CHOICES,

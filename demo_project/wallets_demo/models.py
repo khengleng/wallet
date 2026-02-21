@@ -22,7 +22,22 @@ FLOW_CHOICES = (
     (FLOW_G2P, "G2P"),
 )
 
+WALLET_TYPE_PERSONAL = "P"
+WALLET_TYPE_BUSINESS = "B"
+WALLET_TYPE_CUSTOMER = "C"
+WALLET_TYPE_GOVERNMENT = "G"
+WALLET_TYPE_CHOICES = (
+    (WALLET_TYPE_PERSONAL, "Personal"),
+    (WALLET_TYPE_BUSINESS, "Business"),
+    (WALLET_TYPE_CUSTOMER, "Customer"),
+    (WALLET_TYPE_GOVERNMENT, "Government"),
+)
+
 class User(WalletMixin, AbstractUser):
+    wallet_type = models.CharField(
+        max_length=1, choices=WALLET_TYPE_CHOICES, default=WALLET_TYPE_CUSTOMER
+    )
+
     @property
     def role_names(self) -> list[str]:
         return list(self.groups.values_list("name", flat=True))
@@ -612,6 +627,15 @@ class Merchant(WalletMixin, models.Model):
     name = models.CharField(max_length=128)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     settlement_currency = models.CharField(max_length=12, default="USD")
+    wallet_type = models.CharField(
+        max_length=1,
+        choices=(
+            (WALLET_TYPE_BUSINESS, "Business"),
+            (WALLET_TYPE_GOVERNMENT, "Government"),
+        ),
+        default=WALLET_TYPE_BUSINESS,
+    )
+    is_government = models.BooleanField(default=False)
     contact_email = models.EmailField(blank=True, default="")
     contact_phone = models.CharField(max_length=40, blank=True, default="")
     owner = models.ForeignKey(
@@ -748,6 +772,56 @@ class MerchantLoyaltyEvent(models.Model):
         return (
             f"{self.merchant.code}:{self.customer.username}:{self.event_type}:{self.points}"
         )
+
+
+class MerchantCashflowEvent(models.Model):
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.PROTECT, related_name="cashflow_events"
+    )
+    flow_type = models.CharField(max_length=8, choices=FLOW_CHOICES)
+    amount = models.DecimalField(max_digits=20, decimal_places=2)
+    currency = models.CharField(max_length=12, default="USD")
+    from_user = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="merchant_cashflow_outgoing",
+    )
+    to_user = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="merchant_cashflow_incoming",
+    )
+    counterparty_merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="counterparty_cashflow_events",
+    )
+    reference = models.CharField(max_length=128, blank=True, default="")
+    note = models.CharField(max_length=255, blank=True, default="")
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="created_cashflow_events",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def clean(self):
+        if self.amount <= Decimal("0"):
+            raise ValidationError("Amount must be greater than 0.")
+        if not self.currency:
+            raise ValidationError("Currency is required.")
+
+    def __str__(self):
+        return f"{self.merchant.code}:{self.flow_type}:{self.amount}{self.currency}"
 
 
 class OperationCase(models.Model):

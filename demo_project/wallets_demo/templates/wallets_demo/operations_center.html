@@ -20,6 +20,12 @@
                 {% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}
             </select>
         </div>
+        <div class="form-group"><label>Wallet Type</label>
+            <select name="wallet_type">
+                <option value="B">Business (B)</option>
+                <option value="G">Government (G)</option>
+            </select>
+        </div>
         <div class="form-group"><label>Owner User (optional)</label>
             <select name="owner_user_id"><option value="">-- none --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select>
         </div>
@@ -41,6 +47,85 @@
 </div>
 
 <div class="card">
+    <h3>Manage Merchants</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Code</th>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Wallet Type</th>
+                <th>Owner</th>
+                <th>Capabilities</th>
+                <th>Loyalty</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in merchants %}
+                <tr>
+                    <td>{{ m.code }}</td>
+                    <td>{{ m.name }}</td>
+                    <td>{{ m.status }}</td>
+                    <td>{{ m.wallet_type }}</td>
+                    <td>{% if m.owner %}{{ m.owner.username }}{% else %}-{% endif %}</td>
+                    <td>
+                        {% with cap=m.wallet_capability %}
+                            B2B:{% if cap.supports_b2b %}Y{% else %}N{% endif %},
+                            B2C:{% if cap.supports_b2c %}Y{% else %}N{% endif %},
+                            C2B:{% if cap.supports_c2b %}Y{% else %}N{% endif %},
+                            P2G:{% if cap.supports_p2g %}Y{% else %}N{% endif %},
+                            G2P:{% if cap.supports_g2p %}Y{% else %}N{% endif %}
+                        {% endwith %}
+                    </td>
+                    <td>
+                        {% with p=m.loyalty_program %}
+                            {% if p.is_enabled %}Enabled{% else %}Disabled{% endif %}
+                            ({{ p.earn_rate }}/{{ p.redeem_rate }})
+                        {% endwith %}
+                    </td>
+                    <td>
+                        <form method="post" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_type" value="merchant_update" />
+                            <input type="hidden" name="merchant_id" value="{{ m.id }}" />
+                            <select name="status">
+                                <option value="active"{% if m.status == "active" %} selected{% endif %}>Active</option>
+                                <option value="suspended"{% if m.status == "suspended" %} selected{% endif %}>Suspended</option>
+                                <option value="inactive"{% if m.status == "inactive" %} selected{% endif %}>Inactive</option>
+                            </select>
+                            <select name="owner_user_id">
+                                <option value="">-- owner --</option>
+                                {% for u in users %}
+                                    <option value="{{ u.id }}"{% if m.owner and m.owner.id == u.id %} selected{% endif %}>{{ u.username }}</option>
+                                {% endfor %}
+                            </select>
+                            <select name="wallet_type">
+                                <option value="B"{% if m.wallet_type == "B" %} selected{% endif %}>B</option>
+                                <option value="G"{% if m.wallet_type == "G" %} selected{% endif %}>G</option>
+                            </select>
+                            <label><input type="checkbox" name="supports_b2b"{% if m.wallet_capability.supports_b2b %} checked{% endif %} />B2B</label>
+                            <label><input type="checkbox" name="supports_b2c"{% if m.wallet_capability.supports_b2c %} checked{% endif %} />B2C</label>
+                            <label><input type="checkbox" name="supports_c2b"{% if m.wallet_capability.supports_c2b %} checked{% endif %} />C2B</label>
+                            <label><input type="checkbox" name="supports_p2g"{% if m.wallet_capability.supports_p2g %} checked{% endif %} />P2G</label>
+                            <label><input type="checkbox" name="supports_g2p"{% if m.wallet_capability.supports_g2p %} checked{% endif %} />G2P</label>
+                            <label><input type="checkbox" name="loyalty_enabled"{% if m.loyalty_program.is_enabled %} checked{% endif %} />Loyalty</label>
+                            <input type="number" step="0.0001" min="0.0001" name="earn_rate" value="{{ m.loyalty_program.earn_rate }}" style="max-width:110px;" />
+                            <input type="number" step="0.0001" min="0.0001" name="redeem_rate" value="{{ m.loyalty_program.redeem_rate }}" style="max-width:110px;" />
+                            <input type="email" name="contact_email" value="{{ m.contact_email }}" placeholder="email" style="max-width:180px;" />
+                            <input type="text" name="contact_phone" value="{{ m.contact_phone }}" placeholder="phone" style="max-width:140px;" />
+                            <button class="btn btn-outline" type="submit">Save</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="8" class="text-muted" style="text-align:center;">No merchants yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
     <h3>Create Case (Complaint / Dispute / Refund)</h3>
     <form method="post">
         {% csrf_token %}
@@ -52,6 +137,45 @@
         <div class="form-group"><label>Title</label><input type="text" name="case_title" required /></div>
         <div class="form-group"><label>Description</label><textarea name="case_description" rows="3"></textarea></div>
         <button class="btn btn-primary" type="submit">Create Case</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>User Wallet Type Management</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="user_wallet_type_update" />
+        <div class="form-group"><label>User</label>
+            <select name="user_id" required>
+                {% for u in users %}<option value="{{ u.id }}">{{ u.username }} ({{ u.wallet_type }})</option>{% endfor %}
+            </select>
+        </div>
+        <div class="form-group"><label>Wallet Type</label>
+            <select name="wallet_type" required>
+                <option value="P">Personal (P)</option>
+                <option value="B">Business (B)</option>
+                <option value="C">Customer (C)</option>
+                <option value="G">Government (G)</option>
+            </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Update Wallet Type</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Post Cashflow (B2B / B2C / C2B / P2G / G2P)</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="cashflow_event_create" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Flow Type</label><select name="flow_type">{% for value, label in flow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>User (for B2C/C2B/P2G/G2P)</label><select name="user_id"><option value="">-- optional --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Counterparty Merchant (for B2B)</label><select name="counterparty_merchant_id"><option value="">-- optional --</option>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount" required /></div>
+        <div class="form-group"><label>Reference</label><input type="text" name="reference" /></div>
+        <div class="form-group"><label>Note</label><input type="text" name="note" /></div>
+        <button class="btn btn-primary" type="submit">Post Cashflow</button>
     </form>
 </div>
 
@@ -122,6 +246,29 @@
                 </tr>
             {% empty %}
                 <tr><td colspan="8" class="text-muted" style="text-align:center;">No loyalty events yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Recent Cashflow Events</h3>
+    <table>
+        <thead><tr><th>Time</th><th>Merchant</th><th>Flow</th><th>Amount</th><th>From User</th><th>To User</th><th>Counterparty Merchant</th><th>Ref</th></tr></thead>
+        <tbody>
+            {% for event in cashflow_events %}
+                <tr>
+                    <td>{{ event.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ event.merchant.code }}</td>
+                    <td>{{ event.flow_type|upper }}</td>
+                    <td>{{ event.amount }} {{ event.currency }}</td>
+                    <td>{% if event.from_user %}{{ event.from_user.username }}{% else %}-{% endif %}</td>
+                    <td>{% if event.to_user %}{{ event.to_user.username }}{% else %}-{% endif %}</td>
+                    <td>{% if event.counterparty_merchant %}{{ event.counterparty_merchant.code }}{% else %}-{% endif %}</td>
+                    <td>{{ event.reference|default:"-" }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="8" class="text-muted" style="text-align:center;">No cashflow events yet.</td></tr>
             {% endfor %}
         </tbody>
     </table>
