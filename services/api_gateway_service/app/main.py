@@ -133,13 +133,8 @@ def _forward_headers(
     return headers
 
 
-def _realm_issuer() -> str:
-    return f"{settings.keycloak_base_url}/realms/{settings.keycloak_realm}"
-
-
-def _token_endpoint_host() -> str:
-    endpoint = f"{_realm_issuer()}/protocol/openid-connect/token/introspect"
-    return urlparse(endpoint).hostname or "keycloak"
+def _identity_host() -> str:
+    return urlparse(settings.identity_service_base_url).hostname or "identity-service"
 
 
 async def _decode_keycloak_token(token: str) -> dict[str, Any]:
@@ -149,24 +144,23 @@ async def _decode_keycloak_token(token: str) -> dict[str, Any]:
         if cached and int(cached.get("cache_until", 0)) > now_epoch:
             return dict(cached["claims"])
 
-    endpoint = f"{_realm_issuer()}/protocol/openid-connect/token/introspect"
-    data = {
-        "token": token,
-        "client_id": settings.keycloak_client_id,
-        "client_secret": settings.keycloak_client_secret,
+    endpoint = f"{settings.identity_service_base_url}/v1/tokens/introspect"
+    data = {"token": token}
+    headers = {
+        "Content-Type": "application/json",
+        "X-Service-Api-Key": settings.identity_service_api_key,
     }
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
     try:
         async with httpx.AsyncClient(
-            timeout=settings.keycloak_introspection_timeout_seconds
+            timeout=settings.identity_service_timeout_seconds
         ) as client:
-            resp = await client.post(endpoint, data=data, headers=headers)
+            resp = await client.post(endpoint, json=data, headers=headers)
         resp.raise_for_status()
     except httpx.HTTPError as exc:
         _audit(
             "auth_failed",
-            reason="keycloak_unavailable",
-            keycloak_host=_token_endpoint_host(),
+            reason="identity_service_unavailable",
+            identity_host=_identity_host(),
         )
         _inc_counter("auth_failed_total")
         raise HTTPException(status_code=503, detail="Identity provider unavailable") from exc
@@ -199,14 +193,6 @@ async def _decode_keycloak_token(token: str) -> dict[str, Any]:
             _audit("auth_failed", reason="aud_mismatch")
             _inc_counter("auth_failed_total")
             raise HTTPException(status_code=401, detail="Invalid token audience")
-
-    issuer = str(claims.get("iss", ""))
-    if settings.keycloak_base_url and settings.keycloak_realm:
-        expected_issuer = _realm_issuer()
-        if issuer and issuer != expected_issuer:
-            _audit("auth_failed", reason="issuer_mismatch")
-            _inc_counter("auth_failed_total")
-            raise HTTPException(status_code=401, detail="Invalid token issuer")
 
     cache_until = min(exp, now_epoch + TOKEN_CACHE_TTL_SECONDS)
     with token_cache_lock:

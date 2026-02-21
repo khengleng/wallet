@@ -4,11 +4,8 @@ import base64
 import json
 import time
 from typing import Any
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
-from django.conf import settings
-
+from .identity_client import introspect_access_token as identity_introspect_access_token
 from .rbac import assign_roles, seed_role_groups
 
 
@@ -80,23 +77,7 @@ def sync_user_roles_from_keycloak_claims(user, claims: dict[str, Any]) -> list[s
 
 
 def introspect_access_token(access_token: str) -> dict[str, Any]:
-    realm_base = f"{settings.KEYCLOAK_BASE_URL}/realms/{settings.KEYCLOAK_REALM}"
-    data = urlencode(
-        {
-            "token": access_token,
-            "client_id": settings.KEYCLOAK_CLIENT_ID,
-            "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
-        }
-    ).encode("utf-8")
-    request = Request(
-        f"{realm_base}/protocol/openid-connect/token/introspect",
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
-    timeout = float(getattr(settings, "KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS", 3))
-    with urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read())
+    return identity_introspect_access_token(access_token=access_token)
 
 
 def next_introspection_deadline() -> int:

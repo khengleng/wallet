@@ -46,12 +46,12 @@ class Settings:
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_audience: str = os.getenv("JWT_AUDIENCE", "wallet-api")
     jwt_issuer: str = os.getenv("JWT_ISSUER", "wallet-identity")
-    keycloak_base_url: str = _env("KEYCLOAK_BASE_URL", "").strip().rstrip("/")
-    keycloak_realm: str = _env("KEYCLOAK_REALM", "").strip()
-    keycloak_client_id: str = _env("KEYCLOAK_CLIENT_ID", "").strip()
-    keycloak_client_secret: str = _env("KEYCLOAK_CLIENT_SECRET", "").strip()
-    keycloak_introspection_timeout_seconds: float = float(
-        os.getenv("KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS", "2.0")
+    identity_service_base_url: str = _env(
+        "IDENTITY_SERVICE_BASE_URL", "http://localhost:8085"
+    ).strip().rstrip("/")
+    identity_service_api_key: str = _env("IDENTITY_SERVICE_API_KEY", "").strip()
+    identity_service_timeout_seconds: float = float(
+        os.getenv("IDENTITY_SERVICE_TIMEOUT_SECONDS", "3.0")
     )
     ledger_base_url: str = os.getenv(
         "LEDGER_BASE_URL",
@@ -101,10 +101,8 @@ if settings.is_production:
             [
                 key
                 for key, value in (
-                    ("KEYCLOAK_BASE_URL", settings.keycloak_base_url),
-                    ("KEYCLOAK_REALM", settings.keycloak_realm),
-                    ("KEYCLOAK_CLIENT_ID", settings.keycloak_client_id),
-                    ("KEYCLOAK_CLIENT_SECRET", settings.keycloak_client_secret),
+                    ("IDENTITY_SERVICE_BASE_URL", settings.identity_service_base_url),
+                    ("IDENTITY_SERVICE_API_KEY", settings.identity_service_api_key),
                 )
                 if not value
             ]

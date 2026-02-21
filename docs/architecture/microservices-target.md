@@ -53,6 +53,7 @@
 - Health/readiness endpoints added.
 - Deployment scaffolding for K8s and local infra added.
 - Extracted services:
+  - `services/identity_service` (OIDC boundary + token/session/device APIs)
   - `services/wallet_ledger_service` (ledger + outbox + service API key)
   - `services/api_gateway_service` (JWT auth + rate limiting + audit logging)
 - Ledger DB migrations are now managed with Alembic (`python -m app.migrate`).

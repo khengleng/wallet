@@ -238,6 +238,11 @@ KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS = float(
 KEYCLOAK_SESSION_CHECK_INTERVAL_SECONDS = int(
     os.getenv("KEYCLOAK_SESSION_CHECK_INTERVAL_SECONDS", "120")
 )
+IDENTITY_SERVICE_BASE_URL = _env("IDENTITY_SERVICE_BASE_URL", "").strip().rstrip("/")
+IDENTITY_SERVICE_API_KEY = _env("IDENTITY_SERVICE_API_KEY", "").strip()
+IDENTITY_SERVICE_TIMEOUT_SECONDS = float(
+    os.getenv("IDENTITY_SERVICE_TIMEOUT_SECONDS", "5.0")
+)
 
 
 def _parse_keycloak_role_group_map() -> dict[str, str]:
@@ -317,11 +322,10 @@ if AUTH_MODE == "keycloak_oidc":
     missing_keycloak = [
         key
         for key, value in (
-            ("KEYCLOAK_BASE_URL", KEYCLOAK_BASE_URL),
-            ("KEYCLOAK_REALM", KEYCLOAK_REALM),
             ("KEYCLOAK_CLIENT_ID", KEYCLOAK_CLIENT_ID),
-            ("KEYCLOAK_CLIENT_SECRET", KEYCLOAK_CLIENT_SECRET),
             ("KEYCLOAK_REDIRECT_URI", KEYCLOAK_REDIRECT_URI),
+            ("IDENTITY_SERVICE_BASE_URL", IDENTITY_SERVICE_BASE_URL),
+            ("IDENTITY_SERVICE_API_KEY", IDENTITY_SERVICE_API_KEY),
         )
         if not value
     ]

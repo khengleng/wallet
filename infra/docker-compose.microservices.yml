@@ -46,6 +46,9 @@ services:
       JWT_SECRET: local-jwt-secret
       JWT_AUDIENCE: wallet-api
       JWT_ISSUER: wallet-identity
+      AUTH_MODE: keycloak_oidc
+      IDENTITY_SERVICE_BASE_URL: http://identity-service:8080
+      IDENTITY_SERVICE_API_KEY: local-identity-service-key
       INTERNAL_AUTH_MODE: hmac
       LEDGER_BASE_URL: http://wallet-ledger-service:8080
       INTERNAL_AUTH_SHARED_SECRET: local-internal-auth-shared-secret
@@ -56,6 +59,27 @@ services:
       - "8082:8080"
     depends_on:
       - wallet-ledger-service
+      - identity-service
+
+  identity-service:
+    build:
+      context: ../services/identity_service
+    environment:
+      ENVIRONMENT: production
+      DATABASE_ISOLATION_MODE: strict
+      IDENTITY_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/identity
+      SERVICE_API_KEY: local-identity-service-key
+      METRICS_TOKEN: local-metrics-token
+      KEYCLOAK_BASE_URL: http://keycloak:8080
+      KEYCLOAK_REALM: wallet
+      KEYCLOAK_CLIENT_ID: wallet-web
+      KEYCLOAK_CLIENT_SECRET: replace-with-keycloak-client-secret
+      KEYCLOAK_SCOPES: openid profile email
+    ports:
+      - "8085:8080"
+    depends_on:
+      - postgres
+      - keycloak
 
   ops-risk-service:
     build:
@@ -135,6 +159,12 @@ services:
       DEBUG: "False"
       SECRET_KEY: local-dev-secret-replace
       BACKOFFICE_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet_backoffice
+      AUTH_MODE: keycloak_oidc
+      IDENTITY_SERVICE_BASE_URL: http://identity-service:8080
+      IDENTITY_SERVICE_API_KEY: local-identity-service-key
+      KEYCLOAK_CLIENT_ID: wallet-web
+      KEYCLOAK_REDIRECT_URI: http://localhost:8000/auth/keycloak/callback/
+      KEYCLOAK_POST_LOGOUT_REDIRECT_URI: http://localhost:8000/login/
       ALLOWED_HOSTS: localhost,127.0.0.1
       CSRF_TRUSTED_ORIGINS: http://localhost:8000
       WEB_CONCURRENCY: "2"
@@ -143,6 +173,7 @@ services:
       - "8000:8000"
     depends_on:
       - api-gateway-service
+      - identity-service
       - postgres
       - redis
       - rabbitmq
@@ -194,6 +225,25 @@ services:
       - "3000:3000"
     depends_on:
       - prometheus
+
+  keycloak:
+    build:
+      context: ../services/keycloak
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres
+    ports:
+      - "8086:8080"
+    depends_on:
+      - postgres
 
   postgres:
     image: postgres:16-alpine

@@ -17,11 +17,9 @@ JWT-authenticated gateway in front of `wallet-ledger-service`.
   - `JWT_AUDIENCE`
   - `JWT_ISSUER`
 - If `AUTH_MODE=keycloak_oidc`:
-  - `KEYCLOAK_BASE_URL` (e.g. `https://id.example.com`)
-  - `KEYCLOAK_REALM`
-  - `KEYCLOAK_CLIENT_ID`
-  - `KEYCLOAK_CLIENT_SECRET`
-  - `KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS` (default `2.0`)
+  - `IDENTITY_SERVICE_BASE_URL` (e.g. `https://identity.example.com`)
+  - `IDENTITY_SERVICE_API_KEY`
+  - `IDENTITY_SERVICE_TIMEOUT_SECONDS` (default `3.0`)
   - `JWT_AUDIENCE` (expected audience claim)
 - `LEDGER_BASE_URL` (for Railway use internal domain when possible)
 - Internal service auth:

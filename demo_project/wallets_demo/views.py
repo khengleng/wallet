@@ -8,7 +8,6 @@ import json
 import secrets
 import time
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
 from django.contrib import messages
 from django.conf import settings
@@ -29,6 +28,13 @@ from dj_wallet.utils import get_exchange_service, get_wallet_service
 
 from .fx_sync import sync_external_fx_rates
 from .analytics import track_event
+from .identity_client import (
+    oidc_auth_url as identity_oidc_auth_url,
+    oidc_logout_url as identity_oidc_logout_url,
+    oidc_token_exchange as identity_oidc_token_exchange,
+    oidc_userinfo as identity_oidc_userinfo,
+    register_device_session as identity_register_device_session,
+)
 from .keycloak_auth import (
     decode_access_token_claims,
     next_introspection_deadline,
@@ -293,46 +299,23 @@ def _keycloak_realm_base_url() -> str:
 
 
 def _keycloak_auth_url(state: str, nonce: str) -> str:
-    query = urlencode(
-        {
-            "client_id": settings.KEYCLOAK_CLIENT_ID,
-            "response_type": "code",
-            "scope": settings.KEYCLOAK_SCOPES,
-            "redirect_uri": settings.KEYCLOAK_REDIRECT_URI,
-            "state": state,
-            "nonce": nonce,
-        }
+    return identity_oidc_auth_url(
+        state=state,
+        nonce=nonce,
+        redirect_uri=settings.KEYCLOAK_REDIRECT_URI,
+        scope=settings.KEYCLOAK_SCOPES,
     )
-    return f"{_keycloak_realm_base_url()}/protocol/openid-connect/auth?{query}"
 
 
 def _keycloak_token_exchange(code: str) -> dict:
-    data = urlencode(
-        {
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": settings.KEYCLOAK_CLIENT_ID,
-            "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
-            "redirect_uri": settings.KEYCLOAK_REDIRECT_URI,
-        }
-    ).encode("utf-8")
-    request = Request(
-        f"{_keycloak_realm_base_url()}/protocol/openid-connect/token",
-        data=data,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
+    return identity_oidc_token_exchange(
+        code=code,
+        redirect_uri=settings.KEYCLOAK_REDIRECT_URI,
     )
-    with urlopen(request, timeout=10) as response:
-        return json.loads(response.read())
 
 
 def _keycloak_userinfo(access_token: str) -> dict:
-    request = Request(
-        f"{_keycloak_realm_base_url()}/protocol/openid-connect/userinfo",
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-    with urlopen(request, timeout=10) as response:
-        return json.loads(response.read())
+    return identity_oidc_userinfo(access_token=access_token)
 
 
 def _find_or_create_user_from_claims(claims: dict) -> User:
@@ -518,6 +501,24 @@ def keycloak_callback(request):
     request.session["oidc_id_token"] = token_payload.get("id_token", "")
     request.session["oidc_refresh_token"] = token_payload.get("refresh_token", "")
     request.session["oidc_next_introspection_at"] = next_introspection_deadline()
+    try:
+        access_claims = decode_access_token_claims(access_token)
+        expires_at = timezone.now() + timedelta(seconds=int(request.session.get_expiry_age()))
+        identity_register_device_session(
+            subject=str(access_claims.get("sub", user.username) or user.username),
+            username=user.username,
+            session_id=request.session.session_key or "",
+            device_id=hashlib.sha256(
+                f"{request.META.get('REMOTE_ADDR','')}|{request.META.get('HTTP_USER_AGENT','')}".encode(
+                    "utf-8"
+                )
+            ).hexdigest()[:32],
+            ip_address=_client_ip(request),
+            user_agent=request.META.get("HTTP_USER_AGENT", "")[:2048],
+            expires_at=expires_at,
+        )
+    except Exception:
+        pass
     _track(
         request,
         "auth_login_success",
@@ -533,14 +534,11 @@ def portal_logout(request):
     auth_logout(request)
     if _use_keycloak_oidc() and id_token:
         post_logout = settings.KEYCLOAK_POST_LOGOUT_REDIRECT_URI or settings.KEYCLOAK_REDIRECT_URI
-        query = urlencode(
-            {
-                "id_token_hint": id_token,
-                "post_logout_redirect_uri": post_logout,
-                "client_id": settings.KEYCLOAK_CLIENT_ID,
-            }
+        logout_url = identity_oidc_logout_url(
+            id_token_hint=id_token,
+            post_logout_redirect_uri=post_logout,
+            client_id=settings.KEYCLOAK_CLIENT_ID,
         )
-        logout_url = f"{_keycloak_realm_base_url()}/protocol/openid-connect/logout?{query}"
         return redirect(logout_url)
     return redirect("login")
 
