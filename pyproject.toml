@@ -59,6 +59,7 @@ gunicorn = ">=21.2"
 whitenoise = ">=6.7"
 dj-database-url = ">=2.2"
 psycopg = {version = ">=3.1", extras = ["binary"]}
+redis = ">=5.0"
 
 [tool.poetry.extras]
 drf = ["djangorestframework"]

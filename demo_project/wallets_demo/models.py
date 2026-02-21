@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from django.contrib.auth.models import AbstractUser
 from django.conf import settings
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
@@ -520,10 +521,44 @@ class FxRate(models.Model):
         return f"{self.base_currency}/{self.quote_currency}={self.rate}"
 
     @classmethod
+    def _cache_key(cls, base_currency: str, quote_currency: str) -> str:
+        return f"fx_rate:v1:{base_currency.upper()}:{quote_currency.upper()}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        cache.delete(self._cache_key(self.base_currency, self.quote_currency))
+
+    def delete(self, *args, **kwargs):
+        cache.delete(self._cache_key(self.base_currency, self.quote_currency))
+        return super().delete(*args, **kwargs)
+
+    @classmethod
     def latest_rate(cls, base_currency: str, quote_currency: str):
         base = base_currency.upper()
         quote = quote_currency.upper()
-        return (
+        key = cls._cache_key(base, quote)
+        cached = cache.get(key)
+        if isinstance(cached, dict):
+            try:
+                obj = cls(
+                    base_currency=base,
+                    quote_currency=quote,
+                    rate=Decimal(str(cached["rate"])),
+                    is_active=True,
+                    source_provider=cached.get("source_provider", ""),
+                    source_reference=cached.get("source_reference", ""),
+                )
+                obj.id = cached.get("id")
+                effective_at = cached.get("effective_at")
+                if effective_at:
+                    from datetime import datetime
+
+                    obj.effective_at = datetime.fromisoformat(effective_at)
+                return obj
+            except Exception:
+                cache.delete(key)
+
+        latest = (
             cls.objects.filter(
                 base_currency=base,
                 quote_currency=quote,
@@ -532,3 +567,19 @@ class FxRate(models.Model):
             .order_by("-effective_at", "-id")
             .first()
         )
+        if latest is not None:
+            ttl = int(getattr(settings, "FX_RATE_CACHE_TTL_SECONDS", 60))
+            cache.set(
+                key,
+                {
+                    "id": latest.id,
+                    "rate": str(latest.rate),
+                    "effective_at": latest.effective_at.isoformat()
+                    if latest.effective_at
+                    else "",
+                    "source_provider": latest.source_provider,
+                    "source_reference": latest.source_reference,
+                },
+                timeout=ttl,
+            )
+        return latest

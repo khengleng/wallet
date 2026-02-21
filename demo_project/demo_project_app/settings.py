@@ -179,6 +179,23 @@ FX_PROVIDER_BASE_URL = os.getenv(
 ).strip()
 FX_PROVIDER_API_KEY = os.getenv("FX_PROVIDER_API_KEY", "").strip()
 FX_PROVIDER_FALLBACK = os.getenv("FX_PROVIDER_FALLBACK", "open_er_api").strip().lower()
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+FX_RATE_CACHE_TTL_SECONDS = int(os.getenv("FX_RATE_CACHE_TTL_SECONDS", "60"))
+
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "wallet-default",
+        }
+    }
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
