@@ -1,217 +1,240 @@
 {% extends 'wallets_demo/base.html' %}
-
-{% block title %}Accounting - DJ Wallet{% endblock %}
-
+{% block title %}Accounting Console - {{ org_name }}{% endblock %}
 {% block content %}
 <div class="card">
-    <h2>Accounting Console</h2>
+    <h2>Finance &amp; Ledger</h2>
     <p class="text-muted">Chart of Accounts, Journal Entries, and Trial Balance for business operations.</p>
-    <p><a class="btn btn-outline" href="{% url 'fx_management' %}">Manage FX Rates</a></p>
-    <a class="btn btn-outline mt-4" href="{% url 'backoffice' %}">Back to Backoffice</a>
 </div>
 
-<div class="card">
-    <h3>Create Chart of Account</h3>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="form_type" value="coa_create">
-        <div class="form-group">
-            <label for="code">Code</label>
-            <input id="code" name="code" type="text" placeholder="e.g. 1010" required>
-        </div>
-        <div class="form-group">
-            <label for="name">Name</label>
-            <input id="name" name="name" type="text" placeholder="Cash and Bank" required>
-        </div>
-        <div class="form-group">
-            <label for="account_type">Account Type</label>
-            <select id="account_type" name="account_type" required>
-                <option value="">Select type</option>
-                <option value="asset">Asset</option>
-                <option value="liability">Liability</option>
-                <option value="equity">Equity</option>
-                <option value="revenue">Revenue</option>
-                <option value="expense">Expense</option>
-            </select>
-        </div>
-        <div class="form-group">
-            <label for="currency">Currency</label>
-            <select id="currency" name="currency" required>
-                {% for c in supported_currencies %}
-                <option value="{{ c }}">{{ c }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <button type="submit" class="btn btn-primary">Create Account</button>
-    </form>
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="acc-tab-coa" onclick="switchTab(this,'acc-tab-coa')">🏦 Chart of
+        Accounts</button>
+    <button class="tab-btn" data-tab="acc-tab-journal" onclick="switchTab(this,'acc-tab-journal')">📝 Journal
+        Entries</button>
+    <button class="tab-btn" data-tab="acc-tab-trial" onclick="switchTab(this,'acc-tab-trial')">📈 Trial Balance</button>
 </div>
 
-<div class="card">
-    <h3>Create Journal Entry</h3>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="form_type" value="journal_create">
-        <div class="form-group">
-            <label for="reference">Reference</label>
-            <input id="reference" name="reference" type="text" placeholder="treasury-transfer-001">
-        </div>
-        <div class="form-group">
-            <label for="description">Description</label>
-            <input id="description" name="description" type="text" placeholder="Daily settlement funding">
-        </div>
-        <div class="form-group">
-            <label for="entry_currency">Entry Currency</label>
-            <select id="entry_currency" name="entry_currency" required>
-                {% for c in supported_currencies %}
-                <option value="{{ c }}">{{ c }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <table>
-            <thead>
-                <tr>
-                    <th>Account</th>
-                    <th>Side</th>
-                    <th>Amount</th>
-                    <th>Memo</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for i in "1234" %}
+<!-- Chart of Accounts -->
+<div class="tab-pane active" id="acc-tab-coa">
+    <div class="card">
+        <h3>Create Chart of Account</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="coa_create">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                    <label for="code">Code</label>
+                    <input id="code" name="code" type="text" placeholder="e.g. 1010" required>
+                </div>
+                <div class="form-group">
+                    <label for="name">Name</label>
+                    <input id="name" name="name" type="text" placeholder="Cash and Bank" required>
+                </div>
+                <div class="form-group">
+                    <label for="account_type">Account Type</label>
+                    <select id="account_type" name="account_type" required>
+                        <option value="">Select type</option>
+                        <option value="asset">Asset</option>
+                        <option value="liability">Liability</option>
+                        <option value="equity">Equity</option>
+                        <option value="revenue">Revenue</option>
+                        <option value="expense">Expense</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="currency">Currency</label>
+                    <select id="currency" name="currency" required>
+                        {% for c in supported_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Create Account</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Accounts List</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
                     <tr>
-                        <td>
-                            <select name="line_account">
-                                <option value="">Select account</option>
-                                {% for account in accounts %}
-                                    <option value="{{ account.id }}">{{ account.code }} - {{ account.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </td>
-                        <td>
-                            <select name="line_side">
-                                <option value="">-</option>
-                                <option value="debit">Debit</option>
-                                <option value="credit">Credit</option>
-                            </select>
-                        </td>
-                        <td><input type="number" name="line_amount" step="0.01" min="0"></td>
-                        <td><input type="text" name="line_memo"></td>
+                        <th>Code</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Currency</th>
+                        <th>Status</th>
                     </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% if can_post_entries %}
-        <label style="display:flex; align-items:center; gap:0.5rem; margin-top:1rem;">
-            <input type="checkbox" name="post_now">
-            <span>Post immediately (checker only)</span>
-        </label>
-        {% endif %}
-        <button type="submit" class="btn btn-primary mt-4">Save Journal Entry</button>
-    </form>
+                </thead>
+                <tbody>
+                    {% for account in accounts %}
+                    <tr>
+                        <td><strong>{{ account.code }}</strong></td>
+                        <td>{{ account.name }}</td>
+                        <td>{{ account.account_type }}</td>
+                        <td>{{ account.currency }}</td>
+                        <td>{% if account.is_active %}<span class="badge-active">Active</span>{% else %}<span
+                                class="badge-closed">Inactive</span>{% endif %}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-muted" style="text-align:center;">No chart accounts yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
-<div class="card">
-    <h3>Chart of Accounts</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Currency</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for account in accounts %}
-                <tr>
-                    <td>{{ account.code }}</td>
-                    <td>{{ account.name }}</td>
-                    <td>{{ account.account_type }}</td>
-                    <td>{{ account.currency }}</td>
-                    <td>{% if account.is_active %}active{% else %}inactive{% endif %}</td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="5" class="text-muted" style="text-align:center;">No chart accounts yet.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<!-- Journal Entries -->
+<div class="tab-pane" id="acc-tab-journal">
+    <div class="card">
+        <h3>Create Journal Entry</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="journal_create">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                    <label for="reference">Reference</label>
+                    <input id="reference" name="reference" type="text" placeholder="treasury-transfer-001">
+                </div>
+                <div class="form-group">
+                    <label for="entry_currency">Entry Currency</label>
+                    <select id="entry_currency" name="entry_currency" required>
+                        {% for c in supported_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="description">Description</label>
+                <input id="description" name="description" type="text" placeholder="Daily settlement funding">
+            </div>
+            <div style="overflow-x:auto; margin-bottom:1rem;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Side</th>
+                            <th>Amount</th>
+                            <th>Memo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for i in "1234" %}
+                        <tr>
+                            <td>
+                                <select name="line_account">
+                                    <option value="">Select account</option>
+                                    {% for account in accounts %}<option value="{{ account.id }}">{{ account.code }} -
+                                        {{ account.name }}</option>{% endfor %}
+                                </select>
+                            </td>
+                            <td>
+                                <select name="line_side">
+                                    <option value="">-</option>
+                                    <option value="debit">Debit</option>
+                                    <option value="credit">Credit</option>
+                                </select>
+                            </td>
+                            <td><input type="number" name="line_amount" step="0.01" min="0"></td>
+                            <td><input type="text" name="line_memo"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if can_post_entries %}
+            <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:1rem;">
+                <input type="checkbox" name="post_now">
+                <span>Post immediately (checker only)</span>
+            </label>
+            {% endif %}
+            <button type="submit" class="btn btn-primary">Save Journal Entry</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Draft Journal Entries</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Entry No</th>
+                        <th>Currency</th>
+                        <th>Reference</th>
+                        <th>Description</th>
+                        <th>Debit</th>
+                        <th>Credit</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in draft_entries %}
+                    <tr>
+                        <td><strong>{{ entry.entry_no }}</strong></td>
+                        <td>{{ entry.currency }}</td>
+                        <td>{{ entry.reference }}</td>
+                        <td>{{ entry.description }}</td>
+                        <td>{{ entry.total_debit }}</td>
+                        <td>{{ entry.total_credit }}</td>
+                        <td>
+                            {% if can_post_entries %}
+                            <form method="post" action="{% url 'accounting_post_entry' entry.id %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-primary">Post</button>
+                            </form>
+                            {% else %}
+                            <span class="text-muted">Checker required</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-muted" style="text-align:center;">No draft entries.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
-<div class="card">
-    <h3>Draft Journal Entries</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>Entry No</th>
-                <th>Currency</th>
-                <th>Reference</th>
-                <th>Description</th>
-                <th>Debit</th>
-                <th>Credit</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for entry in draft_entries %}
-                <tr>
-                    <td>{{ entry.entry_no }}</td>
-                    <td>{{ entry.currency }}</td>
-                    <td>{{ entry.reference }}</td>
-                    <td>{{ entry.description }}</td>
-                    <td>{{ entry.total_debit }}</td>
-                    <td>{{ entry.total_credit }}</td>
-                    <td>
-                        {% if can_post_entries %}
-                        <form method="post" action="{% url 'accounting_post_entry' entry.id %}">
-                            {% csrf_token %}
-                            <button type="submit" class="btn btn-primary">Post</button>
-                        </form>
-                        {% else %}
-                        <span class="text-muted">Checker required</span>
-                        {% endif %}
-                    </td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="7" class="text-muted" style="text-align:center;">No draft entries.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-<div class="card">
-    <h3>Trial Balance (Posted Entries)</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>Account</th>
-                <th>Type</th>
-                <th>Total Debit</th>
-                <th>Total Credit</th>
-                <th>Net (Dr-Cr)</th>
-                <th>Net in {{ base_currency }}</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for row in trial_balance %}
-                <tr>
-                    <td>{{ row.account.code }} - {{ row.account.name }}</td>
-                    <td>{{ row.account.account_type }}</td>
-                    <td>{{ row.debit }}</td>
-                    <td>{{ row.credit }}</td>
-                    <td>{{ row.net }}</td>
-                    <td>{% if row.net_base is not None %}{{ row.net_base }}{% else %}N/A{% endif %}</td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="6" class="text-muted" style="text-align:center;">No posted journals yet.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<!-- Trial Balance -->
+<div class="tab-pane" id="acc-tab-trial">
+    <div class="card">
+        <h3>Trial Balance <span class="text-muted" style="font-weight:400; font-size:0.85rem;">(Posted Entries)</span>
+        </h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Account</th>
+                        <th>Type</th>
+                        <th>Total Debit</th>
+                        <th>Total Credit</th>
+                        <th>Net (Dr-Cr)</th>
+                        <th>Net in {{ base_currency }}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in trial_balance %}
+                    <tr>
+                        <td><strong>{{ row.account.code }}</strong> – {{ row.account.name }}</td>
+                        <td>{{ row.account.account_type }}</td>
+                        <td>{{ row.debit }}</td>
+                        <td>{{ row.credit }}</td>
+                        <td style="font-weight:600;">{{ row.net }}</td>
+                        <td>{% if row.net_base is not None %}{{ row.net_base }}{% else %}<span
+                                class="text-muted">N/A</span>{% endif %}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted" style="text-align:center;">No posted journals yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}

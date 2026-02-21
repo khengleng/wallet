@@ -1,155 +1,193 @@
 {% extends 'wallets_demo/base.html' %}
-
-{% block title %}Treasury - DJ Wallet{% endblock %}
-
+{% block title %}Treasury Console - {{ org_name }}{% endblock %}
 {% block content %}
 <div class="card">
     <h2>Treasury Console</h2>
     <p class="text-muted">Manage internal liquidity movement with maker-checker approval.</p>
-    <a class="btn btn-outline mt-4" href="{% url 'accounting_dashboard' %}">Open Accounting Console</a>
-    <a class="btn btn-outline mt-4" href="{% url 'fx_management' %}">Open FX Management</a>
 </div>
 
-<div class="card">
-    <h3>Treasury Accounts</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Currency</th>
-                <th>Balance</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for account in accounts %}
-                <tr>
-                    <td>{{ account.name }}</td>
-                    <td>{{ account.currency }}</td>
-                    <td>${{ account.balance }}</td>
-                    <td>{% if account.is_active %}active{% else %}inactive{% endif %}</td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="4" class="text-muted" style="text-align:center;">No treasury accounts found.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="tr-tab-accounts" onclick="switchTab(this,'tr-tab-accounts')">🏦
+        Accounts</button>
+    {% if can_make_treasury_request %}
+    <button class="tab-btn" data-tab="tr-tab-request" onclick="switchTab(this,'tr-tab-request')">📤 New Transfer
+        Request</button>
+    {% endif %}
+    <button class="tab-btn" data-tab="tr-tab-my" onclick="switchTab(this,'tr-tab-my')">📋 My Requests</button>
+    {% if can_check_treasury_request %}
+    <button class="tab-btn" data-tab="tr-tab-checker" onclick="switchTab(this,'tr-tab-checker')">✅ Checker
+        Queue</button>
+    {% endif %}
 </div>
 
+<!-- Accounts -->
+<div class="tab-pane active" id="tr-tab-accounts">
+    <div class="card">
+        <h3>Treasury Accounts</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Currency</th>
+                        <th>Balance</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for account in accounts %}
+                    <tr>
+                        <td>{{ account.name }}</td>
+                        <td>{{ account.currency }}</td>
+                        <td style="font-weight:600;">${{ account.balance }}</td>
+                        <td>
+                            {% if account.is_active %}<span class="badge-active">Active</span>
+                            {% else %}<span class="badge-closed">Inactive</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="4" class="text-muted" style="text-align:center;">No treasury accounts found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- New Transfer Request -->
 {% if can_make_treasury_request %}
-<div class="card">
-    <h3>Submit Treasury Transfer Request</h3>
-    <form method="post">
-        {% csrf_token %}
-        <div class="form-group">
-            <label for="from_account">From Account</label>
-            <select id="from_account" name="from_account" required>
-                <option value="" selected disabled>Select source account</option>
-                {% for account in accounts %}
-                    <option value="{{ account.id }}">{{ account.name }} ({{ account.currency }})</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="form-group">
-            <label for="to_account">To Account</label>
-            <select id="to_account" name="to_account" required>
-                <option value="" selected disabled>Select destination account</option>
-                {% for account in accounts %}
-                    <option value="{{ account.id }}">{{ account.name }} ({{ account.currency }})</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="form-group">
-            <label for="amount">Amount</label>
-            <input id="amount" name="amount" type="number" step="0.01" min="0.01" required>
-        </div>
-        <div class="form-group">
-            <label for="reason">Reason</label>
-            <input id="reason" name="reason" type="text" placeholder="e.g. top up settlement account">
-        </div>
-        <div class="form-group">
-            <label for="maker_note">Maker Note</label>
-            <textarea id="maker_note" name="maker_note" rows="3"></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">Submit Request</button>
-    </form>
+<div class="tab-pane" id="tr-tab-request">
+    <div class="card">
+        <h3>Submit Treasury Transfer Request</h3>
+        <form method="post">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="from_account">From Account</label>
+                <select id="from_account" name="from_account" required>
+                    <option value="" selected disabled>Select source account</option>
+                    {% for account in accounts %}<option value="{{ account.id }}">{{ account.name }} ({{
+                        account.currency }})</option>{% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="to_account">To Account</label>
+                <select id="to_account" name="to_account" required>
+                    <option value="" selected disabled>Select destination account</option>
+                    {% for account in accounts %}<option value="{{ account.id }}">{{ account.name }} ({{
+                        account.currency }})</option>{% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="amount">Amount</label>
+                <input id="amount" name="amount" type="number" step="0.01" min="0.01" required>
+            </div>
+            <div class="form-group">
+                <label for="reason">Reason</label>
+                <input id="reason" name="reason" type="text" placeholder="e.g. top up settlement account">
+            </div>
+            <div class="form-group">
+                <label for="maker_note">Maker Note</label>
+                <textarea id="maker_note" name="maker_note" rows="3"></textarea>
+            </div>
+            <button type="submit" class="btn btn-primary">Submit Request</button>
+        </form>
+    </div>
 </div>
 {% endif %}
 
-<div class="card">
-    <h3>My Treasury Requests</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Created</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for req in my_requests %}
-                <tr>
-                    <td>#{{ req.id }}</td>
-                    <td>{{ req.from_account.name }}</td>
-                    <td>{{ req.to_account.name }}</td>
-                    <td>${{ req.amount }}</td>
-                    <td>{{ req.status }}</td>
-                    <td>{{ req.created_at|date:"Y-m-d H:i" }}</td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="6" class="text-muted" style="text-align:center;">No treasury requests yet.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<!-- My Requests -->
+<div class="tab-pane" id="tr-tab-my">
+    <div class="card">
+        <h3>My Treasury Requests</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in my_requests %}
+                    <tr>
+                        <td>#{{ req.id }}</td>
+                        <td>{{ req.from_account.name }}</td>
+                        <td>{{ req.to_account.name }}</td>
+                        <td style="font-weight:600;">${{ req.amount }}</td>
+                        <td>
+                            {% if req.status == "approved" %}<span class="badge-active">{{ req.status }}</span>
+                            {% elif req.status == "rejected" %}<span class="badge-blocked">{{ req.status }}</span>
+                            {% else %}<span class="badge-pending">{{ req.status }}</span>{% endif %}
+                        </td>
+                        <td style="font-size:0.8rem; color:var(--text-muted);">{{ req.created_at|date:"d M Y H:i" }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted" style="text-align:center;">No treasury requests yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
+<!-- Checker Queue -->
 {% if can_check_treasury_request %}
-<div class="card">
-    <h3>Treasury Checker Queue</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>Maker</th>
-                <th>From</th>
-                <th>To</th>
-                <th>Amount</th>
-                <th>Reason</th>
-                <th>Decision</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for req in pending_requests %}
-                <tr>
-                    <td>#{{ req.id }}</td>
-                    <td>{{ req.maker.username }}</td>
-                    <td>{{ req.from_account.name }}</td>
-                    <td>{{ req.to_account.name }}</td>
-                    <td>${{ req.amount }}</td>
-                    <td>{{ req.reason }}</td>
-                    <td>
-                        <form method="post" action="{% url 'treasury_decision' req.id %}" class="flex gap-2">
-                            {% csrf_token %}
-                            <input type="text" name="checker_note" placeholder="Note (optional)">
-                            <button type="submit" class="btn btn-primary" name="decision" value="approve">Approve</button>
-                            <button type="submit" class="btn btn-outline" name="decision" value="reject">Reject</button>
-                        </form>
-                    </td>
-                </tr>
-            {% empty %}
-                <tr>
-                    <td colspan="7" class="text-muted" style="text-align:center;">No pending treasury requests.</td>
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="tab-pane" id="tr-tab-checker">
+    <div class="card">
+        <h3>Treasury Checker Queue</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Maker</th>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Amount</th>
+                        <th>Reason</th>
+                        <th>Decision</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in pending_requests %}
+                    <tr>
+                        <td>#{{ req.id }}</td>
+                        <td>{{ req.maker.username }}</td>
+                        <td>{{ req.from_account.name }}</td>
+                        <td>{{ req.to_account.name }}</td>
+                        <td style="font-weight:600;">${{ req.amount }}</td>
+                        <td>{{ req.reason }}</td>
+                        <td>
+                            <form method="post" action="{% url 'treasury_decision' req.id %}"
+                                style="display:flex; gap:0.4rem; align-items:center;">
+                                {% csrf_token %}
+                                <input type="text" name="checker_note" placeholder="Note (optional)"
+                                    style="max-width:140px;">
+                                <button type="submit" class="btn btn-primary" name="decision"
+                                    value="approve">Approve</button>
+                                <button type="submit" class="btn btn-outline" name="decision"
+                                    value="reject">Reject</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-muted" style="text-align:center;">No pending treasury requests.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endif %}
 {% endblock %}

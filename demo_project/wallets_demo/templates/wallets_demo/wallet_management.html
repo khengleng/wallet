@@ -2,92 +2,6 @@
 
 {% block title %}Customer & Wallet Admin - {{ org_name }}{% endblock %}
 
-{% block extra_style %}
-<style>
-    .tab-bar {
-        display: flex;
-        gap: 0.25rem;
-        border-bottom: 2px solid var(--border);
-        margin-bottom: 1.5rem;
-        flex-wrap: wrap;
-    }
-
-    .tab-btn {
-        padding: 0.6rem 1.1rem;
-        border: none;
-        background: none;
-        cursor: pointer;
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        border-bottom: 2px solid transparent;
-        margin-bottom: -2px;
-        border-radius: 0.4rem 0.4rem 0 0;
-        transition: color 0.15s, border-color 0.15s, background 0.15s;
-    }
-
-    .tab-btn:hover {
-        color: var(--primary);
-        background: rgba(99, 102, 241, 0.05);
-    }
-
-    .tab-btn.active {
-        color: var(--primary);
-        border-bottom-color: var(--primary);
-        background: rgba(99, 102, 241, 0.08);
-    }
-
-    .tab-pane {
-        display: none;
-    }
-
-    .tab-pane.active {
-        display: block;
-    }
-
-    .wallet-table td code {
-        background: var(--bg);
-        padding: 0.15rem 0.4rem;
-        border-radius: 0.3rem;
-        font-size: 0.78rem;
-        word-break: break-all;
-    }
-
-    .badge-active {
-        background: #dcfce7;
-        color: #166534;
-        padding: 0.2rem 0.6rem;
-        border-radius: 9999px;
-        font-size: 0.72rem;
-        font-weight: 600;
-    }
-
-    .badge-blocked {
-        background: #fee2e2;
-        color: #991b1b;
-        padding: 0.2rem 0.6rem;
-        border-radius: 9999px;
-        font-size: 0.72rem;
-        font-weight: 600;
-    }
-
-    .badge-closed {
-        background: #f1f5f9;
-        color: #475569;
-        padding: 0.2rem 0.6rem;
-        border-radius: 9999px;
-        font-size: 0.72rem;
-        font-weight: 600;
-    }
-
-    .section-divider {
-        border: none;
-        border-top: 1px solid var(--border);
-        margin: 1.5rem 0;
-    }
-</style>
-{% endblock %}
-
 {% block content %}
 <div class="card" style="margin-bottom:1.25rem;">
     <h2>Customer &amp; Wallet Admin</h2>
@@ -494,22 +408,4 @@
 
 {% endif %}
 
-<script>
-    function switchTab(btn, tabId) {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById(tabId).classList.add('active');
-        // persist tab in URL hash
-        history.replaceState(null, '', '#' + tabId);
-    }
-    // Restore tab from URL hash
-    (function () {
-        const hash = location.hash.replace('#', '');
-        if (hash) {
-            const btn = document.querySelector('[data-tab="' + hash + '"]');
-            if (btn) switchTab(btn, hash);
-        }
-    })();
-</script>
 {% endblock %}
