@@ -46,3 +46,10 @@
   - `services/wallet_ledger_service` (ledger + outbox + service API key)
   - `services/api_gateway_service` (JWT auth + rate limiting + audit logging)
 - Ledger DB migrations are now managed with Alembic (`python -m app.migrate`).
+
+## Phase 2 Progress
+- Outbox relay worker now supports:
+  - `FOR UPDATE SKIP LOCKED` event claiming,
+  - retry with exponential backoff,
+  - dead-lettering after max attempts,
+  - RabbitMQ topic exchange publish.

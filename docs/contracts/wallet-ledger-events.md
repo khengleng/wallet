@@ -2,6 +2,21 @@
 
 All events are emitted through the outbox table and published asynchronously.
 
+## Broker Contract
+- Exchange: `wallet.events` (topic, configurable)
+- Routing key format: `ledger.<event_type_with_dots_replaced_by_underscores>`
+  - Example: `ledger.ledger_transfer`
+- Message headers:
+  - `event_id`
+  - `event_type`
+  - `idempotency_key`
+  - `reference_id`
+
+## Delivery Semantics
+- Publisher uses transactional outbox records.
+- Worker retries failed publish attempts with exponential backoff.
+- Events that exceed retry limit move to outbox status `dead_letter`.
+
 ## Event Types
 - `ledger.deposit`
 - `ledger.withdraw`

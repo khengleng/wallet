@@ -13,6 +13,27 @@ services:
     depends_on:
       - postgres
 
+  wallet-ledger-outbox-worker:
+    build:
+      context: ../services/wallet_ledger_service
+    command: python -m app.outbox_worker
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      SERVICE_API_KEY: local-ledger-service-key
+      BROKER_URL: amqp://guest:guest@rabbitmq:5672/%2F
+      OUTBOX_EXCHANGE: wallet.events
+      OUTBOX_EXCHANGE_TYPE: topic
+      OUTBOX_ROUTING_KEY_PREFIX: ledger
+      OUTBOX_POLL_INTERVAL_SECONDS: 1
+      OUTBOX_BATCH_SIZE: 100
+      OUTBOX_MAX_ATTEMPTS: 20
+      OUTBOX_RETRY_BASE_SECONDS: 2
+      OUTBOX_PROCESSING_TIMEOUT_SECONDS: 60
+    depends_on:
+      - wallet-ledger-service
+      - rabbitmq
+
   api-gateway-service:
     build:
       context: ../services/api_gateway_service

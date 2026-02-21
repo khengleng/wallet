@@ -23,6 +23,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 - `ENVIRONMENT`
 - `SERVICE_API_KEY` (required for all `/v1/*` API calls via `X-Service-Api-Key`)
 - `SECRET_KEY` (for platform-level secret hygiene; this service itself does not issue auth tokens)
+- `BROKER_URL` (AMQP URL for outbox relay, e.g. RabbitMQ)
+- `OUTBOX_EXCHANGE` (default `wallet.events`)
+- `OUTBOX_EXCHANGE_TYPE` (default `topic`)
+- `OUTBOX_ROUTING_KEY_PREFIX` (default `ledger`)
 
 ## Database Migration
 Run schema migration as a separate command before starting traffic:
@@ -51,5 +55,18 @@ python -m app.migrate
 - `POST /v1/transactions/deposit` (requires `Idempotency-Key`)
 - `POST /v1/transactions/withdraw` (requires `Idempotency-Key`)
 - `POST /v1/transactions/transfer` (requires `Idempotency-Key`)
+
+## Outbox Relay Worker
+Run the worker as a separate process:
+
+```bash
+python -m app.outbox_worker
+```
+
+Behavior:
+- claims events with `FOR UPDATE SKIP LOCKED`
+- publishes to RabbitMQ exchange
+- retries with exponential backoff
+- moves exhausted events to `dead_letter`
 
 See contracts in `docs/contracts/wallet-ledger-events.md`.
