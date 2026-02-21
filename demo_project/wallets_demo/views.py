@@ -375,14 +375,24 @@ def keycloak_callback(request):
     if not _use_keycloak_oidc():
         return redirect("login")
 
-    expected_state = request.session.pop("oidc_state", "")
+    expected_state = request.session.get("oidc_state", "")
     provided_state = request.GET.get("state", "")
     code = request.GET.get("code", "")
-    if not expected_state or expected_state != provided_state or not code:
+    if not code:
+        if request.user.is_authenticated:
+            return redirect("dashboard")
+        messages.error(request, "Invalid login callback state.")
+        return redirect("login")
+
+    if expected_state and expected_state != provided_state:
+        if request.user.is_authenticated:
+            return redirect("dashboard")
         messages.error(request, "Invalid login callback state.")
         return redirect("login")
 
     try:
+        request.session.pop("oidc_state", None)
+        request.session.pop("oidc_nonce", None)
         token_payload = _keycloak_token_exchange(code)
         access_token = token_payload.get("access_token", "")
         if not access_token:
