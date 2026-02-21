@@ -1,171 +1,515 @@
 {% extends 'wallets_demo/base.html' %}
 
-{% block title %}Wallet Management - DJ Wallet{% endblock %}
+{% block title %}Customer & Wallet Admin - {{ org_name }}{% endblock %}
+
+{% block extra_style %}
+<style>
+    .tab-bar {
+        display: flex;
+        gap: 0.25rem;
+        border-bottom: 2px solid var(--border);
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+    }
+
+    .tab-btn {
+        padding: 0.6rem 1.1rem;
+        border: none;
+        background: none;
+        cursor: pointer;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        border-radius: 0.4rem 0.4rem 0 0;
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+
+    .tab-btn:hover {
+        color: var(--primary);
+        background: rgba(99, 102, 241, 0.05);
+    }
+
+    .tab-btn.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+        background: rgba(99, 102, 241, 0.08);
+    }
+
+    .tab-pane {
+        display: none;
+    }
+
+    .tab-pane.active {
+        display: block;
+    }
+
+    .wallet-table td code {
+        background: var(--bg);
+        padding: 0.15rem 0.4rem;
+        border-radius: 0.3rem;
+        font-size: 0.78rem;
+        word-break: break-all;
+    }
+
+    .badge-active {
+        background: #dcfce7;
+        color: #166534;
+        padding: 0.2rem 0.6rem;
+        border-radius: 9999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+
+    .badge-blocked {
+        background: #fee2e2;
+        color: #991b1b;
+        padding: 0.2rem 0.6rem;
+        border-radius: 9999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+
+    .badge-closed {
+        background: #f1f5f9;
+        color: #475569;
+        padding: 0.2rem 0.6rem;
+        border-radius: 9999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+    }
+
+    .section-divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 1.5rem 0;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<div class="card">
-    <h2>Wallet Management</h2>
-    <p class="text-muted">CIF-driven onboarding, wallet opening, freeze/unfreeze, and adjustments for users and merchants.</p>
+<div class="card" style="margin-bottom:1.25rem;">
+    <h2>Customer &amp; Wallet Admin</h2>
+    <p class="text-muted">CIF-driven onboarding, wallet opening, freeze/unfreeze, and adjustments for users and
+        merchants.</p>
 </div>
 
 {% if not can_manage_wallet_management %}
 <div class="card">
-    <p class="text-muted">You currently do not have wallet management permission.</p>
+    <p class="text-muted">You do not have wallet management permission.</p>
 </div>
 {% else %}
 
-<div class="card">
-    <h3>Customer Onboarding (CIF)</h3>
-    <p class="text-muted">CIF number becomes immutable after first creation for a customer. Leave CIF empty to auto-generate using prefix <code>{{ operation_settings.cif_id_prefix }}</code>.</p>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="form_type" value="cif_onboard" />
-        <div class="form-group"><label>User</label><select name="user_id" required>{% for u in users_for_cif %}<option value="{{ u.id }}">{{ u.username }} ({{ u.email|default:"-" }})</option>{% endfor %}</select></div>
-        <div class="form-group"><label>CIF Number (optional)</label><input type="text" name="cif_no" maxlength="40" placeholder="{{ operation_settings.cif_id_prefix }}-AUTO" /></div>
-        <div class="form-group"><label>Legal Name</label><input type="text" name="legal_name" maxlength="128" required /></div>
-        <div class="form-group"><label>Mobile Number</label><input type="text" name="mobile_no" maxlength="40" /></div>
-        <div class="form-group"><label>Email</label><input type="email" name="email" /></div>
-        <div class="form-group"><label>Status</label><select name="status">{% for value, label in cif_status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
-        <button type="submit" class="btn btn-primary">Create / Update CIF</button>
-    </form>
+<!-- Tab Bar -->
+<div class="tab-bar" id="wm-tab-bar">
+    <button class="tab-btn active" data-tab="tab-customer" onclick="switchTab(this,'tab-customer')">👤 Customer
+        (CIF)</button>
+    <button class="tab-btn" data-tab="tab-wallets-ops" onclick="switchTab(this,'tab-wallets-ops')">⚙️ Wallet
+        Operations</button>
+    <button class="tab-btn" data-tab="tab-wallets" onclick="switchTab(this,'tab-wallets')">💼 User Wallets</button>
+    <button class="tab-btn" data-tab="tab-merchants" onclick="switchTab(this,'tab-merchants')">🏪 Merchant
+        Wallets</button>
 </div>
 
-<div class="card">
-    <h3>CIF Search</h3>
-    <form method="get">
-        <div class="form-group"><label>Keyword</label><input type="text" name="q" value="{{ cif_query }}" placeholder="CIF, legal name, username, email, mobile" /></div>
-        <div class="form-group">
-            <label>Status</label>
-            <select name="cif_status">
-                <option value="">All</option>
-                {% for value, label in cif_status_choices %}
-                    <option value="{{ value }}"{% if selected_cif_status == value %} selected{% endif %}>{{ label }}</option>
+<!-- ============================================================ -->
+<!-- TAB 1: Customer CIF Onboarding + Search                      -->
+<!-- ============================================================ -->
+<div class="tab-pane active" id="tab-customer">
+
+    <div class="card">
+        <h3>Customer Onboarding (CIF)</h3>
+        <p class="text-muted">CIF number becomes immutable after first creation. Leave CIF empty to auto-generate using
+            prefix <code>{{ operation_settings.cif_id_prefix }}</code>.</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="cif_onboard" />
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                    <label>User</label>
+                    <select name="user_id" required>
+                        {% for u in users_for_cif %}
+                        <option value="{{ u.id }}">{{ u.username }} ({{ u.email|default:"-" }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>CIF Number (optional)</label>
+                    <input type="text" name="cif_no" maxlength="40"
+                        placeholder="{{ operation_settings.cif_id_prefix }}-AUTO" />
+                </div>
+                <div class="form-group">
+                    <label>Legal Name</label>
+                    <input type="text" name="legal_name" maxlength="128" required />
+                </div>
+                <div class="form-group">
+                    <label>Mobile Number</label>
+                    <input type="text" name="mobile_no" maxlength="40" />
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" name="email" />
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select name="status">
+                        {% for value, label in cif_status_choices %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Create / Update CIF</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>CIF Search</h3>
+        <form method="get">
+            <div style="display:grid; grid-template-columns:1fr auto auto; gap:1rem; align-items:flex-end;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Keyword</label>
+                    <input type="text" name="q" value="{{ cif_query }}"
+                        placeholder="CIF, legal name, username, email, mobile" />
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Status</label>
+                    <select name="cif_status">
+                        <option value="">All</option>
+                        {% for value, label in cif_status_choices %}
+                        <option value="{{ value }}" {% if selected_cif_status==value %} selected{% endif %}>{{ label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div style="padding-bottom:0.1rem;">
+                    <button type="submit" class="btn btn-primary">Search</button>
+                </div>
+            </div>
+        </form>
+
+        {% if customer_cifs %}
+        <table class="wallet-table" style="margin-top:1.25rem;">
+            <thead>
+                <tr>
+                    <th>CIF No</th>
+                    <th>Legal Name</th>
+                    <th>Username</th>
+                    <th>Mobile</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cif in customer_cifs %}
+                <tr>
+                    <td><code>{{ cif.cif_no }}</code></td>
+                    <td>{{ cif.legal_name }}</td>
+                    <td>{{ cif.user.username }}</td>
+                    <td>{{ cif.mobile_no|default:"-" }}</td>
+                    <td>{{ cif.email|default:"-" }}</td>
+                    <td>
+                        {% if cif.status == "active" %}<span class="badge-active">Active</span>
+                        {% elif cif.status == "blocked" %}<span class="badge-blocked">Blocked</span>
+                        {% else %}<span class="badge-closed">Closed</span>{% endif %}
+                    </td>
+                    <td style="font-size:0.8rem; color:var(--text-muted);">{{ cif.created_at|date:"d M Y" }}</td>
+                </tr>
                 {% endfor %}
-            </select>
+            </tbody>
+        </table>
+        {% if customer_cifs.paginator.num_pages > 1 %}
+        <div style="display:flex; gap:0.5rem; margin-top:1rem; align-items:center;">
+            <span class="text-muted" style="font-size:0.85rem;">Page {{ customer_cifs.number }} of {{
+                customer_cifs.paginator.num_pages }}</span>
+            {% if customer_cifs.has_previous %}
+            <a class="btn btn-outline"
+                href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.previous_page_number }}">←
+                Prev</a>
+            {% endif %}
+            {% if customer_cifs.has_next %}
+            <a class="btn btn-outline"
+                href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.next_page_number }}">Next
+                →</a>
+            {% endif %}
         </div>
-        <button type="submit" class="btn btn-primary">Search CIF</button>
-    </form>
-</div>
-
-<div class="card">
-    <h3>Open Customer Wallet (by CIF)</h3>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="form_type" value="wallet_open_user" />
-        <div class="form-group"><label>Customer CIF</label><select name="cif_id" required>{% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} - {{ cif.legal_name }} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{% endfor %}</select></div>
-        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
-        <button type="submit" class="btn btn-primary">Open Customer Wallet</button>
-    </form>
-</div>
-
-<div class="card">
-    <h3>Open Merchant Wallet</h3>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="form_type" value="wallet_open_merchant" />
-        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} ({{ m.wallet_type }})</option>{% endfor %}</select></div>
-        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
-        <button type="submit" class="btn btn-primary">Open Merchant Wallet</button>
-    </form>
-</div>
-
-<div class="card">
-    <h3>Adjust Customer Wallet (by CIF)</h3>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="form_type" value="wallet_adjust_user" />
-        <div class="form-group"><label>Customer CIF</label><select name="cif_id" required>{% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} - {{ cif.legal_name }} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{% endfor %}</select></div>
-        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
-        <div class="form-group"><label>Adjustment Type</label><select name="adjustment_type"><option value="deposit">Deposit</option><option value="withdraw">Withdraw</option></select></div>
-        <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount" required /></div>
-        <div class="form-group"><label>Reason</label><input type="text" name="reason" /></div>
-        <button type="submit" class="btn btn-primary">Adjust Customer Wallet</button>
-    </form>
-</div>
-
-<div class="card">
-    <h3>Adjust Merchant Wallet</h3>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="form_type" value="wallet_adjust_merchant" />
-        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} ({{ m.wallet_type }})</option>{% endfor %}</select></div>
-        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
-        <div class="form-group"><label>Adjustment Type</label><select name="adjustment_type"><option value="deposit">Deposit</option><option value="withdraw">Withdraw</option></select></div>
-        <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount" required /></div>
-        <div class="form-group"><label>Reason</label><input type="text" name="reason" /></div>
-        <button type="submit" class="btn btn-primary">Adjust Merchant Wallet</button>
-    </form>
-</div>
-
-<div class="card">
-    <h3>Freeze / Unfreeze Wallet</h3>
-    <form method="post">
-        {% csrf_token %}
-        <input type="hidden" name="form_type" value="wallet_toggle_freeze" />
-        <div class="form-group"><label>Holder Scope</label><select name="holder_scope"><option value="user">User</option><option value="merchant">Merchant</option></select></div>
-        <div class="form-group"><label>Customer CIF (for user scope)</label><select name="cif_id">{% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} - {{ cif.legal_name }} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{% endfor %}</select></div>
-        <div class="form-group"><label>Merchant (for merchant scope)</label><select name="merchant_id">{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% empty %}<option value="">No merchant found</option>{% endfor %}</select></div>
-        <div class="form-group"><label>Wallet Slug</label><input type="text" name="wallet_slug" value="default" required /></div>
-        <div class="form-group"><label>Action</label><select name="action"><option value="freeze">Freeze</option><option value="unfreeze">Unfreeze</option></select></div>
-        <button type="submit" class="btn btn-primary">Apply</button>
-    </form>
-</div>
-
-<div class="card">
-    <h3>Recent User Wallets</h3>
-    <table>
-        <thead><tr><th>Wallet ID</th><th>User</th><th>CIF</th><th>Wallet Type</th><th>Slug</th><th>Balance</th><th>Meta</th></tr></thead>
-        <tbody>
-            {% for wallet, holder, cif in user_wallet_rows %}
-                <tr>
-                    <td>{{ wallet.id }}</td>
-                    <td>{% if holder %}{{ holder.username }}{% else %}#{{ wallet.holder_id }}{% endif %}</td>
-                    <td>{% if cif %}{{ cif.cif_no }}{% else %}-{% endif %}</td>
-                    <td>{% if holder %}{{ holder.wallet_type }}{% else %}-{% endif %}</td>
-                    <td>{{ wallet.slug }}</td>
-                    <td>{{ wallet.balance }}</td>
-                    <td><code>{{ wallet.meta }}</code></td>
-                </tr>
-            {% empty %}
-                <tr><td colspan="7" class="text-muted" style="text-align:center;">No user wallets.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-<div class="card">
-    <h3>Recent Merchant Wallets</h3>
-    <table>
-        <thead><tr><th>Wallet ID</th><th>Merchant</th><th>Wallet Type</th><th>Slug</th><th>Balance</th><th>Meta</th></tr></thead>
-        <tbody>
-            {% for wallet, holder in merchant_wallet_rows %}
-                <tr>
-                    <td>{{ wallet.id }}</td>
-                    <td>{% if holder %}{{ holder.code }}{% else %}#{{ wallet.holder_id }}{% endif %}</td>
-                    <td>{% if holder %}{{ holder.wallet_type }}{% else %}-{% endif %}</td>
-                    <td>{{ wallet.slug }}</td>
-                    <td>{{ wallet.balance }}</td>
-                    <td><code>{{ wallet.meta }}</code></td>
-                </tr>
-            {% empty %}
-                <tr><td colspan="6" class="text-muted" style="text-align:center;">No merchant wallets.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-{% if customer_cifs.paginator.num_pages > 1 %}
-<div class="card">
-    <p class="text-muted">CIF page {{ customer_cifs.number }} of {{ customer_cifs.paginator.num_pages }}</p>
-    <p>
-        {% if customer_cifs.has_previous %}
-            <a class="btn btn-outline" href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.previous_page_number }}">Previous</a>
         {% endif %}
-        {% if customer_cifs.has_next %}
-            <a class="btn btn-outline" href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.next_page_number }}">Next</a>
+        {% else %}
+        <p class="text-muted" style="margin-top:1rem;">No CIF records found.</p>
         {% endif %}
-    </p>
+    </div>
 </div>
+
+<!-- ============================================================ -->
+<!-- TAB 2: Wallet Operations                                     -->
+<!-- ============================================================ -->
+<div class="tab-pane" id="tab-wallets-ops">
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem;">
+
+        <!-- Open Customer Wallet -->
+        <div class="card" style="margin-bottom:0;">
+            <h3>Open Customer Wallet</h3>
+            <p class="text-muted" style="font-size:0.85rem;">Opens a wallet for a CIF-linked customer by currency.</p>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="form_type" value="wallet_open_user" />
+                <div class="form-group">
+                    <label>Customer CIF</label>
+                    <select name="cif_id" required>
+                        {% for cif in customer_cifs %}
+                        <option value="{{ cif.id }}">{{ cif.cif_no }} – {{ cif.legal_name }} ({{ cif.user.username }})
+                        </option>
+                        {% empty %}<option value="">No CIF found</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor
+                        %}</select>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Open Customer Wallet</button>
+            </form>
+        </div>
+
+        <!-- Open Merchant Wallet -->
+        <div class="card" style="margin-bottom:0;">
+            <h3>Open Merchant Wallet</h3>
+            <p class="text-muted" style="font-size:0.85rem;">Opens a wallet for a merchant by currency.</p>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="form_type" value="wallet_open_merchant" />
+                <div class="form-group">
+                    <label>Merchant</label>
+                    <select name="merchant_id" required>
+                        {% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} ({{ m.wallet_type }})</option>{%
+                        endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor
+                        %}</select>
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Open Merchant Wallet</button>
+            </form>
+        </div>
+
+        <!-- Adjust Customer Wallet -->
+        <div class="card" style="margin-bottom:0;">
+            <h3>Adjust Customer Wallet</h3>
+            <p class="text-muted" style="font-size:0.85rem;">Manual credit or debit on a customer wallet.</p>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="form_type" value="wallet_adjust_user" />
+                <div class="form-group">
+                    <label>Customer CIF</label>
+                    <select name="cif_id" required>
+                        {% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} – {{ cif.legal_name
+                            }} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{%
+                        endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor
+                        %}</select>
+                </div>
+                <div class="form-group">
+                    <label>Adjustment Type</label>
+                    <select name="adjustment_type">
+                        <option value="deposit">Deposit</option>
+                        <option value="withdraw">Withdraw</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount"
+                        required /></div>
+                <div class="form-group"><label>Reason</label><input type="text" name="reason" /></div>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Adjust Customer Wallet</button>
+            </form>
+        </div>
+
+        <!-- Adjust Merchant Wallet -->
+        <div class="card" style="margin-bottom:0;">
+            <h3>Adjust Merchant Wallet</h3>
+            <p class="text-muted" style="font-size:0.85rem;">Manual credit or debit on a merchant wallet.</p>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="form_type" value="wallet_adjust_merchant" />
+                <div class="form-group">
+                    <label>Merchant</label>
+                    <select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }}
+                            ({{ m.wallet_type }})</option>{% endfor %}</select>
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="currency">{% for c in supported_currencies %}<option>{{ c }}</option>{% endfor
+                        %}</select>
+                </div>
+                <div class="form-group">
+                    <label>Adjustment Type</label>
+                    <select name="adjustment_type">
+                        <option value="deposit">Deposit</option>
+                        <option value="withdraw">Withdraw</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount"
+                        required /></div>
+                <div class="form-group"><label>Reason</label><input type="text" name="reason" /></div>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Adjust Merchant Wallet</button>
+            </form>
+        </div>
+
+    </div>
+
+    <!-- Freeze / Unfreeze -->
+    <div class="card" style="margin-top:1.25rem;">
+        <h3>Freeze / Unfreeze Wallet</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="wallet_toggle_freeze" />
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                    <label>Holder Scope</label>
+                    <select name="holder_scope">
+                        <option value="user">User</option>
+                        <option value="merchant">Merchant</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Action</label>
+                    <select name="action">
+                        <option value="freeze">Freeze</option>
+                        <option value="unfreeze">Unfreeze</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Customer CIF (for user scope)</label>
+                    <select name="cif_id">
+                        {% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} – {{ cif.legal_name
+                            }} ({{ cif.user.username }})</option>{% empty %}<option value="">No CIF found</option>{%
+                        endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Merchant (for merchant scope)</label>
+                    <select name="merchant_id">
+                        {% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} – {{ m.name }}</option>{% empty
+                        %}<option value="">No merchant found</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Wallet Slug</label>
+                    <input type="text" name="wallet_slug" value="default" required />
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Apply Freeze / Unfreeze</button>
+        </form>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 3: User Wallets                                          -->
+<!-- ============================================================ -->
+<div class="tab-pane" id="tab-wallets">
+    <div class="card">
+        <h3>User Wallets <span class="text-muted" style="font-weight:400; font-size:0.85rem;">(latest 200)</span></h3>
+        <div style="overflow-x:auto;">
+            <table class="wallet-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>CIF No</th>
+                        <th>Type</th>
+                        <th>Slug</th>
+                        <th>Currency</th>
+                        <th>Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for wallet, holder, cif in user_wallet_rows %}
+                    <tr>
+                        <td><code>{{ wallet.id }}</code></td>
+                        <td>{% if holder %}{{ holder.username }}{% else %}#{{ wallet.holder_id }}{% endif %}</td>
+                        <td>{% if cif %}<code>{{ cif.cif_no }}</code>{% else %}<span class="text-muted">—</span>{% endif
+                            %}</td>
+                        <td>{% if holder %}{{ holder.get_wallet_type_display|default:holder.wallet_type }}{% else %}—{%
+                            endif %}</td>
+                        <td>{{ wallet.slug }}</td>
+                        <td>{{ wallet.meta.currency|default:"USD" }}</td>
+                        <td style="font-weight:600;">{{ wallet.balance }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-muted" style="text-align:center;">No user wallets.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 4: Merchant Wallets                                      -->
+<!-- ============================================================ -->
+<div class="tab-pane" id="tab-merchants">
+    <div class="card">
+        <h3>Merchant Wallets <span class="text-muted" style="font-weight:400; font-size:0.85rem;">(latest 200)</span>
+        </h3>
+        <div style="overflow-x:auto;">
+            <table class="wallet-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Merchant Code</th>
+                        <th>Type</th>
+                        <th>Slug</th>
+                        <th>Currency</th>
+                        <th>Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for wallet, holder in merchant_wallet_rows %}
+                    <tr>
+                        <td><code>{{ wallet.id }}</code></td>
+                        <td>{% if holder %}{{ holder.code }}{% else %}#{{ wallet.holder_id }}{% endif %}</td>
+                        <td>{% if holder %}{{ holder.wallet_type }}{% else %}—{% endif %}</td>
+                        <td>{{ wallet.slug }}</td>
+                        <td>{{ wallet.meta.currency|default:"USD" }}</td>
+                        <td style="font-weight:600;">{{ wallet.balance }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted" style="text-align:center;">No merchant wallets.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 {% endif %}
-{% endif %}
+
+<script>
+    function switchTab(btn, tabId) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(tabId).classList.add('active');
+        // persist tab in URL hash
+        history.replaceState(null, '', '#' + tabId);
+    }
+    // Restore tab from URL hash
+    (function () {
+        const hash = location.hash.replace('#', '');
+        if (hash) {
+            const btn = document.querySelector('[data-tab="' + hash + '"]');
+            if (btn) switchTab(btn, hash);
+        }
+    })();
+</script>
 {% endblock %}
