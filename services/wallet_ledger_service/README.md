@@ -22,6 +22,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 - `DATABASE_URL`
 - `ENVIRONMENT`
 - `SERVICE_API_KEY` (required for all `/v1/*` API calls via `X-Service-Api-Key`)
+- `METRICS_TOKEN` (required in production for `/metrics`)
 - `SECRET_KEY` (for platform-level secret hygiene; this service itself does not issue auth tokens)
 - `BROKER_URL` (AMQP URL for outbox relay, e.g. RabbitMQ)
 - `OUTBOX_EXCHANGE` (default `wallet.events`)
@@ -55,6 +56,11 @@ python -m app.migrate
 - `POST /v1/transactions/deposit` (requires `Idempotency-Key`)
 - `POST /v1/transactions/withdraw` (requires `Idempotency-Key`)
 - `POST /v1/transactions/transfer` (requires `Idempotency-Key`)
+
+## Metrics Auth
+- `GET /metrics` accepts:
+  - `Authorization: Bearer <METRICS_TOKEN>` (recommended)
+  - `X-Metrics-Token: <METRICS_TOKEN>` (legacy compatibility)
 
 ## Outbox Relay Worker
 Run the worker as a separate process:

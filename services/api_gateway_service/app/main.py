@@ -393,8 +393,14 @@ async def _proxy(
 
 def _require_metrics_token(
     x_metrics_token: str | None = Header(default=None, alias="X-Metrics-Token"),
+    authorization: str | None = Header(default=None, alias="Authorization"),
 ):
-    if settings.metrics_token and x_metrics_token != settings.metrics_token:
+    if not settings.metrics_token:
+        return
+    bearer_token = ""
+    if authorization and authorization.startswith("Bearer "):
+        bearer_token = authorization.split(" ", 1)[1]
+    if x_metrics_token != settings.metrics_token and bearer_token != settings.metrics_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

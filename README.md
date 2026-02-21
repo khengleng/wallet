@@ -232,6 +232,7 @@ This repository now includes deployment and architecture scaffolding for high-sc
   - API gateway service root: `services/api_gateway_service` (uses local `nixpacks.toml`)
   - Ops/risk service root: `services/ops_risk_service` (uses local `nixpacks.toml`)
   - Prometheus service root: `services/prometheus` (uses local `Dockerfile`)
+  - Alertmanager service root: `services/alertmanager` (uses local `Dockerfile`)
   - Grafana service root: `services/grafana` (uses local `Dockerfile`)
 
 Production defaults enforce:

@@ -35,6 +35,7 @@ if settings.is_production:
             ("DATABASE_URL", settings.database_url),
             ("SIEM_WEBHOOK_URL", settings.siem_webhook_url),
             ("SIEM_SIGNING_SECRET", settings.siem_signing_secret),
+            ("METRICS_TOKEN", settings.metrics_token),
         )
         if not value
     ]

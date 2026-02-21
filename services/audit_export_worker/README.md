@@ -13,6 +13,7 @@ SIEM export pipeline for `wallets_demo_backofficeauditlog`.
 - `DATABASE_URL`
 - `SIEM_WEBHOOK_URL`
 - `SIEM_SIGNING_SECRET`
+- `METRICS_TOKEN` (required in production for `/metrics`)
 
 ## Optional Env Vars
 - `SERVICE_NAME` (default `audit-export-worker`)
@@ -22,7 +23,6 @@ SIEM export pipeline for `wallets_demo_backofficeauditlog`.
 - `EXPORT_MAX_ATTEMPTS` (default `20`)
 - `EXPORT_RETRY_BASE_SECONDS` (default `2`)
 - `EXPORT_REPLAY_BATCH_SIZE` (default `100`)
-- `METRICS_TOKEN` (optional)
 
 ## Run Locally
 ```bash
@@ -37,3 +37,8 @@ Replay dead letters manually:
 ```bash
 python -m app.replay_dead_letters --limit 200
 ```
+
+## Metrics Auth
+- `GET /metrics` accepts:
+  - `Authorization: Bearer <METRICS_TOKEN>` (recommended)
+  - `X-Metrics-Token: <METRICS_TOKEN>` (legacy compatibility)

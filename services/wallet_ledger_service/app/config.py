@@ -33,5 +33,16 @@ class Settings:
 
 settings = Settings()
 
-if settings.is_production and not settings.service_api_key:
-    raise RuntimeError("SERVICE_API_KEY must be set in production.")
+if settings.is_production:
+    missing = [
+        key
+        for key, value in (
+            ("SERVICE_API_KEY", settings.service_api_key),
+            ("METRICS_TOKEN", settings.metrics_token),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            f"Missing required production settings: {', '.join(missing)}"
+        )

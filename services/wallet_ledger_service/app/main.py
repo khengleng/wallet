@@ -85,8 +85,14 @@ def require_service_api_key(
 
 def require_metrics_token(
     x_metrics_token: Annotated[str | None, Header(alias="X-Metrics-Token")] = None,
+    authorization: Annotated[str | None, Header(alias="Authorization")] = None,
 ):
-    if settings.metrics_token and x_metrics_token != settings.metrics_token:
+    if not settings.metrics_token:
+        return
+    bearer_token = ""
+    if authorization and authorization.startswith("Bearer "):
+        bearer_token = authorization.split(" ", 1)[1]
+    if x_metrics_token != settings.metrics_token and bearer_token != settings.metrics_token:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

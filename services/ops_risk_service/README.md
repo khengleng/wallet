@@ -32,9 +32,14 @@ python -m app.replay_dead_letters --limit 200
 ## Required Env Vars
 - `DATABASE_URL`
 - `BROKER_URL`
-- `METRICS_TOKEN` (recommended; required by observability collectors if set)
+- `METRICS_TOKEN` (required in production for `/metrics`)
 - `EVENT_EXCHANGE_NAME` (default `wallet.events`)
 - `EVENT_EXCHANGE_TYPE` (default `topic`)
 - `EVENT_QUEUE_NAME` (default `ops_risk_events`)
 - `EVENT_ROUTING_KEY` (default `ledger.#`)
 - `RISK_HIGH_VALUE_THRESHOLD` (default `10000`)
+
+## Metrics Auth
+- `GET /metrics` accepts:
+  - `Authorization: Bearer <METRICS_TOKEN>` (recommended)
+  - `X-Metrics-Token: <METRICS_TOKEN>` (legacy compatibility)

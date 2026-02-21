@@ -87,6 +87,7 @@ if settings.is_production:
             for key, value in (
                 ("LEDGER_API_KEY", settings.ledger_api_key),
                 ("LEDGER_BASE_URL", settings.ledger_base_url),
+                ("METRICS_TOKEN", settings.metrics_token),
             )
             if not value
         ]

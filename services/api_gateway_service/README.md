@@ -30,6 +30,7 @@ JWT-authenticated gateway in front of `wallet-ledger-service`.
 - `LEDGER_RETRY_BACKOFF_SECONDS` (default `0.2`)
 - `LEDGER_CIRCUIT_FAILURE_THRESHOLD` (default `5`)
 - `LEDGER_CIRCUIT_RESET_SECONDS` (default `30`)
+- `METRICS_TOKEN` (required in production for `/metrics`)
 - `RATE_LIMIT_PER_IP` (default `120/minute`)
 - `RATE_LIMIT_PER_USER` (default `240/minute`)
 - Tiered endpoint rate limits:
@@ -55,3 +56,4 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8082
 
 ## Metrics
 - `wallet_gateway_waf_blocked_total` increments when requests are blocked by WAF deny rules.
+- Auth: set `Authorization: Bearer <METRICS_TOKEN>` or `X-Metrics-Token: <METRICS_TOKEN>`.

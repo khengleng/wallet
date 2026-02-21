@@ -1,0 +1,32 @@
+# Keycloak Hardening Baseline
+
+## Realm Security
+- Enable brute-force detection and temporary lockout.
+- Set short access token lifespan and reasonable refresh token lifespan.
+- Require email verification for self-registration.
+- Enable required actions: update password, configure OTP.
+
+## MFA Policy
+- Enforce OTP for privileged roles:
+  - `super_admin`
+  - `admin`
+  - `finance`
+  - `risk`
+  - `operation`
+- Keep step-up authentication for sensitive actions (maker-checker approvals, treasury disbursement).
+
+## Session Controls
+- Limit concurrent sessions per user.
+- Configure idle and max session timeout.
+- Revoke sessions on password reset / suspicious events.
+
+## Client Security
+- Use confidential clients for server-side apps.
+- Rotate client secrets regularly.
+- Restrict valid redirect URIs to exact URLs.
+- Restrict web origins and CORS to trusted domains only.
+
+## Audit and Monitoring
+- Forward admin and auth events to SIEM pipeline.
+- Alert on repeated login failures, admin role changes, and token errors.
+- Periodically review role mappings and dormant privileged accounts.

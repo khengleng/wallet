@@ -24,3 +24,6 @@ class Settings:
 
 
 settings = Settings()
+
+if settings.is_production and not settings.metrics_token:
+    raise RuntimeError("METRICS_TOKEN must be set in production.")
