@@ -1,0 +1,129 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}Operations Center - DJ Wallet{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Business Operations Center</h2>
+    <p class="text-muted">Manage merchants, customer cases, and loyalty operations in one place.</p>
+</div>
+
+<div class="card">
+    <h3>Create Merchant</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="merchant_create" />
+        <div class="form-group"><label>Merchant Code</label><input type="text" name="merchant_code" required /></div>
+        <div class="form-group"><label>Merchant Name</label><input type="text" name="merchant_name" required /></div>
+        <div class="form-group"><label>Settlement Currency</label>
+            <select name="settlement_currency">
+                {% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}
+            </select>
+        </div>
+        <div class="form-group"><label>Owner User (optional)</label>
+            <select name="owner_user_id"><option value="">-- none --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select>
+        </div>
+        <div class="form-group"><label>Contact Email</label><input type="email" name="contact_email" /></div>
+        <div class="form-group"><label>Contact Phone</label><input type="text" name="contact_phone" /></div>
+        <div class="form-group"><label>Loyalty Earn Rate</label><input type="number" step="0.0001" min="0.0001" name="earn_rate" value="1.0000" required /></div>
+        <div class="form-group"><label>Loyalty Redeem Rate</label><input type="number" step="0.0001" min="0.0001" name="redeem_rate" value="1.0000" required /></div>
+        <div class="form-group"><label><input type="checkbox" name="loyalty_enabled" checked /> Loyalty Enabled</label></div>
+        <div class="form-group">
+            <label>Wallet Flow Capabilities</label>
+            <label><input type="checkbox" name="supports_b2b" checked /> B2B</label>
+            <label><input type="checkbox" name="supports_b2c" checked /> B2C</label>
+            <label><input type="checkbox" name="supports_c2b" checked /> C2B</label>
+            <label><input type="checkbox" name="supports_p2g" /> P2G</label>
+            <label><input type="checkbox" name="supports_g2p" /> G2P</label>
+        </div>
+        <button class="btn btn-primary" type="submit">Create Merchant</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Create Case (Complaint / Dispute / Refund)</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="case_create" />
+        <div class="form-group"><label>Case Type</label><select name="case_type">{% for value, label in case_type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Priority</label><select name="case_priority">{% for value, label in case_priority_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Customer</label><select name="case_customer_id" required>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Merchant (optional)</label><select name="case_merchant_id"><option value="">-- none --</option>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Title</label><input type="text" name="case_title" required /></div>
+        <div class="form-group"><label>Description</label><textarea name="case_description" rows="3"></textarea></div>
+        <button class="btn btn-primary" type="submit">Create Case</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Create Loyalty Event</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="loyalty_event_create" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Customer</label><select name="customer_id" required>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Event Type</label><select name="event_type">{% for value, label in event_type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Flow Type</label><select name="flow_type">{% for value, label in flow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount" required /></div>
+        <div class="form-group"><label>Reference</label><input type="text" name="reference" /></div>
+        <div class="form-group"><label>Note</label><input type="text" name="note" /></div>
+        <button class="btn btn-primary" type="submit">Record Loyalty Event</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Open Cases</h3>
+    <table>
+        <thead><tr><th>Case</th><th>Type</th><th>Priority</th><th>Status</th><th>Customer</th><th>Merchant</th><th>Assigned</th><th>Action</th></tr></thead>
+        <tbody>
+            {% for item in cases %}
+                <tr>
+                    <td>{{ item.case_no }}</td>
+                    <td>{{ item.case_type }}</td>
+                    <td>{{ item.priority }}</td>
+                    <td>{{ item.status }}</td>
+                    <td>{{ item.customer.username }}</td>
+                    <td>{% if item.merchant %}{{ item.merchant.code }}{% else %}-{% endif %}</td>
+                    <td>{% if item.assigned_to %}{{ item.assigned_to.username }}{% else %}-{% endif %}</td>
+                    <td>
+                        <form method="post" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_type" value="case_update" />
+                            <input type="hidden" name="case_id" value="{{ item.id }}" />
+                            <select name="status">{% for value, label in case_status_choices %}<option value="{{ value }}"{% if item.status == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+                            <select name="assigned_to"><option value="">-- unassigned --</option>{% for u in users %}<option value="{{ u.id }}"{% if item.assigned_to and item.assigned_to.id == u.id %} selected{% endif %}>{{ u.username }}</option>{% endfor %}</select>
+                            <input type="text" name="note" placeholder="Internal note" />
+                            <button class="btn btn-outline" type="submit">Update</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="8" class="text-muted" style="text-align:center;">No cases yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Recent Loyalty Events</h3>
+    <table>
+        <thead><tr><th>Time</th><th>Merchant</th><th>Customer</th><th>Type</th><th>Flow</th><th>Points</th><th>Amount</th><th>Ref</th></tr></thead>
+        <tbody>
+            {% for event in loyalty_events %}
+                <tr>
+                    <td>{{ event.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ event.merchant.code }}</td>
+                    <td>{{ event.customer.username }}</td>
+                    <td>{{ event.event_type }}</td>
+                    <td>{{ event.flow_type|upper }}</td>
+                    <td>{{ event.points }}</td>
+                    <td>{{ event.amount }} {{ event.currency }}</td>
+                    <td>{{ event.reference|default:"-" }}</td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="8" class="text-muted" style="text-align:center;">No loyalty events yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

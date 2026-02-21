@@ -38,12 +38,24 @@ from .models import (
     JournalEntry,
     JournalLine,
     LoginLockout,
+    Merchant,
+    MerchantLoyaltyEvent,
+    MerchantLoyaltyProgram,
+    MerchantWalletCapability,
+    OperationCase,
+    OperationCaseNote,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
+    FLOW_B2B,
+    FLOW_B2C,
+    FLOW_C2B,
+    FLOW_G2P,
+    FLOW_P2G,
+    FLOW_CHOICES,
 )
 from .rbac import (
-    ACCOUNTING_CHECKER_ROLES,
+ACCOUNTING_CHECKER_ROLES,
     ACCOUNTING_ROLES,
     BACKOFFICE_ROLES,
     CHECKER_ROLES,
@@ -843,6 +855,25 @@ def _new_entry_no() -> str:
     return f"JE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
 
 
+def _new_case_no() -> str:
+    return f"CASE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def _merchant_loyalty_wallet_slug(merchant_code: str) -> str:
+    slug = f"loyalty_{merchant_code.lower()}"
+    return slug[:64]
+
+
+def _merchant_loyalty_wallet(user: User, merchant: Merchant):
+    wallet = user.get_wallet(_merchant_loyalty_wallet_slug(merchant.code))
+    meta = wallet.meta if isinstance(wallet.meta, dict) else {}
+    meta["currency"] = "POINT"
+    meta["merchant_code"] = merchant.code
+    wallet.meta = meta
+    wallet.save(update_fields=["meta"])
+    return wallet
+
+
 @login_required
 def accounting_dashboard(request):
     if not user_has_any_role(request.user, ACCOUNTING_ROLES):
@@ -1006,6 +1037,214 @@ def accounting_dashboard(request):
             "supported_currencies": _supported_currencies(),
             "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:50],
             "base_currency": getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper(),
+        },
+    )
+
+
+@login_required
+def operations_center(request):
+    operation_roles = ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "sales")
+    if not user_has_any_role(request.user, operation_roles):
+        raise PermissionDenied("You do not have access to operations center.")
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "").strip().lower()
+        try:
+            if form_type == "merchant_create":
+                _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "sales", "finance"))
+                code = (request.POST.get("merchant_code") or "").strip().upper()
+                name = (request.POST.get("merchant_name") or "").strip()
+                settlement_currency = _normalize_currency(request.POST.get("settlement_currency"))
+                owner_id = request.POST.get("owner_user_id")
+                owner = User.objects.filter(id=owner_id).first() if owner_id else None
+                if not code or not name:
+                    raise ValidationError("Merchant code and name are required.")
+                merchant = Merchant.objects.create(
+                    code=code,
+                    name=name,
+                    settlement_currency=settlement_currency,
+                    contact_email=(request.POST.get("contact_email") or "").strip(),
+                    contact_phone=(request.POST.get("contact_phone") or "").strip(),
+                    owner=owner,
+                    created_by=request.user,
+                    updated_by=request.user,
+                )
+                MerchantLoyaltyProgram.objects.create(
+                    merchant=merchant,
+                    is_enabled=request.POST.get("loyalty_enabled") == "on",
+                    earn_rate=Decimal(request.POST.get("earn_rate") or "1"),
+                    redeem_rate=Decimal(request.POST.get("redeem_rate") or "1"),
+                )
+                MerchantWalletCapability.objects.create(
+                    merchant=merchant,
+                    supports_b2b=request.POST.get("supports_b2b") == "on",
+                    supports_b2c=request.POST.get("supports_b2c") == "on",
+                    supports_c2b=request.POST.get("supports_c2b") == "on",
+                    supports_p2g=request.POST.get("supports_p2g") == "on",
+                    supports_g2p=request.POST.get("supports_g2p") == "on",
+                )
+                _audit(
+                    request,
+                    "merchant.create",
+                    target_type="Merchant",
+                    target_id=str(merchant.id),
+                    metadata={"code": merchant.code, "currency": settlement_currency},
+                )
+                messages.success(request, f"Merchant {merchant.code} created.")
+                return redirect("operations_center")
+
+            if form_type == "case_create":
+                _require_role_or_perm(request.user, roles=operation_roles)
+                customer = User.objects.get(id=request.POST.get("case_customer_id"))
+                merchant_id = request.POST.get("case_merchant_id")
+                merchant = Merchant.objects.filter(id=merchant_id).first() if merchant_id else None
+                title = (request.POST.get("case_title") or "").strip()
+                if title == "":
+                    raise ValidationError("Case title is required.")
+                case = OperationCase.objects.create(
+                    case_no=_new_case_no(),
+                    case_type=(request.POST.get("case_type") or OperationCase.TYPE_COMPLAINT).strip(),
+                    priority=(request.POST.get("case_priority") or OperationCase.PRIORITY_MEDIUM).strip(),
+                    title=title,
+                    description=(request.POST.get("case_description") or "").strip(),
+                    customer=customer,
+                    merchant=merchant,
+                    assigned_to=request.user,
+                    created_by=request.user,
+                )
+                _audit(
+                    request,
+                    "operations.case.create",
+                    target_type="OperationCase",
+                    target_id=str(case.id),
+                    metadata={"case_no": case.case_no, "case_type": case.case_type},
+                )
+                messages.success(request, f"Case {case.case_no} created.")
+                return redirect("operations_center")
+
+            if form_type == "case_update":
+                _require_role_or_perm(request.user, roles=operation_roles)
+                case = OperationCase.objects.get(id=request.POST.get("case_id"))
+                case.status = (request.POST.get("status") or case.status).strip()
+                assigned_user_id = request.POST.get("assigned_to")
+                case.assigned_to = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
+                if case.status in (OperationCase.STATUS_RESOLVED, OperationCase.STATUS_CLOSED):
+                    case.resolved_at = timezone.now()
+                case.save(update_fields=["status", "assigned_to", "resolved_at", "updated_at"])
+                note_text = (request.POST.get("note") or "").strip()
+                if note_text:
+                    OperationCaseNote.objects.create(
+                        case=case,
+                        note=note_text,
+                        is_internal=True,
+                        created_by=request.user,
+                    )
+                _audit(
+                    request,
+                    "operations.case.update",
+                    target_type="OperationCase",
+                    target_id=str(case.id),
+                    metadata={"status": case.status},
+                )
+                messages.success(request, f"Case {case.case_no} updated.")
+                return redirect("operations_center")
+
+            if form_type == "loyalty_event_create":
+                _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "customer_service", "sales", "finance"))
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                customer = User.objects.get(id=request.POST.get("customer_id"))
+                program, _program_created = MerchantLoyaltyProgram.objects.get_or_create(
+                    merchant=merchant
+                )
+                if not program.is_enabled:
+                    raise ValidationError("Loyalty program is disabled for this merchant.")
+
+                flow_type = (request.POST.get("flow_type") or FLOW_B2C).strip().lower()
+                capability, _capability_created = MerchantWalletCapability.objects.get_or_create(
+                    merchant=merchant
+                )
+                if not capability.supports_flow(flow_type):
+                    raise ValidationError(f"Flow {flow_type.upper()} is disabled for {merchant.code}.")
+
+                event_type = (request.POST.get("event_type") or MerchantLoyaltyEvent.TYPE_ACCRUAL).strip()
+                amount = _parse_amount(request.POST.get("amount"))
+                reference = (request.POST.get("reference") or "").strip()
+                note = (request.POST.get("note") or "").strip()
+
+                with transaction.atomic():
+                    wallet_service = get_wallet_service()
+                    customer_wallet = _merchant_loyalty_wallet(customer, merchant)
+                    if event_type == MerchantLoyaltyEvent.TYPE_ACCRUAL:
+                        points = (amount * program.earn_rate).quantize(Decimal("0.01"))
+                        wallet_service.deposit(
+                            customer_wallet,
+                            points,
+                            meta={
+                                "type": "merchant_loyalty_accrual",
+                                "merchant_code": merchant.code,
+                                "reference": reference,
+                                "flow_type": flow_type,
+                            },
+                        )
+                    else:
+                        points = amount.quantize(Decimal("0.01"))
+                        wallet_service.withdraw(
+                            customer_wallet,
+                            points,
+                            meta={
+                                "type": "merchant_loyalty_redemption",
+                                "merchant_code": merchant.code,
+                                "reference": reference,
+                                "flow_type": flow_type,
+                            },
+                        )
+                    MerchantLoyaltyEvent.objects.create(
+                        merchant=merchant,
+                        customer=customer,
+                        event_type=event_type,
+                        flow_type=flow_type,
+                        points=points,
+                        amount=amount,
+                        currency=merchant.settlement_currency,
+                        reference=reference,
+                        note=note,
+                        created_by=request.user,
+                    )
+
+                _audit(
+                    request,
+                    "merchant.loyalty.event.create",
+                    target_type="Merchant",
+                    target_id=str(merchant.id),
+                    metadata={
+                        "event_type": event_type,
+                        "flow_type": flow_type,
+                        "points": str(points),
+                        "customer": customer.username,
+                    },
+                )
+                messages.success(request, f"Loyalty {event_type} recorded for {customer.username}.")
+                return redirect("operations_center")
+        except Exception as exc:
+            messages.error(request, f"Operation failed: {exc}")
+
+    merchants = Merchant.objects.select_related("owner").order_by("code")[:200]
+    cases = OperationCase.objects.select_related("customer", "merchant", "assigned_to").order_by("-created_at")[:100]
+    loyalty_events = MerchantLoyaltyEvent.objects.select_related("merchant", "customer").order_by("-created_at")[:100]
+    return render(
+        request,
+        "wallets_demo/operations_center.html",
+        {
+            "merchants": merchants,
+            "cases": cases,
+            "loyalty_events": loyalty_events,
+            "users": User.objects.order_by("username")[:300],
+            "supported_currencies": _supported_currencies(),
+            "flow_choices": FLOW_CHOICES,
+            "case_type_choices": OperationCase.TYPE_CHOICES,
+            "case_priority_choices": OperationCase.PRIORITY_CHOICES,
+            "case_status_choices": OperationCase.STATUS_CHOICES,
+            "event_type_choices": MerchantLoyaltyEvent.TYPE_CHOICES,
         },
     )
 

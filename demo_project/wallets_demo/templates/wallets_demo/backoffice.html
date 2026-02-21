@@ -7,6 +7,7 @@
     <h2>Backoffice Console</h2>
     <p class="text-muted">Roles: {{ role_names|join:", " }}</p>
     <p><a class="btn btn-outline" href="{% url 'treasury_dashboard' %}">Open Treasury Console</a></p>
+    <p><a class="btn btn-outline" href="{% url 'operations_center' %}">Open Business Operations Center</a></p>
     {% if can_access_accounting %}
     <p><a class="btn btn-outline" href="{% url 'accounting_dashboard' %}">Open Accounting Console</a></p>
     <p><a class="btn btn-outline" href="{% url 'fx_management' %}">Open FX Management</a></p>

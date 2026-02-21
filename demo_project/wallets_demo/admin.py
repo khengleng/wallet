@@ -9,6 +9,12 @@ from .models import (
     JournalEntry,
     JournalLine,
     LoginLockout,
+    Merchant,
+    MerchantLoyaltyEvent,
+    MerchantLoyaltyProgram,
+    MerchantWalletCapability,
+    OperationCase,
+    OperationCaseNote,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -139,3 +145,72 @@ class FxRateAdmin(admin.ModelAdmin):
     )
     list_filter = ("base_currency", "quote_currency", "source_provider", "is_active")
     search_fields = ("base_currency", "quote_currency", "source_provider")
+
+
+@admin.register(Merchant)
+class MerchantAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "status", "settlement_currency", "owner", "updated_at")
+    list_filter = ("status", "settlement_currency")
+    search_fields = ("code", "name", "contact_email")
+
+
+@admin.register(MerchantLoyaltyProgram)
+class MerchantLoyaltyProgramAdmin(admin.ModelAdmin):
+    list_display = ("merchant", "is_enabled", "earn_rate", "redeem_rate", "updated_at")
+    list_filter = ("is_enabled",)
+    search_fields = ("merchant__code", "merchant__name")
+
+
+@admin.register(MerchantWalletCapability)
+class MerchantWalletCapabilityAdmin(admin.ModelAdmin):
+    list_display = (
+        "merchant",
+        "supports_b2b",
+        "supports_b2c",
+        "supports_c2b",
+        "supports_p2g",
+        "supports_g2p",
+        "updated_at",
+    )
+    list_filter = ("supports_b2b", "supports_b2c", "supports_c2b", "supports_p2g", "supports_g2p")
+    search_fields = ("merchant__code", "merchant__name")
+
+
+@admin.register(MerchantLoyaltyEvent)
+class MerchantLoyaltyEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "merchant",
+        "customer",
+        "event_type",
+        "flow_type",
+        "points",
+        "amount",
+        "currency",
+        "reference",
+        "created_at",
+    )
+    list_filter = ("event_type", "flow_type", "currency", "created_at")
+    search_fields = ("merchant__code", "customer__username", "reference")
+
+
+@admin.register(OperationCase)
+class OperationCaseAdmin(admin.ModelAdmin):
+    list_display = (
+        "case_no",
+        "case_type",
+        "priority",
+        "status",
+        "customer",
+        "merchant",
+        "assigned_to",
+        "created_at",
+    )
+    list_filter = ("case_type", "priority", "status", "created_at")
+    search_fields = ("case_no", "title", "customer__username", "merchant__code")
+
+
+@admin.register(OperationCaseNote)
+class OperationCaseNoteAdmin(admin.ModelAdmin):
+    list_display = ("case", "created_by", "is_internal", "created_at")
+    list_filter = ("is_internal", "created_at")
+    search_fields = ("case__case_no", "created_by__username", "note")

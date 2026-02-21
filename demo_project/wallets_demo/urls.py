@@ -9,6 +9,7 @@ urlpatterns = [
     path('backoffice/audit/export/', views.backoffice_audit_export, name='backoffice_audit_export'),
     path('backoffice/rbac/', views.rbac_management, name='rbac_management'),
     path('backoffice/fx/', views.fx_management, name='fx_management'),
+    path('backoffice/operations/', views.operations_center, name='operations_center'),
     path('backoffice/accounting/', views.accounting_dashboard, name='accounting_dashboard'),
     path(
         'backoffice/accounting/entries/<int:entry_id>/post/',

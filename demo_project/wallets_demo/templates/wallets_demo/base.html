@@ -319,6 +319,7 @@
                 {% if user|has_any_role:"admin,super_admin,finance,treasury,customer_service,risk,operation,sales" %}
                     <div class="sidebar-section-title">Back Office</div>
                     <a class="sidebar-link{% if request.resolver_match.url_name == 'backoffice' %} active{% endif %}" href="{% url 'backoffice' %}">Operations</a>
+                    <a class="sidebar-link{% if request.resolver_match.url_name == 'operations_center' %} active{% endif %}" href="{% url 'operations_center' %}">Business Ops</a>
                     <a class="sidebar-link{% if request.resolver_match.url_name == 'treasury_dashboard' %} active{% endif %}" href="{% url 'treasury_dashboard' %}">Treasury</a>
                     <a class="sidebar-link{% if request.resolver_match.url_name == 'accounting_dashboard' %} active{% endif %}" href="{% url 'accounting_dashboard' %}">Accounting</a>
                 {% endif %}

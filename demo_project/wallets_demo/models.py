@@ -9,6 +9,19 @@ from django.utils import timezone
 from dj_wallet.mixins import WalletMixin
 from .rbac import user_has_any_role, user_is_checker
 
+FLOW_B2B = "b2b"
+FLOW_B2C = "b2c"
+FLOW_C2B = "c2b"
+FLOW_P2G = "p2g"
+FLOW_G2P = "g2p"
+FLOW_CHOICES = (
+    (FLOW_B2B, "B2B"),
+    (FLOW_B2C, "B2C"),
+    (FLOW_C2B, "C2B"),
+    (FLOW_P2G, "P2G"),
+    (FLOW_G2P, "G2P"),
+)
+
 class User(WalletMixin, AbstractUser):
     @property
     def role_names(self) -> list[str]:
@@ -583,3 +596,248 @@ class FxRate(models.Model):
                 timeout=ttl,
             )
         return latest
+
+
+class Merchant(WalletMixin, models.Model):
+    STATUS_ACTIVE = "active"
+    STATUS_SUSPENDED = "suspended"
+    STATUS_INACTIVE = "inactive"
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_SUSPENDED, "Suspended"),
+        (STATUS_INACTIVE, "Inactive"),
+    )
+
+    code = models.CharField(max_length=40, unique=True)
+    name = models.CharField(max_length=128)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    settlement_currency = models.CharField(max_length=12, default="USD")
+    contact_email = models.EmailField(blank=True, default="")
+    contact_phone = models.CharField(max_length=40, blank=True, default="")
+    owner = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="managed_merchants",
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="created_merchants",
+    )
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="updated_merchants",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("code",)
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class MerchantLoyaltyProgram(models.Model):
+    merchant = models.OneToOneField(
+        Merchant, on_delete=models.CASCADE, related_name="loyalty_program"
+    )
+    is_enabled = models.BooleanField(default=True)
+    earn_rate = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        default=Decimal("1.0000"),
+        help_text="Points earned for each 1 unit of settlement currency spent.",
+    )
+    redeem_rate = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        default=Decimal("1.0000"),
+        help_text="Currency value deducted for each 1 point redeemed.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("merchant__code",)
+
+    def clean(self):
+        if self.earn_rate <= Decimal("0"):
+            raise ValidationError("Earn rate must be greater than 0.")
+        if self.redeem_rate <= Decimal("0"):
+            raise ValidationError("Redeem rate must be greater than 0.")
+
+    def __str__(self):
+        return f"{self.merchant.code} loyalty"
+
+
+class MerchantWalletCapability(models.Model):
+    merchant = models.OneToOneField(
+        Merchant, on_delete=models.CASCADE, related_name="wallet_capability"
+    )
+    supports_b2b = models.BooleanField(default=True)
+    supports_b2c = models.BooleanField(default=True)
+    supports_c2b = models.BooleanField(default=True)
+    supports_p2g = models.BooleanField(default=False)
+    supports_g2p = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "Merchant wallet capabilities"
+        ordering = ("merchant__code",)
+
+    def supports_flow(self, flow_type: str) -> bool:
+        return {
+            FLOW_B2B: self.supports_b2b,
+            FLOW_B2C: self.supports_b2c,
+            FLOW_C2B: self.supports_c2b,
+            FLOW_P2G: self.supports_p2g,
+            FLOW_G2P: self.supports_g2p,
+        }.get(flow_type, False)
+
+    def __str__(self):
+        return f"{self.merchant.code} capability"
+
+
+class MerchantLoyaltyEvent(models.Model):
+    TYPE_ACCRUAL = "accrual"
+    TYPE_REDEMPTION = "redemption"
+    TYPE_CHOICES = (
+        (TYPE_ACCRUAL, "Accrual"),
+        (TYPE_REDEMPTION, "Redemption"),
+    )
+
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.PROTECT, related_name="loyalty_events"
+    )
+    customer = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="loyalty_events"
+    )
+    event_type = models.CharField(max_length=16, choices=TYPE_CHOICES)
+    flow_type = models.CharField(max_length=8, choices=FLOW_CHOICES, default=FLOW_B2C)
+    points = models.DecimalField(max_digits=20, decimal_places=2)
+    amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=Decimal("0"),
+        help_text="Settlement currency amount tied to the event.",
+    )
+    currency = models.CharField(max_length=12, default="USD")
+    reference = models.CharField(max_length=128, blank=True, default="")
+    note = models.CharField(max_length=255, blank=True, default="")
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="created_loyalty_events",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def clean(self):
+        if self.points <= Decimal("0"):
+            raise ValidationError("Points must be greater than 0.")
+        if self.amount < Decimal("0"):
+            raise ValidationError("Amount cannot be negative.")
+
+    def __str__(self):
+        return (
+            f"{self.merchant.code}:{self.customer.username}:{self.event_type}:{self.points}"
+        )
+
+
+class OperationCase(models.Model):
+    TYPE_COMPLAINT = "complaint"
+    TYPE_DISPUTE = "dispute"
+    TYPE_REFUND = "refund"
+    TYPE_INCIDENT = "incident"
+    TYPE_CHOICES = (
+        (TYPE_COMPLAINT, "Complaint"),
+        (TYPE_DISPUTE, "Dispute"),
+        (TYPE_REFUND, "Refund"),
+        (TYPE_INCIDENT, "Incident"),
+    )
+
+    PRIORITY_LOW = "low"
+    PRIORITY_MEDIUM = "medium"
+    PRIORITY_HIGH = "high"
+    PRIORITY_CRITICAL = "critical"
+    PRIORITY_CHOICES = (
+        (PRIORITY_LOW, "Low"),
+        (PRIORITY_MEDIUM, "Medium"),
+        (PRIORITY_HIGH, "High"),
+        (PRIORITY_CRITICAL, "Critical"),
+    )
+
+    STATUS_OPEN = "open"
+    STATUS_IN_PROGRESS = "in_progress"
+    STATUS_ESCALATED = "escalated"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_PROGRESS, "In Progress"),
+        (STATUS_ESCALATED, "Escalated"),
+        (STATUS_RESOLVED, "Resolved"),
+        (STATUS_CLOSED, "Closed"),
+    )
+
+    case_no = models.CharField(max_length=40, unique=True)
+    case_type = models.CharField(max_length=16, choices=TYPE_CHOICES)
+    priority = models.CharField(max_length=16, choices=PRIORITY_CHOICES, default=PRIORITY_MEDIUM)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    customer = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="operation_cases",
+    )
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operation_cases",
+    )
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="assigned_operation_cases",
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_operation_cases"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.case_no} ({self.status})"
+
+
+class OperationCaseNote(models.Model):
+    case = models.ForeignKey(
+        OperationCase, on_delete=models.CASCADE, related_name="notes"
+    )
+    note = models.TextField()
+    is_internal = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="operation_case_notes"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.case.case_no} note by {self.created_by.username}"
