@@ -33,6 +33,7 @@ python -m app.replay_dead_letters --limit 200
 - `DATABASE_URL`
 - `BROKER_URL`
 - `METRICS_TOKEN` (required in production for `/metrics`)
+- `ALERT_WEBHOOK_TOKEN` (required in production for `/v1/alerts/ingest`)
 - `EVENT_EXCHANGE_NAME` (default `wallet.events`)
 - `EVENT_EXCHANGE_TYPE` (default `topic`)
 - `EVENT_QUEUE_NAME` (default `ops_risk_events`)
@@ -43,3 +44,7 @@ python -m app.replay_dead_letters --limit 200
 - `GET /metrics` accepts:
   - `Authorization: Bearer <METRICS_TOKEN>` (recommended)
   - `X-Metrics-Token: <METRICS_TOKEN>` (legacy compatibility)
+
+## Alertmanager Webhook
+- `POST /v1/alerts/ingest?token=<ALERT_WEBHOOK_TOKEN>`
+- Persists incoming alert payloads into `alert_notifications`.

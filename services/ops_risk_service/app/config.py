@@ -11,6 +11,7 @@ class Settings:
     )
     broker_url: str = os.getenv("BROKER_URL", "amqp://guest:guest@localhost:5672/%2F")
     metrics_token: str = os.getenv("METRICS_TOKEN", "")
+    alert_webhook_token: str = os.getenv("ALERT_WEBHOOK_TOKEN", "")
     exchange_name: str = os.getenv("EVENT_EXCHANGE_NAME", "wallet.events")
     exchange_type: str = os.getenv("EVENT_EXCHANGE_TYPE", "topic")
     queue_name: str = os.getenv("EVENT_QUEUE_NAME", "ops_risk_events")
@@ -25,5 +26,14 @@ class Settings:
 
 settings = Settings()
 
-if settings.is_production and not settings.metrics_token:
-    raise RuntimeError("METRICS_TOKEN must be set in production.")
+if settings.is_production:
+    missing = [
+        key
+        for key, value in (
+            ("METRICS_TOKEN", settings.metrics_token),
+            ("ALERT_WEBHOOK_TOKEN", settings.alert_webhook_token),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(f"Missing required production settings: {', '.join(missing)}")

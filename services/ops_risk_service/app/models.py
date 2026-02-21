@@ -63,3 +63,19 @@ class DeadLetterEvent(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
     )
     last_replayed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AlertNotification(Base):
+    __tablename__ = "alert_notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    status: Mapped[str] = mapped_column(String(16), default="firing", index=True)
+    alert_name: Mapped[str] = mapped_column(String(128), default="", index=True)
+    severity: Mapped[str] = mapped_column(String(32), default="", index=True)
+    service: Mapped[str] = mapped_column(String(64), default="", index=True)
+    payload: Mapped[dict] = mapped_column(JSONB, default=dict)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
