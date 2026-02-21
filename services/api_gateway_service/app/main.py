@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from collections import defaultdict, deque
+from threading import Lock
 from typing import Any
 from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from jose import JWTError, jwt
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from .config import settings
 from .schemas import AccountCreateRequest, MoneyRequest, TransferRequest
@@ -20,10 +20,9 @@ app = FastAPI(
     version="1.0.0",
     description="JWT auth, rate-limited gateway for wallet ledger operations.",
 )
-limiter = Limiter(key_func=get_remote_address, default_limits=[])
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 logger = logging.getLogger("api_gateway.audit")
+rate_lock = Lock()
+rate_windows: dict[str, deque[float]] = defaultdict(deque)
 
 
 def _audit(event: str, **fields: Any) -> None:
@@ -65,32 +64,65 @@ def _decode_jwt(authorization: str | None) -> dict[str, Any]:
     return claims
 
 
-def _try_extract_subject(authorization: str | None) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        return "anonymous"
-    token = authorization.split(" ", 1)[1]
-    try:
-        claims = jwt.decode(
-            token,
-            settings.jwt_secret,
-            algorithms=[settings.jwt_algorithm],
-            audience=settings.jwt_audience,
-            issuer=settings.jwt_issuer,
-        )
-    except JWTError:
-        return "anonymous"
-    return str(claims.get("sub") or "anonymous")
-
-
 def require_user(
     authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> dict[str, Any]:
     return _decode_jwt(authorization)
 
 
-def user_rate_key(request: Request) -> str:
-    subject = _try_extract_subject(request.headers.get("Authorization"))
-    return f"{subject}:{get_remote_address(request)}"
+def _parse_rate_limit(rate: str) -> tuple[int, int]:
+    limit_raw, _, window_raw = rate.partition("/")
+    limit = int(limit_raw)
+    unit = window_raw.strip().lower()
+    if unit == "second":
+        return limit, 1
+    if unit == "minute":
+        return limit, 60
+    if unit == "hour":
+        return limit, 3600
+    raise ValueError(f"Unsupported rate-limit unit: {unit}")
+
+
+def _consume(key: str, limit_value: int, window_seconds: int) -> bool:
+    now = time.monotonic()
+    with rate_lock:
+        entries = rate_windows[key]
+        cutoff = now - window_seconds
+        while entries and entries[0] <= cutoff:
+            entries.popleft()
+        if len(entries) >= limit_value:
+            return False
+        entries.append(now)
+        return True
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def enforce_rate_limits(
+    request: Request,
+    claims: dict[str, Any] = Depends(require_user),
+) -> dict[str, Any]:
+    ip_limit, ip_window = _parse_rate_limit(settings.per_ip_limit)
+    user_limit, user_window = _parse_rate_limit(settings.per_user_limit)
+    ip = _client_ip(request)
+    subject = str(claims["sub"])
+
+    if not _consume(f"ip:{ip}", ip_limit, ip_window):
+        _audit("rate_limited", reason="ip_limit", ip=ip)
+        raise HTTPException(status_code=429, detail="Too many requests")
+    if not _consume(f"user:{subject}", user_limit, user_window):
+        _audit("rate_limited", reason="user_limit", subject=subject, ip=ip)
+        raise HTTPException(status_code=429, detail="Too many requests")
+
+    request.state.subject = subject
+    return claims
 
 
 async def _proxy(
@@ -133,41 +165,32 @@ async def readyz():
 
 
 @app.post("/v1/accounts")
-@limiter.limit(settings.per_ip_limit)
-@limiter.limit(settings.per_user_limit, key_func=user_rate_key)
 async def create_account(
     request: Request,
     payload: AccountCreateRequest,
-    claims: dict[str, Any] = Depends(require_user),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
 ):
-    request.state.subject = claims["sub"]
     _audit("create_account", subject=claims["sub"], external_owner_id=payload.external_owner_id)
     return await _proxy("POST", "/v1/accounts", payload.model_dump(mode="json"))
 
 
 @app.get("/v1/accounts/{account_id}")
-@limiter.limit(settings.per_ip_limit)
-@limiter.limit(settings.per_user_limit, key_func=user_rate_key)
 async def get_account(
     request: Request,
     account_id: UUID,
-    claims: dict[str, Any] = Depends(require_user),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
 ):
-    request.state.subject = claims["sub"]
     _audit("read_account", subject=claims["sub"], account_id=str(account_id))
     return await _proxy("GET", f"/v1/accounts/{account_id}")
 
 
 @app.post("/v1/transactions/deposit")
-@limiter.limit(settings.per_ip_limit)
-@limiter.limit(settings.per_user_limit, key_func=user_rate_key)
 async def deposit(
     request: Request,
     payload: MoneyRequest,
-    claims: dict[str, Any] = Depends(require_user),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
-    request.state.subject = claims["sub"]
     _audit(
         "deposit_attempt",
         subject=claims["sub"],
@@ -183,15 +206,12 @@ async def deposit(
 
 
 @app.post("/v1/transactions/withdraw")
-@limiter.limit(settings.per_ip_limit)
-@limiter.limit(settings.per_user_limit, key_func=user_rate_key)
 async def withdraw(
     request: Request,
     payload: MoneyRequest,
-    claims: dict[str, Any] = Depends(require_user),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
-    request.state.subject = claims["sub"]
     _audit(
         "withdraw_attempt",
         subject=claims["sub"],
@@ -207,15 +227,12 @@ async def withdraw(
 
 
 @app.post("/v1/transactions/transfer")
-@limiter.limit(settings.per_ip_limit)
-@limiter.limit(settings.per_user_limit, key_func=user_rate_key)
 async def transfer(
     request: Request,
     payload: TransferRequest,
-    claims: dict[str, Any] = Depends(require_user),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
-    request.state.subject = claims["sub"]
     _audit(
         "transfer_attempt",
         subject=claims["sub"],
