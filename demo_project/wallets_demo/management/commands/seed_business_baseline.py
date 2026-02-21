@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from wallets_demo.models import ChartOfAccount, TreasuryAccount
+from wallets_demo.models import ChartOfAccount, FxRate, TreasuryAccount
 
 
 class Command(BaseCommand):
@@ -40,5 +40,22 @@ class Command(BaseCommand):
             )
             if created:
                 self.stdout.write(f"Created COA account: {chart.code} {chart.name}")
+
+        fx_defaults = [
+            ("USD", "EUR", "0.92000000"),
+            ("EUR", "USD", "1.08695652"),
+            ("USD", "SGD", "1.35000000"),
+            ("SGD", "USD", "0.74074074"),
+            ("USD", "GBP", "0.79000000"),
+            ("GBP", "USD", "1.26582278"),
+        ]
+        for base, quote, rate in fx_defaults:
+            fx, created = FxRate.objects.get_or_create(
+                base_currency=base,
+                quote_currency=quote,
+                defaults={"rate": rate, "is_active": True},
+            )
+            if created:
+                self.stdout.write(f"Created FX rate: {base}/{quote}={rate}")
 
         self.stdout.write(self.style.SUCCESS("Business baseline seed complete."))

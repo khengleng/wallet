@@ -1,9 +1,12 @@
+from decimal import Decimal
+
 from django.test import Client, TestCase
 from django.urls import reverse
 
 from .models import (
     ApprovalRequest,
     ChartOfAccount,
+    FxRate,
     JournalEntry,
     JournalLine,
     TreasuryAccount,
@@ -182,3 +185,25 @@ class AccountingWorkflowTests(TestCase):
 
         with self.assertRaises(Exception):
             entry.post(self.checker)
+
+
+class FxWorkflowTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.user = User.objects.create_user(username="fx_user", password="pass12345")
+        self.user.deposit(200)
+        FxRate.objects.create(base_currency="USD", quote_currency="EUR", rate="0.90000000")
+
+    def test_wallet_fx_exchange(self):
+        self.client.login(username="fx_user", password="pass12345")
+        response = self.client.post(
+            reverse("wallet_fx_exchange"),
+            {"from_currency": "USD", "to_currency": "EUR", "amount": "100.00"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.user.refresh_from_db()
+        usd_wallet = self.user.get_wallet("default")
+        eur_wallet = self.user.get_wallet("eur")
+        self.assertEqual(usd_wallet.balance, Decimal("100.00000000"))
+        self.assertEqual(eur_wallet.balance, Decimal("90.00000000"))

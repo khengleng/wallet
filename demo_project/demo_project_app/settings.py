@@ -166,16 +166,35 @@ dj_wallet = {
     "MATH_SCALE": 2,
     "DEFAULT_CURRENCY": "USD",
 }
+PLATFORM_BASE_CURRENCY = os.getenv("PLATFORM_BASE_CURRENCY", "USD").upper()
+SUPPORTED_CURRENCIES = [
+    c.strip().upper()
+    for c in os.getenv("SUPPORTED_CURRENCIES", "USD,EUR,SGD,GBP").split(",")
+    if c.strip()
+]
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
+SESSION_COOKIE_AGE = int(os.getenv("SESSION_COOKIE_AGE_SECONDS", "43200"))
+SESSION_SAVE_EVERY_REQUEST = True
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+
+LOGIN_LOCKOUT_WINDOW_MINUTES = int(os.getenv("LOGIN_LOCKOUT_WINDOW_MINUTES", "15"))
+LOGIN_LOCKOUT_THRESHOLD = int(os.getenv("LOGIN_LOCKOUT_THRESHOLD", "5"))
+LOGIN_LOCKOUT_DURATION_MINUTES = int(
+    os.getenv("LOGIN_LOCKOUT_DURATION_MINUTES", "30")
+)
+
+if IS_PRODUCTION and not CSRF_TRUSTED_ORIGINS and not IS_BUILD:
+    raise ImproperlyConfigured(
+        "CSRF_TRUSTED_ORIGINS must be set in production."
+    )
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

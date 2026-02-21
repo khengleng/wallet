@@ -219,6 +219,7 @@
                 <a href="{% url 'transfer' %}">Transfer</a>
                 <a href="{% url 'deposit' %}">Deposit</a>
                 <a href="{% url 'withdraw' %}">Withdraw</a>
+                <a href="{% url 'wallet_fx_exchange' %}">FX</a>
                 {% if user|has_any_role:"admin,super_admin,finance,treasury,customer_service,risk,operation,sales" %}
                     <a href="{% url 'backoffice' %}">Backoffice</a>
                     <a href="{% url 'treasury_dashboard' %}">Treasury</a>

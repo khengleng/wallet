@@ -4,8 +4,10 @@ from . import views
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
+    path('fx/exchange/', views.wallet_fx_exchange, name='wallet_fx_exchange'),
     path('backoffice/', views.backoffice, name='backoffice'),
     path('backoffice/rbac/', views.rbac_management, name='rbac_management'),
+    path('backoffice/fx/', views.fx_management, name='fx_management'),
     path('backoffice/accounting/', views.accounting_dashboard, name='accounting_dashboard'),
     path(
         'backoffice/accounting/entries/<int:entry_id>/post/',
@@ -27,6 +29,6 @@ urlpatterns = [
     path('withdraw/', views.withdraw, name='withdraw'),
     path('transfer/', views.transfer, name='transfer'),
     path('register/', views.register, name='register'),
-    path('login/', auth_views.LoginView.as_view(template_name='wallets_demo/login.html'), name='login'),
+    path('login/', views.portal_login, name='login'),
     path('logout/', auth_views.LogoutView.as_view(next_page='login'), name='logout'),
 ]

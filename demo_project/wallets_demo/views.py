@@ -1,7 +1,9 @@
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
-from django.contrib.auth import login
+from django.conf import settings
+from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -9,12 +11,16 @@ from django.utils import timezone
 from django.shortcuts import get_object_or_404, redirect, render
 
 from dj_wallet.models import Transaction, Wallet
+from dj_wallet.utils import get_exchange_service, get_wallet_service
 
 from .models import (
     ApprovalRequest,
+    BackofficeAuditLog,
     ChartOfAccount,
+    FxRate,
     JournalEntry,
     JournalLine,
+    LoginLockout,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -44,6 +50,112 @@ def _parse_amount(raw_value: str) -> Decimal:
     return value
 
 
+def _supported_currencies() -> list[str]:
+    return list(getattr(settings, "SUPPORTED_CURRENCIES", ["USD"]))
+
+
+def _normalize_currency(raw_value: str | None) -> str:
+    currency = (raw_value or getattr(settings, "PLATFORM_BASE_CURRENCY", "USD")).upper()
+    if currency not in _supported_currencies():
+        raise ValidationError(f"Unsupported currency: {currency}")
+    return currency
+
+
+def _wallet_slug(currency: str) -> str:
+    base = getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper()
+    if currency.upper() == base:
+        return "default"
+    return currency.lower()
+
+
+def _wallet_for_currency(user: User, currency: str):
+    slug = _wallet_slug(currency)
+    wallet = user.get_wallet(slug=slug)
+    if wallet.meta.get("currency") != currency:
+        wallet.meta["currency"] = currency
+        wallet.save(update_fields=["meta"])
+    return wallet
+
+
+def _fx_to_base(amount: Decimal, from_currency: str) -> Decimal | None:
+    base_currency = getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper()
+    source = from_currency.upper()
+    if source == base_currency:
+        return amount
+    fx = FxRate.latest_rate(source, base_currency)
+    if fx is None:
+        return None
+    return (amount * fx.rate).quantize(Decimal("0.0001"))
+
+
+def _client_ip(request) -> str:
+    forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _audit(
+    request,
+    action: str,
+    *,
+    target_type: str = "",
+    target_id: str = "",
+    metadata: dict | None = None,
+):
+    if not getattr(request.user, "is_authenticated", False):
+        return
+    BackofficeAuditLog.objects.create(
+        actor=request.user,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        ip_address=_client_ip(request) or None,
+        user_agent=(request.META.get("HTTP_USER_AGENT", "") or "")[:255],
+        metadata_json=metadata or {},
+    )
+
+
+def _require_role_or_perm(
+    user, *, roles: tuple[str, ...] = (), perms: tuple[str, ...] = ()
+) -> None:
+    if roles and not user_has_any_role(user, roles):
+        raise PermissionDenied("Role is not allowed for this operation.")
+    if perms and not all(user.has_perm(perm) for perm in perms):
+        raise PermissionDenied("Permission is not allowed for this operation.")
+
+
+def _is_locked(username: str, ip: str) -> bool:
+    row = LoginLockout.objects.filter(username=username, ip_address=ip).first()
+    return row.is_locked() if row else False
+
+
+def _register_failed_login(username: str, ip: str):
+    now = timezone.now()
+    window_minutes = getattr(settings, "LOGIN_LOCKOUT_WINDOW_MINUTES", 15)
+    threshold = getattr(settings, "LOGIN_LOCKOUT_THRESHOLD", 5)
+    lock_minutes = getattr(settings, "LOGIN_LOCKOUT_DURATION_MINUTES", 30)
+    window_start = now - timedelta(minutes=window_minutes)
+
+    row, _created = LoginLockout.objects.get_or_create(
+        username=username,
+        ip_address=ip,
+        defaults={"failed_attempts": 0, "first_failed_at": now},
+    )
+    if row.first_failed_at < window_start:
+        row.failed_attempts = 0
+        row.first_failed_at = now
+        row.lock_until = None
+    row.failed_attempts += 1
+    if row.failed_attempts >= threshold:
+        row.lock_until = now + timedelta(minutes=lock_minutes)
+    row.save()
+
+
+def _clear_login_lockout(username: str, ip: str):
+    LoginLockout.objects.filter(username=username, ip_address=ip).delete()
+
+
 def _should_use_maker_checker(user) -> bool:
     return user_is_maker(user) and not user_is_checker(user)
 
@@ -54,6 +166,7 @@ def _submit_approval_request(
     source_user: User,
     action: str,
     amount: Decimal,
+    currency: str,
     description: str,
     maker_note: str = "",
     recipient_user: User | None = None,
@@ -64,22 +177,70 @@ def _submit_approval_request(
         recipient_user=recipient_user,
         action=action,
         amount=amount,
+        currency=currency,
         description=description,
         maker_note=maker_note,
     )
     return request_obj
 
 
+def portal_login(request):
+    if request.user.is_authenticated:
+        return redirect("dashboard")
+
+    if request.method == "POST":
+        username = (request.POST.get("username") or "").strip()
+        password = request.POST.get("password") or ""
+        ip = _client_ip(request)
+
+        if _is_locked(username, ip):
+            messages.error(
+                request,
+                "Too many failed login attempts. Please try again later.",
+            )
+            return render(request, "wallets_demo/login.html")
+
+        user = authenticate(request, username=username, password=password)
+        if user is None:
+            _register_failed_login(username, ip)
+            messages.error(request, "Invalid username or password.")
+            return render(request, "wallets_demo/login.html")
+
+        _clear_login_lockout(username, ip)
+        login(request, user)
+        request.session.cycle_key()
+        return redirect("dashboard")
+
+    return render(request, "wallets_demo/login.html")
+
+
 @login_required
 def dashboard(request):
-    wallet = request.user.wallet
+    selected_currency = _normalize_currency(request.GET.get("currency"))
+    wallet = _wallet_for_currency(request.user, selected_currency)
     transactions = Transaction.objects.filter(wallet=wallet).order_by("-created_at")[:10]
+    wallets = Wallet.objects.filter(
+        holder_type=request.user.wallet.holder_type,
+        holder_id=request.user.id,
+    ).order_by("slug")
+    currency_balances = [
+        {
+            "currency": (w.meta.get("currency") or w.slug.upper()),
+            "balance": w.balance,
+            "slug": w.slug,
+        }
+        for w in wallets
+    ]
 
     return render(
         request,
         "wallets_demo/dashboard.html",
         {
             "transactions": transactions,
+            "selected_currency": selected_currency,
+            "supported_currencies": _supported_currencies(),
+            "currency_balances": currency_balances,
+            "selected_balance": wallet.balance,
         },
     )
 
@@ -121,8 +282,11 @@ def backoffice(request):
 def approval_decision(request, request_id: int):
     if request.method != "POST":
         return redirect("backoffice")
-    if not user_has_any_role(request.user, CHECKER_ROLES):
-        raise PermissionDenied("You do not have checker role.")
+    _require_role_or_perm(
+        request.user,
+        roles=CHECKER_ROLES,
+        perms=("wallets_demo.change_approvalrequest",),
+    )
 
     decision = request.POST.get("decision")
     checker_note = request.POST.get("checker_note", "")
@@ -131,9 +295,23 @@ def approval_decision(request, request_id: int):
     try:
         if decision == "approve":
             approval_request.approve(request.user, checker_note=checker_note)
+            _audit(
+                request,
+                "approval_request.approve",
+                target_type="ApprovalRequest",
+                target_id=str(approval_request.id),
+                metadata={"decision": decision},
+            )
             messages.success(request, f"Request #{approval_request.id} approved.")
         elif decision == "reject":
             approval_request.reject(request.user, checker_note=checker_note)
+            _audit(
+                request,
+                "approval_request.reject",
+                target_type="ApprovalRequest",
+                target_id=str(approval_request.id),
+                metadata={"decision": decision},
+            )
             messages.success(request, f"Request #{approval_request.id} rejected.")
         else:
             messages.error(request, "Invalid decision action.")
@@ -213,6 +391,48 @@ def treasury_decision(request, request_id: int):
     return redirect("treasury_dashboard")
 
 
+@login_required
+def fx_management(request):
+    _require_role_or_perm(
+        request.user,
+        roles=ACCOUNTING_ROLES,
+        perms=("wallets_demo.view_fxrate",),
+    )
+    if request.method == "POST":
+        try:
+            _require_role_or_perm(request.user, perms=("wallets_demo.add_fxrate",))
+            base = _normalize_currency(request.POST.get("base_currency"))
+            quote = _normalize_currency(request.POST.get("quote_currency"))
+            rate = _parse_amount(request.POST.get("rate"))
+            fx = FxRate.objects.create(
+                base_currency=base,
+                quote_currency=quote,
+                rate=rate,
+                created_by=request.user,
+            )
+            _audit(
+                request,
+                "fx_rate.create",
+                target_type="FxRate",
+                target_id=str(fx.id),
+                metadata={"pair": f"{base}/{quote}", "rate": str(rate)},
+            )
+            messages.success(request, f"FX rate {base}/{quote}={rate} created.")
+            return redirect("fx_management")
+        except Exception as exc:
+            messages.error(request, f"Unable to create FX rate: {exc}")
+
+    return render(
+        request,
+        "wallets_demo/fx_management.html",
+        {
+            "supported_currencies": _supported_currencies(),
+            "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:100],
+            "base_currency": getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper(),
+        },
+    )
+
+
 def _new_entry_no() -> str:
     return f"JE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
 
@@ -224,6 +444,33 @@ def accounting_dashboard(request):
 
     if request.method == "POST":
         form_type = request.POST.get("form_type")
+        if form_type == "fx_rate_create":
+            try:
+                _require_role_or_perm(
+                    request.user,
+                    perms=("wallets_demo.add_fxrate",),
+                )
+                base = _normalize_currency(request.POST.get("base_currency"))
+                quote = _normalize_currency(request.POST.get("quote_currency"))
+                rate = _parse_amount(request.POST.get("rate"))
+                fx = FxRate.objects.create(
+                    base_currency=base,
+                    quote_currency=quote,
+                    rate=rate,
+                    created_by=request.user,
+                )
+                _audit(
+                    request,
+                    "fx_rate.create",
+                    target_type="FxRate",
+                    target_id=str(fx.id),
+                    metadata={"pair": f"{base}/{quote}", "rate": str(rate)},
+                )
+                messages.success(request, f"FX rate {base}/{quote}={rate} created.")
+                return redirect("accounting_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Unable to create FX rate: {exc}")
+
         if form_type == "coa_create":
             try:
                 if not user_has_any_role(request.user, ("finance", "treasury", "admin", "super_admin")):
@@ -249,6 +496,7 @@ def accounting_dashboard(request):
             try:
                 reference = (request.POST.get("reference") or "").strip()
                 description = (request.POST.get("description") or "").strip()
+                entry_currency = _normalize_currency(request.POST.get("entry_currency"))
                 account_ids = request.POST.getlist("line_account")
                 sides = request.POST.getlist("line_side")
                 amounts = request.POST.getlist("line_amount")
@@ -263,6 +511,10 @@ def accounting_dashboard(request):
                     memo = memos[idx] if idx < len(memos) else ""
                     amount = _parse_amount(amount_raw)
                     account = ChartOfAccount.objects.get(id=account_id, is_active=True)
+                    if account.currency != entry_currency:
+                        raise ValidationError(
+                            f"Account {account.code} currency {account.currency} does not match entry currency {entry_currency}."
+                        )
                     if side == "debit":
                         parsed_lines.append((account, amount, Decimal("0"), memo))
                     elif side == "credit":
@@ -278,6 +530,7 @@ def accounting_dashboard(request):
                         entry_no=_new_entry_no(),
                         reference=reference,
                         description=description,
+                        currency=entry_currency,
                         created_by=request.user,
                     )
                     for account, debit, credit, memo in parsed_lines:
@@ -323,12 +576,14 @@ def accounting_dashboard(request):
     trial_balance = []
     for row in totals.values():
         net = row["debit"] - row["credit"]
+        net_base = _fx_to_base(net, row["account"].currency)
         trial_balance.append(
             {
                 "account": row["account"],
                 "debit": row["debit"],
                 "credit": row["credit"],
                 "net": net,
+                "net_base": net_base,
             }
         )
     trial_balance.sort(key=lambda item: item["account"].code)
@@ -342,6 +597,9 @@ def accounting_dashboard(request):
             "posted_entries": posted_entries,
             "trial_balance": trial_balance,
             "can_post_entries": user_has_any_role(request.user, ACCOUNTING_CHECKER_ROLES),
+            "supported_currencies": _supported_currencies(),
+            "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:50],
+            "base_currency": getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper(),
         },
     )
 
@@ -394,7 +652,53 @@ def rbac_management(request):
 
 
 @login_required
+def wallet_fx_exchange(request):
+    if request.method == "POST":
+        try:
+            from_currency = _normalize_currency(request.POST.get("from_currency"))
+            to_currency = _normalize_currency(request.POST.get("to_currency"))
+            if from_currency == to_currency:
+                raise ValidationError("Source and target currencies must be different.")
+            amount = _parse_amount(request.POST.get("amount"))
+            fx = FxRate.latest_rate(from_currency, to_currency)
+            if fx is None:
+                raise ValidationError(f"No active FX rate for {from_currency}/{to_currency}.")
+
+            exchange_service = get_exchange_service()
+            exchange_service.exchange(
+                request.user,
+                from_slug=_wallet_slug(from_currency),
+                to_slug=_wallet_slug(to_currency),
+                amount=amount,
+                rate=fx.rate,
+            )
+            messages.success(
+                request,
+                f"Converted {amount} {from_currency} to {to_currency} at rate {fx.rate}.",
+            )
+            return redirect("dashboard")
+        except Exception as exc:
+            messages.error(request, f"FX conversion failed: {exc}")
+            return redirect("wallet_fx_exchange")
+
+    wallets = Wallet.objects.filter(
+        holder_type=request.user.wallet.holder_type,
+        holder_id=request.user.id,
+    ).order_by("slug")
+    return render(
+        request,
+        "wallets_demo/fx_exchange.html",
+        {
+            "supported_currencies": _supported_currencies(),
+            "wallets": wallets,
+            "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:30],
+        },
+    )
+
+
+@login_required
 def deposit(request):
+    selected_currency = _normalize_currency(request.GET.get("currency") or request.POST.get("currency"))
     if request.method == "POST":
         description = request.POST.get("description", "Manual Deposit")
         maker_note = request.POST.get("maker_note", "")
@@ -407,6 +711,7 @@ def deposit(request):
                     source_user=request.user,
                     action=ApprovalRequest.ACTION_DEPOSIT,
                     amount=amount,
+                    currency=selected_currency,
                     description=description,
                     maker_note=maker_note,
                 )
@@ -417,28 +722,44 @@ def deposit(request):
                 return redirect("dashboard")
 
             with transaction.atomic():
-                request.user.deposit(amount, meta={"description": description})
-            messages.success(request, f"Successfully deposited ${amount}.")
+                wallet = _wallet_for_currency(request.user, selected_currency)
+                wallet_service = get_wallet_service()
+                wallet_service.deposit(
+                    wallet,
+                    amount,
+                    meta={"description": description, "currency": selected_currency},
+                )
+            messages.success(request, f"Successfully deposited {amount} {selected_currency}.")
             return redirect("dashboard")
         except ValidationError as exc:
             messages.error(request, str(exc))
         except Exception as exc:
             messages.error(request, f"Error during deposit: {exc}")
 
-    return render(request, "wallets_demo/deposit.html")
+    return render(
+        request,
+        "wallets_demo/deposit.html",
+        {"supported_currencies": _supported_currencies(), "selected_currency": selected_currency},
+    )
 
 
 @login_required
 def withdraw(request):
+    selected_currency = _normalize_currency(request.GET.get("currency") or request.POST.get("currency"))
     if request.method == "POST":
         description = request.POST.get("description", "Manual Withdrawal")
         maker_note = request.POST.get("maker_note", "")
 
         try:
             amount = _parse_amount(request.POST.get("amount"))
-            if request.user.balance < amount:
+            wallet = _wallet_for_currency(request.user, selected_currency)
+            if wallet.balance < amount:
                 messages.error(request, "Insufficient funds.")
-                return render(request, "wallets_demo/withdraw.html")
+                return render(
+                    request,
+                    "wallets_demo/withdraw.html",
+                    {"supported_currencies": _supported_currencies(), "selected_currency": selected_currency, "selected_balance": wallet.balance},
+                )
 
             if _should_use_maker_checker(request.user):
                 approval_request = _submit_approval_request(
@@ -446,6 +767,7 @@ def withdraw(request):
                     source_user=request.user,
                     action=ApprovalRequest.ACTION_WITHDRAW,
                     amount=amount,
+                    currency=selected_currency,
                     description=description,
                     maker_note=maker_note,
                 )
@@ -456,20 +778,35 @@ def withdraw(request):
                 return redirect("dashboard")
 
             with transaction.atomic():
-                request.user.withdraw(amount, meta={"description": description})
-            messages.success(request, f"Successfully withdrew ${amount}.")
+                wallet_service = get_wallet_service()
+                wallet_service.withdraw(
+                    wallet,
+                    amount,
+                    meta={"description": description, "currency": selected_currency},
+                )
+            messages.success(request, f"Successfully withdrew {amount} {selected_currency}.")
             return redirect("dashboard")
         except ValidationError as exc:
             messages.error(request, str(exc))
         except Exception as exc:
             messages.error(request, f"Error during withdrawal: {exc}")
 
-    return render(request, "wallets_demo/withdraw.html")
+    wallet = _wallet_for_currency(request.user, selected_currency)
+    return render(
+        request,
+        "wallets_demo/withdraw.html",
+        {
+            "supported_currencies": _supported_currencies(),
+            "selected_currency": selected_currency,
+            "selected_balance": wallet.balance,
+        },
+    )
 
 
 @login_required
 def transfer(request):
     users = User.objects.exclude(id=request.user.id)
+    selected_currency = _normalize_currency(request.GET.get("currency") or request.POST.get("currency"))
 
     if request.method == "POST":
         recipient_id = request.POST.get("recipient")
@@ -479,10 +816,20 @@ def transfer(request):
         try:
             amount = _parse_amount(request.POST.get("amount"))
             recipient = User.objects.get(id=recipient_id)
+            sender_wallet = _wallet_for_currency(request.user, selected_currency)
 
-            if request.user.balance < amount:
+            if sender_wallet.balance < amount:
                 messages.error(request, "Insufficient funds.")
-                return render(request, "wallets_demo/transfer.html", {"users": users})
+                return render(
+                    request,
+                    "wallets_demo/transfer.html",
+                    {
+                        "users": users,
+                        "supported_currencies": _supported_currencies(),
+                        "selected_currency": selected_currency,
+                        "selected_balance": sender_wallet.balance,
+                    },
+                )
 
             if _should_use_maker_checker(request.user):
                 approval_request = _submit_approval_request(
@@ -491,6 +838,7 @@ def transfer(request):
                     recipient_user=recipient,
                     action=ApprovalRequest.ACTION_TRANSFER,
                     amount=amount,
+                    currency=selected_currency,
                     description=description,
                     maker_note=maker_note,
                 )
@@ -501,14 +849,21 @@ def transfer(request):
                 return redirect("dashboard")
 
             with transaction.atomic():
-                request.user.transfer(
-                    recipient,
+                recipient_wallet = _wallet_for_currency(recipient, selected_currency)
+                wallet_service = get_wallet_service()
+                wallet_service.withdraw(
+                    sender_wallet,
                     amount,
-                    meta={"description": description},
+                    meta={"description": description, "currency": selected_currency},
+                )
+                wallet_service.deposit(
+                    recipient_wallet,
+                    amount,
+                    meta={"description": description, "currency": selected_currency},
                 )
             messages.success(
                 request,
-                f"Successfully transferred ${amount} to {recipient.username}.",
+                f"Successfully transferred {amount} {selected_currency} to {recipient.username}.",
             )
             return redirect("dashboard")
         except User.DoesNotExist:
@@ -518,7 +873,17 @@ def transfer(request):
         except Exception as exc:
             messages.error(request, f"Error during transfer: {exc}")
 
-    return render(request, "wallets_demo/transfer.html", {"users": users})
+    sender_wallet = _wallet_for_currency(request.user, selected_currency)
+    return render(
+        request,
+        "wallets_demo/transfer.html",
+        {
+            "users": users,
+            "supported_currencies": _supported_currencies(),
+            "selected_currency": selected_currency,
+            "selected_balance": sender_wallet.balance,
+        },
+    )
 
 
 def register(request):
@@ -537,10 +902,17 @@ def register(request):
                     password=password,
                 )
                 login(request, user)
-                user.deposit(100, meta={"description": "Welcome Bonus"})
+                base_currency = _normalize_currency(getattr(settings, "PLATFORM_BASE_CURRENCY", "USD"))
+                wallet = _wallet_for_currency(user, base_currency)
+                wallet_service = get_wallet_service()
+                wallet_service.deposit(
+                    wallet,
+                    Decimal("100"),
+                    meta={"description": "Welcome Bonus", "currency": base_currency},
+                )
                 messages.success(
                     request,
-                    "Account created! You received a $100 welcome bonus.",
+                    f"Account created! You received a 100 {base_currency} welcome bonus.",
                 )
                 return redirect("dashboard")
         except Exception as exc:

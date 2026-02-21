@@ -6,6 +6,7 @@
 <div class="card">
     <h2>Accounting Console</h2>
     <p class="text-muted">Chart of Accounts, Journal Entries, and Trial Balance for business operations.</p>
+    <p><a class="btn btn-outline" href="{% url 'fx_management' %}">Manage FX Rates</a></p>
     <a class="btn btn-outline mt-4" href="{% url 'backoffice' %}">Back to Backoffice</a>
 </div>
 
@@ -35,7 +36,11 @@
         </div>
         <div class="form-group">
             <label for="currency">Currency</label>
-            <input id="currency" name="currency" type="text" value="USD" required>
+            <select id="currency" name="currency" required>
+                {% for c in supported_currencies %}
+                <option value="{{ c }}">{{ c }}</option>
+                {% endfor %}
+            </select>
         </div>
         <button type="submit" class="btn btn-primary">Create Account</button>
     </form>
@@ -53,6 +58,14 @@
         <div class="form-group">
             <label for="description">Description</label>
             <input id="description" name="description" type="text" placeholder="Daily settlement funding">
+        </div>
+        <div class="form-group">
+            <label for="entry_currency">Entry Currency</label>
+            <select id="entry_currency" name="entry_currency" required>
+                {% for c in supported_currencies %}
+                <option value="{{ c }}">{{ c }}</option>
+                {% endfor %}
+            </select>
         </div>
         <table>
             <thead>
@@ -133,6 +146,7 @@
         <thead>
             <tr>
                 <th>Entry No</th>
+                <th>Currency</th>
                 <th>Reference</th>
                 <th>Description</th>
                 <th>Debit</th>
@@ -144,6 +158,7 @@
             {% for entry in draft_entries %}
                 <tr>
                     <td>{{ entry.entry_no }}</td>
+                    <td>{{ entry.currency }}</td>
                     <td>{{ entry.reference }}</td>
                     <td>{{ entry.description }}</td>
                     <td>{{ entry.total_debit }}</td>
@@ -161,7 +176,7 @@
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="6" class="text-muted" style="text-align:center;">No draft entries.</td>
+                    <td colspan="7" class="text-muted" style="text-align:center;">No draft entries.</td>
                 </tr>
             {% endfor %}
         </tbody>
@@ -178,6 +193,7 @@
                 <th>Total Debit</th>
                 <th>Total Credit</th>
                 <th>Net (Dr-Cr)</th>
+                <th>Net in {{ base_currency }}</th>
             </tr>
         </thead>
         <tbody>
@@ -188,10 +204,11 @@
                     <td>{{ row.debit }}</td>
                     <td>{{ row.credit }}</td>
                     <td>{{ row.net }}</td>
+                    <td>{% if row.net_base is not None %}{{ row.net_base }}{% else %}N/A{% endif %}</td>
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="5" class="text-muted" style="text-align:center;">No posted journals yet.</td>
+                    <td colspan="6" class="text-muted" style="text-align:center;">No posted journals yet.</td>
                 </tr>
             {% endfor %}
         </tbody>

@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from django.contrib.auth.models import AbstractUser
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
@@ -65,6 +66,7 @@ class ApprovalRequest(models.Model):
         max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True
     )
     amount = models.DecimalField(max_digits=20, decimal_places=2)
+    currency = models.CharField(max_length=12, default="USD")
     description = models.CharField(max_length=255, blank=True, default="")
     maker_note = models.TextField(blank=True, default="")
     checker_note = models.TextField(blank=True, default="")
@@ -81,6 +83,8 @@ class ApprovalRequest(models.Model):
     def clean(self):
         if self.amount <= Decimal("0"):
             raise ValidationError("Amount must be greater than 0.")
+        if not self.currency:
+            raise ValidationError("Currency is required.")
         if self.action == self.ACTION_TRANSFER and not self.recipient_user:
             raise ValidationError("Transfer request requires a recipient.")
         if self.action != self.ACTION_TRANSFER and self.recipient_user:
@@ -100,17 +104,33 @@ class ApprovalRequest(models.Model):
             "maker": self.maker.username,
             "checker": checker.username,
             "description": description,
+            "currency": self.currency,
         }
+        from dj_wallet.utils import get_wallet_service
+
+        wallet_service = get_wallet_service()
+        base_currency = getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper()
+        source_slug = "default" if self.currency.upper() == base_currency else self.currency.lower()
+        source_wallet = self.source_user.get_wallet(source_slug)
+        if source_wallet.meta.get("currency") != self.currency:
+            source_wallet.meta["currency"] = self.currency
+            source_wallet.save(update_fields=["meta"])
         try:
             with transaction.atomic():
                 if self.action == self.ACTION_DEPOSIT:
-                    self.source_user.deposit(self.amount, meta=meta)
+                    wallet_service.deposit(source_wallet, self.amount, meta=meta)
                 elif self.action == self.ACTION_WITHDRAW:
-                    self.source_user.withdraw(self.amount, meta=meta)
+                    wallet_service.withdraw(source_wallet, self.amount, meta=meta)
                 elif self.action == self.ACTION_TRANSFER:
                     if self.recipient_user is None:
                         raise ValidationError("Recipient is required for transfer.")
-                    self.source_user.transfer(self.recipient_user, self.amount, meta=meta)
+                    recipient_slug = "default" if self.currency.upper() == base_currency else self.currency.lower()
+                    recipient_wallet = self.recipient_user.get_wallet(recipient_slug)
+                    if recipient_wallet.meta.get("currency") != self.currency:
+                        recipient_wallet.meta["currency"] = self.currency
+                        recipient_wallet.save(update_fields=["meta"])
+                    wallet_service.withdraw(source_wallet, self.amount, meta=meta)
+                    wallet_service.deposit(recipient_wallet, self.amount, meta=meta)
                 else:
                     raise ValidationError("Unsupported action.")
 
@@ -338,6 +358,7 @@ class JournalEntry(models.Model):
     entry_no = models.CharField(max_length=40, unique=True)
     reference = models.CharField(max_length=128, blank=True, default="")
     description = models.CharField(max_length=255, blank=True, default="")
+    currency = models.CharField(max_length=12, default="USD")
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT)
     created_by = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="created_journal_entries"
@@ -376,6 +397,8 @@ class JournalEntry(models.Model):
             raise ValidationError("Cannot post empty journal entry.")
         if not self.is_balanced():
             raise ValidationError("Journal entry is not balanced.")
+        if self.lines.exclude(account__currency=self.currency).exists():
+            raise ValidationError("All journal lines must match entry currency.")
 
         self.status = self.STATUS_POSTED
         self.posted_by = actor
@@ -410,3 +433,92 @@ class JournalLine(models.Model):
         side = "DR" if self.debit > Decimal("0") else "CR"
         amount = self.debit if self.debit > Decimal("0") else self.credit
         return f"{self.entry.entry_no} {self.account.code} {side} {amount}"
+
+
+class BackofficeAuditLog(models.Model):
+    actor = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="backoffice_audit_logs"
+    )
+    action = models.CharField(max_length=128, db_index=True)
+    target_type = models.CharField(max_length=64, blank=True, default="")
+    target_id = models.CharField(max_length=64, blank=True, default="")
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True, default="")
+    metadata_json = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.action} by {self.actor.username} at {self.created_at.isoformat()}"
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("BackofficeAuditLog is immutable and cannot be deleted.")
+
+
+class LoginLockout(models.Model):
+    username = models.CharField(max_length=150, db_index=True)
+    ip_address = models.GenericIPAddressField()
+    failed_attempts = models.PositiveIntegerField(default=0)
+    first_failed_at = models.DateTimeField(default=timezone.now)
+    lock_until = models.DateTimeField(null=True, blank=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (("username", "ip_address"),)
+        ordering = ("-updated_at",)
+
+    def is_locked(self) -> bool:
+        return self.lock_until is not None and self.lock_until > timezone.now()
+
+    def __str__(self):
+        return f"{self.username}@{self.ip_address} ({self.failed_attempts})"
+
+
+class FxRate(models.Model):
+    base_currency = models.CharField(max_length=12)
+    quote_currency = models.CharField(max_length=12)
+    rate = models.DecimalField(max_digits=20, decimal_places=8)
+    effective_at = models.DateTimeField(default=timezone.now, db_index=True)
+    is_active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="created_fx_rates",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-effective_at", "-id")
+        indexes = [
+            models.Index(
+                fields=["base_currency", "quote_currency", "effective_at"],
+                name="fx_pair_effective_idx",
+            )
+        ]
+
+    def clean(self):
+        if self.base_currency == self.quote_currency:
+            raise ValidationError("Base and quote currencies must be different.")
+        if self.rate <= Decimal("0"):
+            raise ValidationError("FX rate must be greater than 0.")
+
+    def __str__(self):
+        return f"{self.base_currency}/{self.quote_currency}={self.rate}"
+
+    @classmethod
+    def latest_rate(cls, base_currency: str, quote_currency: str):
+        base = base_currency.upper()
+        quote = quote_currency.upper()
+        return (
+            cls.objects.filter(
+                base_currency=base,
+                quote_currency=quote,
+                is_active=True,
+            )
+            .order_by("-effective_at", "-id")
+            .first()
+        )

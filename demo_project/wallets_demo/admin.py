@@ -3,9 +3,12 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .models import (
     ApprovalRequest,
+    BackofficeAuditLog,
     ChartOfAccount,
+    FxRate,
     JournalEntry,
     JournalLine,
+    LoginLockout,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -81,3 +84,57 @@ class JournalEntryAdmin(admin.ModelAdmin):
     list_filter = ("status", "created_at")
     search_fields = ("entry_no", "reference", "description")
     inlines = [JournalLineInline]
+
+
+@admin.register(BackofficeAuditLog)
+class BackofficeAuditLogAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "action", "actor", "target_type", "target_id", "ip_address")
+    list_filter = ("action", "created_at")
+    search_fields = ("actor__username", "target_type", "target_id")
+    readonly_fields = (
+        "actor",
+        "action",
+        "target_type",
+        "target_id",
+        "ip_address",
+        "user_agent",
+        "metadata_json",
+        "created_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(LoginLockout)
+class LoginLockoutAdmin(admin.ModelAdmin):
+    list_display = (
+        "username",
+        "ip_address",
+        "failed_attempts",
+        "first_failed_at",
+        "lock_until",
+        "updated_at",
+    )
+    list_filter = ("lock_until",)
+    search_fields = ("username", "ip_address")
+
+
+@admin.register(FxRate)
+class FxRateAdmin(admin.ModelAdmin):
+    list_display = (
+        "base_currency",
+        "quote_currency",
+        "rate",
+        "effective_at",
+        "is_active",
+        "created_by",
+    )
+    list_filter = ("base_currency", "quote_currency", "is_active")
+    search_fields = ("base_currency", "quote_currency")
