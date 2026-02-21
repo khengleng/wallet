@@ -1,0 +1,62 @@
+groups:
+  - name: wallet-platform
+    rules:
+      - alert: WalletLedgerServiceDown
+        expr: up{job="wallet-ledger-service"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: wallet-ledger-service
+        annotations:
+          summary: "Wallet ledger service is down"
+          description: "Prometheus cannot scrape wallet-ledger-service for 2 minutes."
+
+      - alert: ApiGatewayServiceDown
+        expr: up{job="api-gateway-service"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: api-gateway-service
+        annotations:
+          summary: "API gateway service is down"
+          description: "Prometheus cannot scrape api-gateway-service for 2 minutes."
+
+      - alert: OpsRiskServiceDown
+        expr: up{job="ops-risk-service"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: ops-risk-service
+        annotations:
+          summary: "Ops/risk service is down"
+          description: "Prometheus cannot scrape ops-risk-service for 2 minutes."
+
+      - alert: ApiGatewayRateLimitedSpike
+        expr: increase(wallet_gateway_rate_limited_total[5m]) > 200
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway-service
+        annotations:
+          summary: "Rate limiting spike detected"
+          description: "API gateway has rate-limited over 200 requests in 5 minutes."
+
+      - alert: ApiGatewayWafBlockedSpike
+        expr: increase(wallet_gateway_waf_blocked_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: api-gateway-service
+        annotations:
+          summary: "WAF block spike detected"
+          description: "API gateway blocked over 100 requests by WAF in 5 minutes."
+
+      - alert: LedgerInsufficientFundsSpike
+        expr: increase(wallet_ledger_insufficient_funds_total[10m]) > 300
+        for: 10m
+        labels:
+          severity: warning
+          service: wallet-ledger-service
+        annotations:
+          summary: "Insufficient funds errors spike"
+          description: "wallet_ledger_insufficient_funds_total increased by more than 300 in 10 minutes."

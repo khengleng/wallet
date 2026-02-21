@@ -94,6 +94,23 @@ services:
       - postgres
       - ops-risk-service
 
+  audit-export-worker:
+    build:
+      context: ../services/audit_export_worker
+    environment:
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      SIEM_WEBHOOK_URL: http://mock-siem:8080/ingest
+      SIEM_SIGNING_SECRET: local-audit-export-signing-secret
+      EXPORT_BATCH_SIZE: 200
+      EXPORT_POLL_INTERVAL_SECONDS: 2
+      METRICS_TOKEN: ""
+    ports:
+      - "8084:8080"
+    depends_on:
+      - postgres
+      - api
+
   api:
     build:
       context: ..
@@ -117,6 +134,40 @@ services:
       - postgres
       - redis
       - rabbitmq
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - wallet-ledger-service
+      - api-gateway-service
+      - ops-risk-service
+      - audit-export-worker
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
 
   postgres:
     image: postgres:16-alpine
@@ -142,3 +193,5 @@ services:
 
 volumes:
   pgdata:
+  prometheus-data:
+  grafana-data:

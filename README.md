@@ -224,6 +224,7 @@ This repository now includes deployment and architecture scaffolding for high-sc
 - Extracted ops/risk consumer: `services/ops_risk_service`
 - Production environment template: `.env.production.example`
 - Local multi-service infrastructure (PostgreSQL/Redis/RabbitMQ): `infra/docker-compose.microservices.yml`
+- Local monitoring stack (Prometheus/Grafana + alerts/dashboards): `infra/monitoring/README.md`
 - Kubernetes deployment/HPA/PDB baseline: `infra/k8s/wallet-api.yaml`
 - Railway split deployment:
   - Django web service root: repository root (uses `Procfile`)
