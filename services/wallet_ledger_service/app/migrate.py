@@ -9,9 +9,9 @@ from .db import _normalize_database_url, engine
 
 
 def main():
-    root = Path(__file__).resolve().parents[1]
-    cfg = Config(str(root / "alembic.ini"))
-    cfg.set_main_option("script_location", str(root / "alembic"))
+    script_location = Path(__file__).resolve().parent / "alembic"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(script_location))
     cfg.set_main_option(
         "sqlalchemy.url", _normalize_database_url(settings.database_url)
     )

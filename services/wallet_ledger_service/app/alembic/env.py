@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from logging.config import fileConfig
-
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
@@ -9,10 +7,6 @@ from app.db import Base, _normalize_database_url
 from app import models  # noqa: F401
 
 config = context.config
-
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
 target_metadata = Base.metadata
 
 
