@@ -39,9 +39,9 @@ python -m app.migrate
    - `DATABASE_URL` (PostgreSQL connection string)
    - `ENVIRONMENT=production`
    - `SERVICE_API_KEY=<strong-random-secret>`
-6. Run migration as one-off command in the service runtime:
+5. Run migration command:
    - `python -m app.migrate`
-7. Deploy and verify:
+6. Deploy and verify:
    - `GET /healthz`
    - `GET /readyz`
 

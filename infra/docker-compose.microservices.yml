@@ -7,10 +7,28 @@ services:
     environment:
       ENVIRONMENT: production
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      SERVICE_API_KEY: local-ledger-service-key
     ports:
       - "8080:8080"
     depends_on:
       - postgres
+
+  api-gateway-service:
+    build:
+      context: ../services/api_gateway_service
+    environment:
+      ENVIRONMENT: production
+      JWT_SECRET: local-jwt-secret
+      JWT_AUDIENCE: wallet-api
+      JWT_ISSUER: wallet-identity
+      LEDGER_BASE_URL: http://wallet-ledger-service:8080
+      LEDGER_API_KEY: local-ledger-service-key
+      RATE_LIMIT_PER_IP: 120/minute
+      RATE_LIMIT_PER_USER: 240/minute
+    ports:
+      - "8082:8080"
+    depends_on:
+      - wallet-ledger-service
 
   api:
     build:
@@ -31,7 +49,7 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - wallet-ledger-service
+      - api-gateway-service
       - postgres
       - redis
       - rabbitmq

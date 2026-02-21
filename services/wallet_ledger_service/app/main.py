@@ -4,6 +4,8 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, Header, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+import json
+import logging
 
 from .config import settings
 from .db import SessionLocal
@@ -29,6 +31,8 @@ app = FastAPI(
     description="Idempotent, transactional wallet ledger microservice.",
 )
 
+logger = logging.getLogger("wallet_ledger.audit")
+
 
 def get_db():
     db = SessionLocal()
@@ -42,8 +46,21 @@ def require_service_api_key(
     x_service_api_key: Annotated[str | None, Header(alias="X-Service-Api-Key")] = None,
 ):
     if not settings.service_api_key:
+        logger.error(
+            json.dumps(
+                {
+                    "event": "service_auth_unconfigured",
+                    "service": settings.service_name,
+                }
+            )
+        )
         raise HTTPException(status_code=503, detail="Service API key is not configured")
     if x_service_api_key != settings.service_api_key:
+        logger.warning(
+            json.dumps(
+                {"event": "service_auth_failed", "service": settings.service_name}
+            )
+        )
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -68,6 +85,16 @@ def create_account_endpoint(
         account = create_account(
             db, owner_id=payload.external_owner_id, currency=payload.currency
         )
+    logger.info(
+        json.dumps(
+            {
+                "event": "account_created",
+                "account_id": str(account.id),
+                "external_owner_id": payload.external_owner_id,
+                "currency": payload.currency,
+            }
+        )
+    )
     return {
         "account_id": str(account.id),
         "currency": account.currency,
@@ -84,6 +111,9 @@ def get_account_endpoint(
     account = get_account(db, account_id=account_id)
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    logger.info(
+        json.dumps({"event": "account_read", "account_id": str(account.id)})
+    )
     return {
         "account_id": str(account.id),
         "external_owner_id": account.external_owner_id,
@@ -116,6 +146,17 @@ def deposit_endpoint(
         }
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        logger.info(
+            json.dumps(
+                {
+                    "event": "transaction_deposit_attempt",
+                    "account_id": str(payload.account_id),
+                    "reference_id": payload.reference_id,
+                    "idempotency_key": idempotency_key,
+                }
+            )
+        )
 
 
 @app.post("/v1/transactions/withdraw", response_model=LedgerResult)
@@ -144,6 +185,17 @@ def withdraw_endpoint(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except InsufficientFundsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        logger.info(
+            json.dumps(
+                {
+                    "event": "transaction_withdraw_attempt",
+                    "account_id": str(payload.account_id),
+                    "reference_id": payload.reference_id,
+                    "idempotency_key": idempotency_key,
+                }
+            )
+        )
 
 
 @app.post("/v1/transactions/transfer", response_model=TransferResult)
@@ -175,3 +227,15 @@ def transfer_endpoint(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except InsufficientFundsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        logger.info(
+            json.dumps(
+                {
+                    "event": "transaction_transfer_attempt",
+                    "from_account_id": str(payload.from_account_id),
+                    "to_account_id": str(payload.to_account_id),
+                    "reference_id": payload.reference_id,
+                    "idempotency_key": idempotency_key,
+                }
+            )
+        )

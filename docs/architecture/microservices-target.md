@@ -42,4 +42,7 @@
 - Release migration command separated from web startup.
 - Health/readiness endpoints added.
 - Deployment scaffolding for K8s and local infra added.
-- First extracted runtime service added at `services/wallet_ledger_service`.
+- Extracted services:
+  - `services/wallet_ledger_service` (ledger + outbox + service API key)
+  - `services/api_gateway_service` (JWT auth + rate limiting + audit logging)
+- Ledger DB migrations are now managed with Alembic (`python -m app.migrate`).
