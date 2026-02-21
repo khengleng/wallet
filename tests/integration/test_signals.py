@@ -7,7 +7,13 @@ from decimal import Decimal
 import pytest
 
 from dj_wallet.services import TransferService, WalletService
-from dj_wallet.signals import balance_changed, transaction_created
+from dj_wallet.signals import (
+    balance_changed,
+    pre_deposit,
+    pre_withdraw,
+    transaction_created,
+    wallet_created,
+)
 
 
 @pytest.mark.django_db()
@@ -108,3 +114,37 @@ class TestSignalIntegration:
             assert not signal_receiver.was_called
         finally:
             balance_changed.disconnect(signal_receiver)
+
+    def test_pre_deposit_signal_emitted(self, wallet, signal_receiver):
+        """pre_deposit should be emitted before a deposit transaction."""
+        pre_deposit.connect(signal_receiver)
+        try:
+            WalletService.deposit(wallet, Decimal("10.00"))
+            assert signal_receiver.was_called
+            assert signal_receiver.last_kwargs["wallet"].pk == wallet.pk
+            assert signal_receiver.last_kwargs["amount"] == Decimal("10.00")
+        finally:
+            pre_deposit.disconnect(signal_receiver)
+
+    def test_pre_withdraw_signal_emitted(self, funded_wallet, signal_receiver):
+        """pre_withdraw should be emitted before a withdrawal transaction."""
+        pre_withdraw.connect(signal_receiver)
+        try:
+            WalletService.withdraw(funded_wallet, Decimal("10.00"))
+            assert signal_receiver.was_called
+            assert signal_receiver.last_kwargs["wallet"].pk == funded_wallet.pk
+            assert signal_receiver.last_kwargs["amount"] == Decimal("10.00")
+        finally:
+            pre_withdraw.disconnect(signal_receiver)
+
+    def test_wallet_created_signal_emitted(self, user_factory, signal_receiver):
+        """wallet_created should be emitted when a wallet is first persisted."""
+        user = user_factory()
+        wallet_created.connect(signal_receiver)
+        try:
+            _ = user.wallet
+            assert signal_receiver.was_called
+            assert signal_receiver.last_kwargs["wallet"].holder_id == user.pk
+            assert signal_receiver.last_kwargs["holder"].pk == user.pk
+        finally:
+            wallet_created.disconnect(signal_receiver)

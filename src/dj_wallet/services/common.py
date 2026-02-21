@@ -13,8 +13,14 @@ from ..exceptions import (
     TransactionAlreadyProcessed,
     WalletFrozen,
 )
-from ..models import Transaction, Wallet
-from ..signals import balance_changed, transaction_confirmed, transaction_created
+from ..signals import (
+    balance_changed,
+    pre_deposit,
+    pre_withdraw,
+    transaction_confirmed,
+    transaction_created,
+)
+from ..utils import get_transaction_model, get_wallet_model
 
 
 class WalletService:
@@ -88,6 +94,8 @@ class WalletService:
         """
         amount = cls.verify_amount(amount)
         meta = meta or {}
+        Wallet = get_wallet_model()
+        Transaction = get_transaction_model()
 
         with transaction.atomic():
             # Lock the wallet row to prevent concurrent modifications
@@ -95,6 +103,9 @@ class WalletService:
 
             # Check if wallet is frozen
             cls._check_frozen(locked_wallet)
+            pre_deposit.send(
+                sender=cls, wallet=locked_wallet, amount=amount, meta=meta
+            )
 
             # Determine transaction status based on confirmed flag
             status = (
@@ -146,12 +157,17 @@ class WalletService:
         """
         amount = cls.verify_amount(amount)
         meta = meta or {}
+        Wallet = get_wallet_model()
+        Transaction = get_transaction_model()
 
         with transaction.atomic():
             locked_wallet = Wallet.objects.select_for_update().get(pk=wallet.pk)
 
             # Check if wallet is frozen
             cls._check_frozen(locked_wallet)
+            pre_withdraw.send(
+                sender=cls, wallet=locked_wallet, amount=amount, meta=meta
+            )
 
             # Check balance *after* acquiring lock
             if confirmed and locked_wallet.balance < amount:
@@ -206,6 +222,8 @@ class WalletService:
         """
         amount = cls.verify_amount(amount)
         meta = meta or {}
+        Wallet = get_wallet_model()
+        Transaction = get_transaction_model()
 
         with transaction.atomic():
             locked_wallet = Wallet.objects.select_for_update().get(pk=wallet.pk)
@@ -256,6 +274,8 @@ class WalletService:
             InsufficientFunds: If withdrawing and balance is insufficient.
         """
         with transaction.atomic():
+            Wallet = get_wallet_model()
+            Transaction = get_transaction_model()
             # Lock the transaction and wallet
             locked_txn = Transaction.objects.select_for_update().get(pk=txn.pk)
 
@@ -320,6 +340,7 @@ class WalletService:
             TransactionAlreadyProcessed: If transaction is not pending.
         """
         with transaction.atomic():
+            Transaction = get_transaction_model()
             locked_txn = Transaction.objects.select_for_update().get(pk=txn.pk)
 
             if locked_txn.status != Transaction.STATUS_PENDING:
@@ -355,6 +376,8 @@ class WalletService:
             InsufficientFunds: If reversing a deposit and balance is insufficient.
         """
         with transaction.atomic():
+            Wallet = get_wallet_model()
+            Transaction = get_transaction_model()
             locked_txn = Transaction.objects.select_for_update().get(pk=txn.pk)
 
             if locked_txn.status != Transaction.STATUS_COMPLETED:
@@ -438,6 +461,7 @@ class WalletService:
 
         if before_date is None:
             before_date = timezone.now()
+        Transaction = get_transaction_model()
 
         count = Transaction.objects.filter(
             wallet=wallet,

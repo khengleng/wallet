@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from ..models import Transfer
+from ..utils import get_transfer_model
 from .common import WalletService
 
 
@@ -23,6 +23,7 @@ class ExchangeService:
 
         amount = Decimal(amount)
         converted_amount = amount * Decimal(rate)
+        Transfer = get_transfer_model()
 
         with transaction.atomic():
             # Withdraw from source

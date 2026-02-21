@@ -1,0 +1,80 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}Dashboard - DJ Wallet{% endblock %}
+
+{% block content %}
+<div class="flex justify-between align-center mb-4">
+    <h1>Welcome, {{ user.username }}!</h1>
+    <div class="text-right">
+        <p class="text-muted">Total Balance</p>
+        <p class="text-2xl font-bold color-primary">${{ user.balance|floatformat:2 }}</p>
+    </div>
+</div>
+
+<div class="card" style="background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%); color: white;">
+    <div class="flex justify-between align-center">
+        <div>
+            <p style="opacity: 0.8; font-size: 0.875rem;">Main Wallet</p>
+            <h2 style="font-size: 2.5rem; margin-top: 0.5rem;">${{ user.balance|floatformat:2 }}</h2>
+            <p style="margin-top: 1rem; opacity: 0.9;">Available for transactions</p>
+        </div>
+        <div style="background: rgba(255,255,255,0.1); padding: 1.5rem; border-radius: 1rem;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <rect width="20" height="14" x="2" y="5" rx="2"></rect>
+                <line x1="2" x2="22" y1="10" y2="10"></line>
+            </svg>
+        </div>
+    </div>
+</div>
+
+<div class="flex gap-2 mb-4">
+    <a href="{% url 'deposit' %}" class="btn btn-primary" style="flex: 1;">Deposit</a>
+    <a href="{% url 'withdraw' %}" class="btn btn-outline" style="flex: 1;">Withdraw</a>
+    <a href="{% url 'transfer' %}" class="btn btn-outline" style="flex: 1;">Transfer</a>
+</div>
+
+<div class="card">
+    <h3 class="mb-4">Recent Transactions</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Description</th>
+                <th>Date</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tx in transactions %}
+            <tr>
+                <td>
+                    {% if tx.type == 'deposit' %}
+                    <span class="badge badge-success">Deposit</span>
+                    {% elif tx.type == 'withdraw' %}
+                    <span class="badge badge-danger">Withdraw</span>
+                    {% else %}
+                    <span class="badge badge-info">Transfer</span>
+                    {% endif %}
+                </td>
+                <td class="font-bold">
+                    {% if tx.type == 'withdraw' or tx.meta.direction == 'out' %}
+                    <span style="color: var(--danger);">- ${{ tx.amount|floatformat:2 }}</span>
+                    {% else %}
+                    <span style="color: var(--success);">+ ${{ tx.amount|floatformat:2 }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ tx.meta.description|default:tx.type|title }}</td>
+                <td class="text-muted">{{ tx.created_at|date:"M d, Y H:i" }}</td>
+                <td><span class="badge badge-success">Completed</span></td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" style="text-align: center; padding: 2rem;" class="text-muted">No transactions yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

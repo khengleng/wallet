@@ -6,7 +6,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.utils.translation import gettext_lazy as _
 
 from .exceptions import WalletException
-from .models import Wallet
+from .utils import get_wallet_model
 
 
 class WalletMixin:
@@ -30,7 +30,8 @@ class WalletMixin:
         Uses get_or_create to ensure existence.
         """
         ct = ContentType.objects.get_for_model(self)
-        w, created = Wallet.objects.get_or_create(
+        Wallet = get_wallet_model()
+        w, _ = Wallet.objects.get_or_create(
             holder_type=ct, holder_id=self.pk, slug="default"
         )
         return w
@@ -40,6 +41,7 @@ class WalletMixin:
         Retrieve a specific wallet by slug.
         """
         ct = ContentType.objects.get_for_model(self)
+        Wallet = get_wallet_model()
         w, _ = Wallet.objects.get_or_create(
             holder_type=ct, holder_id=self.pk, slug=slug
         )
@@ -50,6 +52,7 @@ class WalletMixin:
         Explicitly create a wallet with metadata.
         """
         ct = ContentType.objects.get_for_model(self)
+        Wallet = get_wallet_model()
         return Wallet.objects.create(
             holder_type=ct, holder_id=self.pk, slug=slug, meta=meta
         )
@@ -59,6 +62,7 @@ class WalletMixin:
         Check if a specific wallet exists without creating it.
         """
         ct = ContentType.objects.get_for_model(self)
+        Wallet = get_wallet_model()
         return Wallet.objects.filter(
             holder_type=ct, holder_id=self.pk, slug=slug
         ).exists()

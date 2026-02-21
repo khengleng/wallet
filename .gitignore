@@ -140,3 +140,7 @@ cython_debug/
 Thumbs.db
 
 .ruff_cache
+
+# Demo build artifacts
+demo_project/staticfiles/
+demo_project/db.sqlite3

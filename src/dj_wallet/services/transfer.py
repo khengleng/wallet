@@ -6,8 +6,8 @@ from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
 from ..exceptions import TransactionAlreadyProcessed
-from ..models import Transfer
 from ..signals import transfer_completed
+from ..utils import get_transfer_model, get_wallet_model
 from .common import WalletService
 
 
@@ -40,6 +40,7 @@ class TransferService:
         receiver_wallet = to_holder.wallet
 
         meta = meta or {}
+        Transfer = get_transfer_model()
         status = status or Transfer.STATUS_TRANSFER
 
         with transaction.atomic():
@@ -49,7 +50,7 @@ class TransferService:
             wallets_to_lock = sorted([sender_wallet.pk, receiver_wallet.pk])
 
             # Lock in consistent order
-            from ..models import Wallet
+            Wallet = get_wallet_model()
 
             for pk in wallets_to_lock:
                 Wallet.objects.select_for_update().get(pk=pk)
@@ -108,6 +109,8 @@ class TransferService:
             WalletFrozen: If either wallet is frozen.
         """
         with transaction.atomic():
+            Transfer = get_transfer_model()
+            Wallet = get_wallet_model()
             # Lock the transfer record
             locked_transfer = Transfer.objects.select_for_update().get(pk=transfer.pk)
 
@@ -119,6 +122,13 @@ class TransferService:
             # Get the original sender and receiver wallets
             original_sender_wallet = locked_transfer.withdraw.wallet
             original_receiver_wallet = locked_transfer.deposit.wallet
+
+            # Lock wallets in deterministic order to avoid deadlocks.
+            wallet_ids = sorted(
+                {original_sender_wallet.pk, original_receiver_wallet.pk}
+            )
+            for wallet_id in wallet_ids:
+                Wallet.objects.select_for_update().get(pk=wallet_id)
 
             # Calculate refund amount (original amount minus any fees)
             refund_amount = locked_transfer.deposit.amount
@@ -185,4 +195,5 @@ class TransferService:
         """
         meta = meta or {}
         meta["action"] = "gift"
+        Transfer = get_transfer_model()
         return cls.transfer(from_holder, to_holder, amount, meta, Transfer.STATUS_GIFT)

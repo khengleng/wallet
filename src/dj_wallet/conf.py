@@ -26,6 +26,12 @@ class WalletSettings:
     TRANSFER_SERVICE_CLASS: str = "dj_wallet.services.transfer.TransferService"
     EXCHANGE_SERVICE_CLASS: str = "dj_wallet.services.exchange.ExchangeService"
     PURCHASE_SERVICE_CLASS: str = "dj_wallet.services.purchase.PurchaseService"
+    WALLET_MIXIN_CLASS: str = "dj_wallet.mixins.WalletMixin"
+
+    # Swappable model classes - use "app_label.ModelName" strings
+    WALLET_MODEL: str = "dj_wallet.Wallet"
+    TRANSACTION_MODEL: str = "dj_wallet.Transaction"
+    TRANSFER_MODEL: str = "dj_wallet.Transfer"
 
     # Transaction expiration settings
     PENDING_TRANSACTION_EXPIRY_HOURS: int = (
@@ -82,12 +88,26 @@ class WalletSettings:
             ("TRANSFER_SERVICE_CLASS", self.TRANSFER_SERVICE_CLASS),
             ("EXCHANGE_SERVICE_CLASS", self.EXCHANGE_SERVICE_CLASS),
             ("PURCHASE_SERVICE_CLASS", self.PURCHASE_SERVICE_CLASS),
+            ("WALLET_MIXIN_CLASS", self.WALLET_MIXIN_CLASS),
         ]
 
         for name, value in service_classes:
             if not isinstance(value, str) or "." not in value:
                 raise ImproperlyConfigured(
                     f"dj_wallet['{name}'] must be a valid dotted path string. "
+                    f"Got: {value}"
+                )
+
+        # Validate model class labels
+        model_labels = [
+            ("WALLET_MODEL", self.WALLET_MODEL),
+            ("TRANSACTION_MODEL", self.TRANSACTION_MODEL),
+            ("TRANSFER_MODEL", self.TRANSFER_MODEL),
+        ]
+        for name, value in model_labels:
+            if not isinstance(value, str) or "." not in value:
+                raise ImproperlyConfigured(
+                    f"dj_wallet['{name}'] must be a valid app_label.ModelName string. "
                     f"Got: {value}"
                 )
 

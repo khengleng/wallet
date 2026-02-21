@@ -1,0 +1,26 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}Deposit - DJ Wallet{% endblock %}
+
+{% block content %}
+<div style="max-width: 500px; margin: 0 auto;">
+    <div class="card">
+        <h1>Deposit Funds</h1>
+        <p class="text-muted mb-4">Add money to your virtual wallet balance.</p>
+
+        <form method="post">
+            {% csrf_token %}
+            <div class="form-group">
+                <label for="amount">Amount (USD)</label>
+                <input type="number" step="0.01" name="amount" id="amount" placeholder="0.00" required>
+            </div>
+            <div class="form-group">
+                <label for="description">Description (Optional)</label>
+                <input type="text" name="description" id="description" placeholder="e.g. Weekly topup">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Complete Deposit</button>
+        </form>
+    </div>
+    <a href="{% url 'dashboard' %}" class="btn btn-outline" style="width: 100%;">Back to Dashboard</a>
+</div>
+{% endblock %}
