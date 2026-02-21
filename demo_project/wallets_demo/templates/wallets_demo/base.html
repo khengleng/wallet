@@ -35,6 +35,10 @@
             line-height: 1.5;
         }
 
+        a {
+            color: inherit;
+        }
+
         .navbar {
             background: var(--card-bg);
             border-bottom: 1px solid var(--border);
@@ -78,6 +82,68 @@
             max-width: 1000px;
             margin: 2rem auto;
             padding: 0 1rem;
+        }
+
+        .portal-layout {
+            display: grid;
+            grid-template-columns: 260px minmax(0, 1fr);
+            min-height: calc(100vh - 76px);
+        }
+
+        .sidebar {
+            background: var(--card-bg);
+            border-right: 1px solid var(--border);
+            padding: 1.25rem 1rem;
+            position: sticky;
+            top: 76px;
+            height: calc(100vh - 76px);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .sidebar nav {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .sidebar-link {
+            text-decoration: none;
+            padding: 0.6rem 0.75rem;
+            border-radius: 0.5rem;
+            font-weight: 500;
+            color: var(--text);
+            transition: background-color 0.2s, color 0.2s;
+        }
+
+        .sidebar-link:hover {
+            background: var(--bg);
+            color: var(--primary);
+        }
+
+        .sidebar-link.active {
+            background: rgba(99, 102, 241, 0.12);
+            color: var(--primary-hover);
+        }
+
+        .sidebar-section-title {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin: 0.6rem 0 0.3rem;
+            font-weight: 600;
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            border-top: 1px solid var(--border);
+            padding-top: 0.9rem;
+        }
+
+        .content-area {
+            padding: 1.5rem 1.5rem 0;
         }
 
         .card {
@@ -204,6 +270,23 @@
 
         tr:last-child td { border-bottom: none; }
 
+        @media (max-width: 960px) {
+            .portal-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar {
+                position: static;
+                height: auto;
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+            }
+
+            .content-area {
+                padding: 1rem 1rem 0;
+            }
+        }
+
         {% block extra_style %}{% endblock %}
     </style>
 </head>
@@ -215,22 +298,7 @@
         </a>
         <div class="nav-links">
             {% if user.is_authenticated %}
-                <a href="{% url 'dashboard' %}">Dashboard</a>
-                <a href="{% url 'transfer' %}">Transfer</a>
-                <a href="{% url 'deposit' %}">Deposit</a>
-                <a href="{% url 'withdraw' %}">Withdraw</a>
-                <a href="{% url 'wallet_fx_exchange' %}">FX</a>
-                {% if user|has_any_role:"admin,super_admin,finance,treasury,customer_service,risk,operation,sales" %}
-                    <a href="{% url 'backoffice' %}">Backoffice</a>
-                    <a href="{% url 'treasury_dashboard' %}">Treasury</a>
-                    <a href="{% url 'accounting_dashboard' %}">Accounting</a>
-                {% endif %}
-                <span class="text-muted">|</span>
                 <span class="font-bold">{{ user.username }}</span>
-                <form action="{% url 'logout' %}" method="post" style="display: inline;">
-                    {% csrf_token %}
-                    <button type="submit" class="btn btn-outline" style="padding: 0.4rem 0.8rem;">Logout</button>
-                </form>
             {% else %}
                 <a href="{% url 'login' %}">Login</a>
                 <a href="{% url 'register' %}" class="btn btn-primary">Sign Up</a>
@@ -238,17 +306,52 @@
         </div>
     </nav>
 
-    <div class="container">
-        {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-{{ message.tags }}">
-                    {{ message }}
-                </div>
-            {% endfor %}
-        {% endif %}
+    {% if user.is_authenticated %}
+    <div class="portal-layout">
+        <aside class="sidebar">
+            <nav>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'dashboard' %} active{% endif %}" href="{% url 'dashboard' %}">Dashboard</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'transfer' %} active{% endif %}" href="{% url 'transfer' %}">Transfer</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'deposit' %} active{% endif %}" href="{% url 'deposit' %}">Deposit</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'withdraw' %} active{% endif %}" href="{% url 'withdraw' %}">Withdraw</a>
+                <a class="sidebar-link{% if request.resolver_match.url_name == 'wallet_fx_exchange' %} active{% endif %}" href="{% url 'wallet_fx_exchange' %}">FX Exchange</a>
 
-        {% block content %}{% endblock %}
+                {% if user|has_any_role:"admin,super_admin,finance,treasury,customer_service,risk,operation,sales" %}
+                    <div class="sidebar-section-title">Back Office</div>
+                    <a class="sidebar-link{% if request.resolver_match.url_name == 'backoffice' %} active{% endif %}" href="{% url 'backoffice' %}">Operations</a>
+                    <a class="sidebar-link{% if request.resolver_match.url_name == 'treasury_dashboard' %} active{% endif %}" href="{% url 'treasury_dashboard' %}">Treasury</a>
+                    <a class="sidebar-link{% if request.resolver_match.url_name == 'accounting_dashboard' %} active{% endif %}" href="{% url 'accounting_dashboard' %}">Accounting</a>
+                {% endif %}
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="text-muted" style="font-size: 0.8rem; margin-bottom: 0.5rem;">Signed in as</div>
+                <div class="font-bold" style="margin-bottom: 0.8rem;">{{ user.username }}</div>
+                <form action="{% url 'logout' %}" method="post">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-outline" style="width: 100%;">Logout</button>
+                </form>
+            </div>
+        </aside>
+
+        <main class="content-area">
+    {% else %}
+    <div class="container">
+    {% endif %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+            {% block content %}{% endblock %}
+    {% if user.is_authenticated %}
+        </main>
     </div>
+    {% else %}
+    </div>
+    {% endif %}
 
     <footer style="text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.875rem;">
         &copy; 2026 DJ Wallet System. Built with Django & dj-wallet.
