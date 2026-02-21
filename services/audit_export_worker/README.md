@@ -10,7 +10,9 @@ SIEM export pipeline for `wallets_demo_backofficeauditlog`.
 - Prometheus metrics endpoint for alerting/dashboard.
 
 ## Required Env Vars
-- `DATABASE_URL`
+- `AUDIT_EXPORT_DATABASE_URL` (preferred)
+- `BACKOFFICE_DATABASE_URL` (fallback when sharing audit source DB explicitly)
+- `DATABASE_ISOLATION_MODE` (`strict` in production)
 - `SIEM_WEBHOOK_URL`
 - `SIEM_SIGNING_SECRET`
 - `METRICS_TOKEN` (required in production for `/metrics`)

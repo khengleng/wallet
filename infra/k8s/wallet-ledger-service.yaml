@@ -32,11 +32,20 @@ spec:
           env:
             - name: ENVIRONMENT
               value: production
-            - name: DATABASE_URL
+            - name: DATABASE_ISOLATION_MODE
+              value: strict
+            - name: INTERNAL_AUTH_MODE
+              value: hmac
+            - name: LEDGER_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: wallet-ledger-secrets
-                  key: DATABASE_URL
+                  key: LEDGER_DATABASE_URL
+            - name: INTERNAL_AUTH_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: wallet-ledger-secrets
+                  key: INTERNAL_AUTH_SHARED_SECRET
           readinessProbe:
             httpGet:
               path: /readyz

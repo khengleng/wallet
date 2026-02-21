@@ -25,7 +25,8 @@ python -m app.replay_dead_letters --limit 200
 ```
 
 ## Required Env Vars
-- `DATABASE_URL`
+- `OPS_RISK_DATABASE_URL` (preferred)
+- `DATABASE_ISOLATION_MODE` (`strict` in production)
 - `BROKER_URL`
 - `EVENT_EXCHANGE_NAME` (default `wallet.events`)
 - `EVENT_EXCHANGE_TYPE` (default `topic`)

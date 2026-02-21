@@ -2,6 +2,9 @@ from typing import Annotated
 from uuid import UUID
 import time
 from threading import Lock
+import hmac
+import hashlib
+from fastapi import Request
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import func, select, text
@@ -36,6 +39,8 @@ app = FastAPI(
 
 logger = logging.getLogger("wallet_ledger.audit")
 metrics_lock = Lock()
+nonce_lock = Lock()
+seen_nonces: dict[str, float] = {}
 metrics_counters = {
     "requests_total": 0,
     "accounts_created_total": 0,
@@ -61,9 +66,72 @@ def get_db():
         db.close()
 
 
-def require_service_api_key(
+def _cleanup_expired_nonces(now_epoch: float) -> None:
+    expired = [nonce for nonce, expiry in seen_nonces.items() if expiry <= now_epoch]
+    for nonce in expired:
+        seen_nonces.pop(nonce, None)
+
+
+async def require_service_api_key(
+    request: Request,
     x_service_api_key: Annotated[str | None, Header(alias="X-Service-Api-Key")] = None,
+    x_internal_service: Annotated[str | None, Header(alias="X-Internal-Service")] = None,
+    x_internal_timestamp: Annotated[str | None, Header(alias="X-Internal-Timestamp")] = None,
+    x_internal_nonce: Annotated[str | None, Header(alias="X-Internal-Nonce")] = None,
+    x_internal_signature: Annotated[str | None, Header(alias="X-Internal-Signature")] = None,
 ):
+    if settings.internal_auth_mode == "hmac":
+        if not settings.internal_auth_shared_secret:
+            logger.error(
+                json.dumps(
+                    {
+                        "event": "service_auth_unconfigured",
+                        "service": settings.service_name,
+                    }
+                )
+            )
+            raise HTTPException(status_code=503, detail="Internal auth is not configured")
+
+        if not (x_internal_service and x_internal_timestamp and x_internal_nonce and x_internal_signature):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        try:
+            timestamp = int(x_internal_timestamp)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail="Unauthorized") from exc
+        now_epoch = int(time.time())
+        if abs(now_epoch - timestamp) > settings.internal_auth_timestamp_skew_seconds:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        now_monotonic = time.monotonic()
+        with nonce_lock:
+            _cleanup_expired_nonces(now_monotonic)
+            if x_internal_nonce in seen_nonces:
+                raise HTTPException(status_code=401, detail="Unauthorized")
+
+        body_bytes = await request.body()
+        body_hash = hashlib.sha256(body_bytes).hexdigest()
+        signature_payload = "\n".join(
+            [
+                request.method.upper(),
+                request.url.path,
+                x_internal_timestamp,
+                x_internal_nonce,
+                x_internal_service,
+                body_hash,
+            ]
+        )
+        expected_signature = hmac.new(
+            settings.internal_auth_shared_secret.encode("utf-8"),
+            signature_payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not hmac.compare_digest(expected_signature, x_internal_signature):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        with nonce_lock:
+            seen_nonces[x_internal_nonce] = (
+                now_monotonic + settings.internal_auth_nonce_ttl_seconds
+            )
+        return
+
     if not settings.service_api_key:
         logger.error(
             json.dumps(

@@ -19,9 +19,13 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
 ## Required Env Vars
-- `DATABASE_URL`
+- `LEDGER_DATABASE_URL` (preferred)
+- `DATABASE_ISOLATION_MODE` (`strict` in production)
 - `ENVIRONMENT`
-- `SERVICE_API_KEY` (required for all `/v1/*` API calls via `X-Service-Api-Key`)
+- Internal service auth:
+  - `INTERNAL_AUTH_MODE` (`api_key` or `hmac`)
+  - if `api_key`: `SERVICE_API_KEY` (required for all `/v1/*` API calls via `X-Service-Api-Key`)
+  - if `hmac`: `INTERNAL_AUTH_SHARED_SECRET` (+ timestamp/nonce replay checks)
 - `METRICS_TOKEN` (required in production for `/metrics`)
 - `SECRET_KEY` (for platform-level secret hygiene; this service itself does not issue auth tokens)
 - `BROKER_URL` (AMQP URL for outbox relay, e.g. RabbitMQ)
@@ -41,9 +45,11 @@ python -m app.migrate
 2. Set the service **Root Directory** to `services/wallet_ledger_service`.
 3. Ensure the service uses Nixpacks (it will pick up local `nixpacks.toml`).
 4. Set service variables:
-   - `DATABASE_URL` (PostgreSQL connection string)
+   - `LEDGER_DATABASE_URL` (PostgreSQL connection string)
    - `ENVIRONMENT=production`
-   - `SERVICE_API_KEY=<strong-random-secret>`
+   - `DATABASE_ISOLATION_MODE=strict`
+   - `INTERNAL_AUTH_MODE=hmac`
+   - `INTERNAL_AUTH_SHARED_SECRET=<strong-random-secret>`
 5. Run migration command:
    - `python -m app.migrate`
 6. Deploy and verify:

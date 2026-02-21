@@ -11,6 +11,12 @@
 - Database-per-service.
 - No cross-service direct table access.
 - `wallet-ledger-service` is the source of truth for balance and transaction state.
+- Runtime contract:
+  - Backoffice web: `BACKOFFICE_DATABASE_URL`
+  - Ledger + outbox worker: `LEDGER_DATABASE_URL`
+  - Ops/risk API + consumer: `OPS_RISK_DATABASE_URL`
+  - Audit exporter: `AUDIT_EXPORT_DATABASE_URL` (or explicit shared `BACKOFFICE_DATABASE_URL`)
+  - Production enforcement: set `DATABASE_ISOLATION_MODE=strict`.
 
 ## Communication
 - Synchronous: REST/gRPC for request/response operations.
@@ -35,6 +41,10 @@
 - Strict RBAC for admin operations.
 - Secure defaults: HTTPS only, secure cookies, HSTS, CSRF protection.
 - Signed internal service-to-service auth (mTLS or short-lived JWT).
+- Interim zero-trust baseline in this repo:
+  - `INTERNAL_AUTH_MODE=hmac` between gateway and ledger,
+  - signed request headers with timestamp + nonce + body digest,
+  - replay protection and clock-skew validation on ledger ingress.
 
 ## Current Repo State (Phase 1)
 - Production-hardening settings added.

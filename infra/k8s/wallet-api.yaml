@@ -32,6 +32,8 @@ spec:
           env:
             - name: ENVIRONMENT
               value: production
+            - name: DATABASE_ISOLATION_MODE
+              value: strict
             - name: DEBUG
               value: "False"
             - name: ALLOWED_HOSTS
@@ -49,11 +51,11 @@ spec:
                 secretKeyRef:
                   name: wallet-secrets
                   key: SECRET_KEY
-            - name: DATABASE_URL
+            - name: BACKOFFICE_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: wallet-secrets
-                  key: DATABASE_URL
+                  key: BACKOFFICE_DATABASE_URL
           livenessProbe:
             httpGet:
               path: /healthz

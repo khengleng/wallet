@@ -6,8 +6,10 @@ services:
       context: ../services/wallet_ledger_service
     environment:
       ENVIRONMENT: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
-      SERVICE_API_KEY: local-ledger-service-key
+      DATABASE_ISOLATION_MODE: strict
+      LEDGER_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet_ledger
+      INTERNAL_AUTH_MODE: hmac
+      INTERNAL_AUTH_SHARED_SECRET: local-internal-auth-shared-secret
       METRICS_TOKEN: local-metrics-token
     ports:
       - "8080:8080"
@@ -20,7 +22,8 @@ services:
     command: python -m app.outbox_worker
     environment:
       ENVIRONMENT: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      DATABASE_ISOLATION_MODE: strict
+      LEDGER_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet_ledger
       SERVICE_API_KEY: local-ledger-service-key
       BROKER_URL: amqp://guest:guest@rabbitmq:5672/%2F
       OUTBOX_EXCHANGE: wallet.events
@@ -43,8 +46,9 @@ services:
       JWT_SECRET: local-jwt-secret
       JWT_AUDIENCE: wallet-api
       JWT_ISSUER: wallet-identity
+      INTERNAL_AUTH_MODE: hmac
       LEDGER_BASE_URL: http://wallet-ledger-service:8080
-      LEDGER_API_KEY: local-ledger-service-key
+      INTERNAL_AUTH_SHARED_SECRET: local-internal-auth-shared-secret
       METRICS_TOKEN: local-metrics-token
       RATE_LIMIT_PER_IP: 120/minute
       RATE_LIMIT_PER_USER: 240/minute
@@ -61,7 +65,8 @@ services:
              uvicorn app.main:app --host 0.0.0.0 --port 8080 --workers 2"
     environment:
       ENVIRONMENT: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      DATABASE_ISOLATION_MODE: strict
+      OPS_RISK_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ops_risk
       BROKER_URL: amqp://guest:guest@rabbitmq:5672/%2F
       METRICS_TOKEN: local-metrics-token
       EVENT_EXCHANGE_NAME: wallet.events
@@ -84,7 +89,8 @@ services:
              python -m app.consumer"
     environment:
       ENVIRONMENT: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      DATABASE_ISOLATION_MODE: strict
+      OPS_RISK_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ops_risk
       BROKER_URL: amqp://guest:guest@rabbitmq:5672/%2F
       EVENT_EXCHANGE_NAME: wallet.events
       EVENT_EXCHANGE_TYPE: topic
@@ -102,7 +108,9 @@ services:
       context: ../services/audit_export_worker
     environment:
       ENVIRONMENT: production
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      DATABASE_ISOLATION_MODE: strict
+      BACKOFFICE_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet_backoffice
+      AUDIT_EXPORT_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet_backoffice
       SIEM_WEBHOOK_URL: http://mock-siem:8080/ingest
       SIEM_SIGNING_SECRET: local-audit-export-signing-secret
       EXPORT_BATCH_SIZE: 200
@@ -123,9 +131,10 @@ services:
              gunicorn demo_project_app.wsgi:application -c ../gunicorn.conf.py"
     environment:
       ENVIRONMENT: production
+      DATABASE_ISOLATION_MODE: strict
       DEBUG: "False"
       SECRET_KEY: local-dev-secret-replace
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet
+      BACKOFFICE_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/wallet_backoffice
       ALLOWED_HOSTS: localhost,127.0.0.1
       CSRF_TRUSTED_ORIGINS: http://localhost:8000
       WEB_CONCURRENCY: "2"
@@ -189,13 +198,14 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: wallet
+      POSTGRES_DB: postgres
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./postgres/init-microservices.sql:/docker-entrypoint-initdb.d/init-microservices.sql:ro
 
   redis:
     image: redis:7-alpine

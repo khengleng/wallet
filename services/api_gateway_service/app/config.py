@@ -1,20 +1,55 @@
 import os
 from dataclasses import dataclass
+from urllib import error as urlerror
+from urllib import request as urlrequest
+import json
+
+
+def _env(key: str, default: str = "") -> str:
+    value = os.getenv(key, "").strip()
+    if value:
+        return value
+    file_path = os.getenv(f"{key}_FILE", "").strip()
+    if file_path:
+        try:
+            with open(file_path, "r", encoding="utf-8") as secret_file:
+                file_value = secret_file.read().strip()
+            if file_value:
+                return file_value
+        except OSError:
+            pass
+    vault_addr = os.getenv("VAULT_ADDR", "").strip().rstrip("/")
+    vault_token = os.getenv("VAULT_TOKEN", "").strip()
+    vault_path = os.getenv(f"{key}_VAULT_PATH", "").strip().strip("/")
+    if not (vault_addr and vault_token and vault_path):
+        return default
+    vault_field = os.getenv(f"{key}_VAULT_FIELD", key)
+    headers = {"X-Vault-Token": vault_token}
+    namespace = os.getenv("VAULT_NAMESPACE", "").strip()
+    if namespace:
+        headers["X-Vault-Namespace"] = namespace
+    req = urlrequest.Request(f"{vault_addr}/v1/{vault_path}", headers=headers)
+    try:
+        with urlrequest.urlopen(req, timeout=float(os.getenv("VAULT_TIMEOUT_SECONDS", "3"))) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        return str(payload.get("data", {}).get("data", {}).get(vault_field, default)).strip()
+    except (urlerror.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return default
 
 
 @dataclass(frozen=True)
 class Settings:
-    service_name: str = os.getenv("SERVICE_NAME", "api-gateway-service")
-    environment: str = os.getenv("ENVIRONMENT", "development")
-    auth_mode: str = os.getenv("AUTH_MODE", "local_jwt").strip().lower()
-    jwt_secret: str = os.getenv("JWT_SECRET", "")
+    service_name: str = _env("SERVICE_NAME", "api-gateway-service")
+    environment: str = _env("ENVIRONMENT", "development")
+    auth_mode: str = _env("AUTH_MODE", "local_jwt").strip().lower()
+    jwt_secret: str = _env("JWT_SECRET", "")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_audience: str = os.getenv("JWT_AUDIENCE", "wallet-api")
     jwt_issuer: str = os.getenv("JWT_ISSUER", "wallet-identity")
-    keycloak_base_url: str = os.getenv("KEYCLOAK_BASE_URL", "").strip().rstrip("/")
-    keycloak_realm: str = os.getenv("KEYCLOAK_REALM", "").strip()
-    keycloak_client_id: str = os.getenv("KEYCLOAK_CLIENT_ID", "").strip()
-    keycloak_client_secret: str = os.getenv("KEYCLOAK_CLIENT_SECRET", "").strip()
+    keycloak_base_url: str = _env("KEYCLOAK_BASE_URL", "").strip().rstrip("/")
+    keycloak_realm: str = _env("KEYCLOAK_REALM", "").strip()
+    keycloak_client_id: str = _env("KEYCLOAK_CLIENT_ID", "").strip()
+    keycloak_client_secret: str = _env("KEYCLOAK_CLIENT_SECRET", "").strip()
     keycloak_introspection_timeout_seconds: float = float(
         os.getenv("KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS", "2.0")
     )
@@ -22,7 +57,12 @@ class Settings:
         "LEDGER_BASE_URL",
         "http://localhost:8081",
     )
-    ledger_api_key: str = os.getenv("LEDGER_API_KEY", "")
+    internal_auth_mode: str = _env("INTERNAL_AUTH_MODE", "api_key").strip().lower()
+    ledger_api_key: str = _env("LEDGER_API_KEY", "")
+    internal_auth_shared_secret: str = _env("INTERNAL_AUTH_SHARED_SECRET", "")
+    internal_auth_timestamp_skew_seconds: int = int(
+        os.getenv("INTERNAL_AUTH_TIMESTAMP_SKEW_SECONDS", "90")
+    )
     ledger_timeout_seconds: float = float(os.getenv("LEDGER_TIMEOUT_SECONDS", "10"))
     ledger_max_retries: int = int(os.getenv("LEDGER_MAX_RETRIES", "2"))
     ledger_retry_backoff_seconds: float = float(
@@ -32,7 +72,7 @@ class Settings:
         os.getenv("LEDGER_CIRCUIT_FAILURE_THRESHOLD", "5")
     )
     circuit_reset_seconds: int = int(os.getenv("LEDGER_CIRCUIT_RESET_SECONDS", "30"))
-    metrics_token: str = os.getenv("METRICS_TOKEN", "")
+    metrics_token: str = _env("METRICS_TOKEN", "")
     per_ip_limit: str = os.getenv("RATE_LIMIT_PER_IP", "120/minute")
     per_user_limit: str = os.getenv("RATE_LIMIT_PER_USER", "240/minute")
     read_per_ip_limit: str = os.getenv("RATE_LIMIT_READ_PER_IP", "300/minute")
@@ -81,16 +121,29 @@ if settings.is_production:
                 if not value
             ]
         )
-    missing.extend(
-        [
-            key
-            for key, value in (
-                ("LEDGER_API_KEY", settings.ledger_api_key),
-                ("LEDGER_BASE_URL", settings.ledger_base_url),
-                ("METRICS_TOKEN", settings.metrics_token),
-            )
-            if not value
-        ]
-    )
+    if settings.internal_auth_mode == "hmac":
+        missing.extend(
+            [
+                key
+                for key, value in (
+                    ("INTERNAL_AUTH_SHARED_SECRET", settings.internal_auth_shared_secret),
+                    ("LEDGER_BASE_URL", settings.ledger_base_url),
+                    ("METRICS_TOKEN", settings.metrics_token),
+                )
+                if not value
+            ]
+        )
+    else:
+        missing.extend(
+            [
+                key
+                for key, value in (
+                    ("LEDGER_API_KEY", settings.ledger_api_key),
+                    ("LEDGER_BASE_URL", settings.ledger_base_url),
+                    ("METRICS_TOKEN", settings.metrics_token),
+                )
+                if not value
+            ]
+        )
     if missing:
         raise RuntimeError(f"Missing required production settings: {', '.join(missing)}")

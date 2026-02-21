@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
+import secrets
 import time
 from collections import defaultdict, deque
 from threading import Lock
@@ -80,11 +83,51 @@ def _audit(event: str, **fields: Any) -> None:
     logger.info(json.dumps(payload))
 
 
-def _forward_headers(idempotency_key: str | None = None) -> dict[str, str]:
+def _forward_headers(
+    *,
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, str]:
     headers = {
-        "X-Service-Api-Key": settings.ledger_api_key,
         "Content-Type": "application/json",
     }
+    if settings.internal_auth_mode == "hmac":
+        timestamp = str(int(time.time()))
+        nonce = secrets.token_hex(16)
+        body_bytes = b""
+        if payload is not None:
+            body_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode(
+                "utf-8"
+            )
+        body_digest = hashlib.sha256(body_bytes).hexdigest()
+        signature_payload = "\n".join(
+            [
+                method.upper(),
+                path,
+                timestamp,
+                nonce,
+                settings.service_name,
+                body_digest,
+            ]
+        )
+        signature = hmac.new(
+            settings.internal_auth_shared_secret.encode("utf-8"),
+            signature_payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        headers.update(
+            {
+                "X-Internal-Service": settings.service_name,
+                "X-Internal-Timestamp": timestamp,
+                "X-Internal-Nonce": nonce,
+                "X-Internal-Signature": signature,
+                "X-Internal-Signature-Alg": "HMAC-SHA256",
+            }
+        )
+    else:
+        headers["X-Service-Api-Key"] = settings.ledger_api_key
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key
     return headers
@@ -350,7 +393,12 @@ async def _proxy(
                     method,
                     url,
                     json=payload,
-                    headers=_forward_headers(idempotency_key),
+                    headers=_forward_headers(
+                        method=method,
+                        path=path,
+                        payload=payload,
+                        idempotency_key=idempotency_key,
+                    ),
                 )
         except httpx.HTTPError as exc:
             if attempt <= settings.ledger_max_retries:

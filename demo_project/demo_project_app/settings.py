@@ -4,6 +4,9 @@ Django settings for demo_project_app project.
 
 import os
 from pathlib import Path
+import json
+from urllib import error as urlerror
+from urllib import request as urlrequest
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
@@ -12,15 +15,47 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _env(key: str, default: str = "") -> str:
+    value = os.getenv(key, "").strip()
+    if value:
+        return value
+    file_path = os.getenv(f"{key}_FILE", "").strip()
+    if file_path:
+        try:
+            with open(file_path, "r", encoding="utf-8") as secret_file:
+                file_value = secret_file.read().strip()
+            if file_value:
+                return file_value
+        except OSError:
+            pass
+    vault_addr = os.getenv("VAULT_ADDR", "").strip().rstrip("/")
+    vault_token = os.getenv("VAULT_TOKEN", "").strip()
+    vault_path = os.getenv(f"{key}_VAULT_PATH", "").strip().strip("/")
+    if not (vault_addr and vault_token and vault_path):
+        return default
+    vault_field = os.getenv(f"{key}_VAULT_FIELD", key)
+    headers = {"X-Vault-Token": vault_token}
+    namespace = os.getenv("VAULT_NAMESPACE", "").strip()
+    if namespace:
+        headers["X-Vault-Namespace"] = namespace
+    req = urlrequest.Request(f"{vault_addr}/v1/{vault_path}", headers=headers)
+    try:
+        with urlrequest.urlopen(req, timeout=float(os.getenv("VAULT_TIMEOUT_SECONDS", "3"))) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        return str(payload.get("data", {}).get("data", {}).get(vault_field, default)).strip()
+    except (urlerror.URLError, TimeoutError, ValueError, json.JSONDecodeError):
+        return default
+
+
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv("SECRET_KEY")
+SECRET_KEY = _env("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-IS_PRODUCTION = os.getenv("ENVIRONMENT", "").lower() in {
+DEBUG = _env("DEBUG", "False").lower() == "true"
+IS_PRODUCTION = _env("ENVIRONMENT", "").lower() in {
     "prod",
     "production",
 } or not DEBUG
@@ -95,12 +130,18 @@ WSGI_APPLICATION = "demo_project_app.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = _env("DATABASE_URL")
+BACKOFFICE_DATABASE_URL = _env("BACKOFFICE_DATABASE_URL", DATABASE_URL)
+DATABASE_ISOLATION_MODE = _env("DATABASE_ISOLATION_MODE", "compat").lower()
+if IS_PRODUCTION and DATABASE_ISOLATION_MODE == "strict" and not BACKOFFICE_DATABASE_URL and not IS_BUILD:
+    raise ImproperlyConfigured(
+        "BACKOFFICE_DATABASE_URL must be set in production when DATABASE_ISOLATION_MODE=strict."
+    )
 
-if DATABASE_URL:
+if BACKOFFICE_DATABASE_URL:
     DATABASES = {
         "default": dj_database_url.parse(
-            DATABASE_URL,
+            BACKOFFICE_DATABASE_URL,
             conn_max_age=600,
             ssl_require=True,
         )
@@ -178,16 +219,16 @@ FX_PROVIDER_TIMEOUT_SECONDS = int(os.getenv("FX_PROVIDER_TIMEOUT_SECONDS", "10")
 FX_PROVIDER_BASE_URL = os.getenv(
     "FX_PROVIDER_BASE_URL", "https://api.frankfurter.app"
 ).strip()
-FX_PROVIDER_API_KEY = os.getenv("FX_PROVIDER_API_KEY", "").strip()
+FX_PROVIDER_API_KEY = _env("FX_PROVIDER_API_KEY", "").strip()
 FX_PROVIDER_FALLBACK = os.getenv("FX_PROVIDER_FALLBACK", "open_er_api").strip().lower()
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 FX_RATE_CACHE_TTL_SECONDS = int(os.getenv("FX_RATE_CACHE_TTL_SECONDS", "60"))
-METRICS_TOKEN = os.getenv("METRICS_TOKEN", "").strip()
+METRICS_TOKEN = _env("METRICS_TOKEN", "").strip()
 AUTH_MODE = os.getenv("AUTH_MODE", "local").strip().lower()
 KEYCLOAK_BASE_URL = os.getenv("KEYCLOAK_BASE_URL", "").strip().rstrip("/")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "").strip()
 KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "").strip()
-KEYCLOAK_CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET", "").strip()
+KEYCLOAK_CLIENT_SECRET = _env("KEYCLOAK_CLIENT_SECRET", "").strip()
 KEYCLOAK_REDIRECT_URI = os.getenv("KEYCLOAK_REDIRECT_URI", "").strip()
 KEYCLOAK_POST_LOGOUT_REDIRECT_URI = os.getenv("KEYCLOAK_POST_LOGOUT_REDIRECT_URI", "").strip()
 KEYCLOAK_SCOPES = os.getenv("KEYCLOAK_SCOPES", "openid profile email").strip()
@@ -219,11 +260,11 @@ def _parse_keycloak_role_group_map() -> dict[str, str]:
 
 
 KEYCLOAK_ROLE_GROUP_MAP = _parse_keycloak_role_group_map()
-AUDIT_EXPORT_HMAC_SECRET = os.getenv("AUDIT_EXPORT_HMAC_SECRET", SECRET_KEY or "").strip()
+AUDIT_EXPORT_HMAC_SECRET = _env("AUDIT_EXPORT_HMAC_SECRET", SECRET_KEY or "").strip()
 AUDIT_EXPORT_MAX_DAYS = int(os.getenv("AUDIT_EXPORT_MAX_DAYS", "90"))
 CLEVERTAP_ENABLED = os.getenv("CLEVERTAP_ENABLED", "false").lower() == "true"
-CLEVERTAP_ACCOUNT_ID = os.getenv("CLEVERTAP_ACCOUNT_ID", "").strip()
-CLEVERTAP_PASSCODE = os.getenv("CLEVERTAP_PASSCODE", "").strip()
+CLEVERTAP_ACCOUNT_ID = _env("CLEVERTAP_ACCOUNT_ID", "").strip()
+CLEVERTAP_PASSCODE = _env("CLEVERTAP_PASSCODE", "").strip()
 CLEVERTAP_REGION = os.getenv("CLEVERTAP_REGION", "us1").strip()
 CLEVERTAP_EVENT_ENDPOINT = os.getenv("CLEVERTAP_EVENT_ENDPOINT", "").strip()
 CLEVERTAP_TIMEOUT_SECONDS = float(os.getenv("CLEVERTAP_TIMEOUT_SECONDS", "5"))
