@@ -181,6 +181,7 @@ FX_PROVIDER_API_KEY = os.getenv("FX_PROVIDER_API_KEY", "").strip()
 FX_PROVIDER_FALLBACK = os.getenv("FX_PROVIDER_FALLBACK", "open_er_api").strip().lower()
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 FX_RATE_CACHE_TTL_SECONDS = int(os.getenv("FX_RATE_CACHE_TTL_SECONDS", "60"))
+METRICS_TOKEN = os.getenv("METRICS_TOKEN", "").strip()
 
 if REDIS_URL:
     CACHES = {

@@ -11,6 +11,7 @@ class Settings:
     )
     default_currency: str = os.getenv("DEFAULT_CURRENCY", "USD")
     service_api_key: str = os.getenv("SERVICE_API_KEY", "")
+    metrics_token: str = os.getenv("METRICS_TOKEN", "")
     broker_url: str = os.getenv("BROKER_URL", "amqp://guest:guest@localhost:5672/%2F")
     outbox_exchange: str = os.getenv("OUTBOX_EXCHANGE", "wallet.events")
     outbox_exchange_type: str = os.getenv("OUTBOX_EXCHANGE_TYPE", "topic")

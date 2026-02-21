@@ -1,7 +1,9 @@
 from typing import Annotated
 from uuid import UUID
+import time
+from threading import Lock
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 import json
@@ -32,6 +34,22 @@ app = FastAPI(
 )
 
 logger = logging.getLogger("wallet_ledger.audit")
+metrics_lock = Lock()
+metrics_counters = {
+    "requests_total": 0,
+    "accounts_created_total": 0,
+    "deposits_success_total": 0,
+    "withdrawals_success_total": 0,
+    "transfers_success_total": 0,
+    "insufficient_funds_total": 0,
+    "not_found_total": 0,
+}
+APP_START_MONOTONIC = time.monotonic()
+
+
+def _inc_counter(key: str, value: int = 1) -> None:
+    with metrics_lock:
+        metrics_counters[key] = int(metrics_counters.get(key, 0)) + value
 
 
 def get_db():
@@ -64,9 +82,50 @@ def require_service_api_key(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def require_metrics_token(
+    x_metrics_token: Annotated[str | None, Header(alias="X-Metrics-Token")] = None,
+):
+    if settings.metrics_token and x_metrics_token != settings.metrics_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/metrics")
+def metrics(_: Annotated[None, Depends(require_metrics_token)]):
+    uptime_seconds = int(time.monotonic() - APP_START_MONOTONIC)
+    with metrics_lock:
+        snapshot = dict(metrics_counters)
+    lines = [
+        "# HELP wallet_ledger_uptime_seconds Process uptime in seconds.",
+        "# TYPE wallet_ledger_uptime_seconds gauge",
+        f"wallet_ledger_uptime_seconds {uptime_seconds}",
+        "# HELP wallet_ledger_requests_total Total handled ledger requests.",
+        "# TYPE wallet_ledger_requests_total counter",
+        f"wallet_ledger_requests_total {snapshot['requests_total']}",
+        "# HELP wallet_ledger_accounts_created_total Total created accounts.",
+        "# TYPE wallet_ledger_accounts_created_total counter",
+        f"wallet_ledger_accounts_created_total {snapshot['accounts_created_total']}",
+        "# HELP wallet_ledger_deposits_success_total Successful deposits.",
+        "# TYPE wallet_ledger_deposits_success_total counter",
+        f"wallet_ledger_deposits_success_total {snapshot['deposits_success_total']}",
+        "# HELP wallet_ledger_withdrawals_success_total Successful withdrawals.",
+        "# TYPE wallet_ledger_withdrawals_success_total counter",
+        f"wallet_ledger_withdrawals_success_total {snapshot['withdrawals_success_total']}",
+        "# HELP wallet_ledger_transfers_success_total Successful transfers.",
+        "# TYPE wallet_ledger_transfers_success_total counter",
+        f"wallet_ledger_transfers_success_total {snapshot['transfers_success_total']}",
+        "# HELP wallet_ledger_insufficient_funds_total Insufficient funds errors.",
+        "# TYPE wallet_ledger_insufficient_funds_total counter",
+        f"wallet_ledger_insufficient_funds_total {snapshot['insufficient_funds_total']}",
+        "# HELP wallet_ledger_not_found_total Account not found errors.",
+        "# TYPE wallet_ledger_not_found_total counter",
+        f"wallet_ledger_not_found_total {snapshot['not_found_total']}",
+    ]
+    return Response(content="\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 @app.get("/readyz")
@@ -81,10 +140,12 @@ def create_account_endpoint(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[None, Depends(require_service_api_key)],
 ):
+    _inc_counter("requests_total")
     with db.begin():
         account = create_account(
             db, owner_id=payload.external_owner_id, currency=payload.currency
         )
+    _inc_counter("accounts_created_total")
     logger.info(
         json.dumps(
             {
@@ -108,8 +169,10 @@ def get_account_endpoint(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[None, Depends(require_service_api_key)],
 ):
+    _inc_counter("requests_total")
     account = get_account(db, account_id=account_id)
     if account is None:
+        _inc_counter("not_found_total")
         raise HTTPException(status_code=404, detail="Account not found")
     logger.info(
         json.dumps({"event": "account_read", "account_id": str(account.id)})
@@ -129,6 +192,7 @@ def deposit_endpoint(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[None, Depends(require_service_api_key)],
 ):
+    _inc_counter("requests_total")
     try:
         result = apply_deposit(
             db=db,
@@ -145,7 +209,10 @@ def deposit_endpoint(
             "idempotency_key": result["idempotency_key"],
         }
     except ValueError as exc:
+        _inc_counter("not_found_total")
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    else:
+        _inc_counter("deposits_success_total")
     finally:
         logger.info(
             json.dumps(
@@ -166,6 +233,7 @@ def withdraw_endpoint(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[None, Depends(require_service_api_key)],
 ):
+    _inc_counter("requests_total")
     try:
         result = apply_withdrawal(
             db=db,
@@ -182,9 +250,13 @@ def withdraw_endpoint(
             "idempotency_key": result["idempotency_key"],
         }
     except ValueError as exc:
+        _inc_counter("not_found_total")
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except InsufficientFundsError as exc:
+        _inc_counter("insufficient_funds_total")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    else:
+        _inc_counter("withdrawals_success_total")
     finally:
         logger.info(
             json.dumps(
@@ -205,6 +277,7 @@ def transfer_endpoint(
     db: Annotated[Session, Depends(get_db)],
     _: Annotated[None, Depends(require_service_api_key)],
 ):
+    _inc_counter("requests_total")
     try:
         result = apply_transfer(
             db=db,
@@ -224,9 +297,13 @@ def transfer_endpoint(
             "idempotency_key": result["idempotency_key"],
         }
     except ValueError as exc:
+        _inc_counter("not_found_total")
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except InsufficientFundsError as exc:
+        _inc_counter("insufficient_funds_total")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    else:
+        _inc_counter("transfers_success_total")
     finally:
         logger.info(
             json.dumps(

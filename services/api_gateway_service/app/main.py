@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from jose import JWTError, jwt
 
 from .config import settings
@@ -27,6 +27,21 @@ rate_windows: dict[str, deque[float]] = defaultdict(deque)
 circuit_lock = Lock()
 circuit_failures = 0
 circuit_open_until = 0.0
+metrics_lock = Lock()
+metrics_counters = {
+    "requests_total": 0,
+    "upstream_errors_total": 0,
+    "rate_limited_total": 0,
+    "auth_failed_total": 0,
+    "circuit_open_total": 0,
+    "proxy_retries_total": 0,
+}
+APP_START_MONOTONIC = time.monotonic()
+
+
+def _inc_counter(key: str, value: int = 1) -> None:
+    with metrics_lock:
+        metrics_counters[key] = int(metrics_counters.get(key, 0)) + value
 
 
 def _audit(event: str, **fields: Any) -> None:
@@ -48,6 +63,7 @@ def _forward_headers(idempotency_key: str | None = None) -> dict[str, str]:
 def _decode_jwt(authorization: str | None) -> dict[str, Any]:
     if not authorization or not authorization.startswith("Bearer "):
         _audit("auth_failed", reason="missing_bearer")
+        _inc_counter("auth_failed_total")
         raise HTTPException(status_code=401, detail="Missing or invalid bearer token")
     token = authorization.split(" ", 1)[1]
     try:
@@ -60,10 +76,12 @@ def _decode_jwt(authorization: str | None) -> dict[str, Any]:
         )
     except JWTError as exc:
         _audit("auth_failed", reason="jwt_invalid")
+        _inc_counter("auth_failed_total")
         raise HTTPException(status_code=401, detail="Invalid token") from exc
     subject = claims.get("sub")
     if not subject:
         _audit("auth_failed", reason="missing_subject")
+        _inc_counter("auth_failed_total")
         raise HTTPException(status_code=401, detail="Invalid token")
     return claims
 
@@ -120,9 +138,11 @@ def enforce_rate_limits(
 
     if not _consume(f"ip:{ip}", ip_limit, ip_window):
         _audit("rate_limited", reason="ip_limit", ip=ip)
+        _inc_counter("rate_limited_total")
         raise HTTPException(status_code=429, detail="Too many requests")
     if not _consume(f"user:{subject}", user_limit, user_window):
         _audit("rate_limited", reason="user_limit", subject=subject, ip=ip)
+        _inc_counter("rate_limited_total")
         raise HTTPException(status_code=429, detail="Too many requests")
 
     request.state.subject = subject
@@ -140,6 +160,7 @@ async def _proxy(
     with circuit_lock:
         if circuit_open_until > time.monotonic():
             _audit("upstream_circuit_open")
+            _inc_counter("circuit_open_total")
             raise HTTPException(status_code=503, detail="Ledger temporarily unavailable")
 
     url = f"{settings.ledger_base_url.rstrip('/')}{path}"
@@ -157,9 +178,11 @@ async def _proxy(
                 )
         except httpx.HTTPError as exc:
             if attempt <= settings.ledger_max_retries:
+                _inc_counter("proxy_retries_total")
                 await asyncio.sleep(backoff)
                 backoff *= 2
                 continue
+            _inc_counter("upstream_errors_total")
             with circuit_lock:
                 circuit_failures += 1
                 if circuit_failures >= settings.circuit_failure_threshold:
@@ -167,6 +190,7 @@ async def _proxy(
             raise HTTPException(status_code=502, detail="Ledger upstream unavailable") from exc
 
         if resp.status_code >= 500 and attempt <= settings.ledger_max_retries:
+            _inc_counter("proxy_retries_total")
             await asyncio.sleep(backoff)
             backoff *= 2
             continue
@@ -178,6 +202,7 @@ async def _proxy(
 
         if resp.status_code >= 400:
             if resp.status_code >= 500:
+                _inc_counter("upstream_errors_total")
                 with circuit_lock:
                     circuit_failures += 1
                     if circuit_failures >= settings.circuit_failure_threshold:
@@ -190,9 +215,52 @@ async def _proxy(
         return body
 
 
+def _require_metrics_token(
+    x_metrics_token: str | None = Header(default=None, alias="X-Metrics-Token"),
+):
+    if settings.metrics_token and x_metrics_token != settings.metrics_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok", "service": settings.service_name}
+
+
+@app.get("/metrics")
+def metrics(_: None = Depends(_require_metrics_token)):
+    uptime_seconds = int(time.monotonic() - APP_START_MONOTONIC)
+    with metrics_lock:
+        snapshot = dict(metrics_counters)
+    with circuit_lock:
+        is_open = 1 if circuit_open_until > time.monotonic() else 0
+    lines = [
+        "# HELP wallet_gateway_uptime_seconds Process uptime in seconds.",
+        "# TYPE wallet_gateway_uptime_seconds gauge",
+        f"wallet_gateway_uptime_seconds {uptime_seconds}",
+        "# HELP wallet_gateway_requests_total Total handled requests to business endpoints.",
+        "# TYPE wallet_gateway_requests_total counter",
+        f"wallet_gateway_requests_total {snapshot['requests_total']}",
+        "# HELP wallet_gateway_upstream_errors_total Upstream ledger errors.",
+        "# TYPE wallet_gateway_upstream_errors_total counter",
+        f"wallet_gateway_upstream_errors_total {snapshot['upstream_errors_total']}",
+        "# HELP wallet_gateway_rate_limited_total Requests blocked by rate limit.",
+        "# TYPE wallet_gateway_rate_limited_total counter",
+        f"wallet_gateway_rate_limited_total {snapshot['rate_limited_total']}",
+        "# HELP wallet_gateway_auth_failed_total Failed authentications.",
+        "# TYPE wallet_gateway_auth_failed_total counter",
+        f"wallet_gateway_auth_failed_total {snapshot['auth_failed_total']}",
+        "# HELP wallet_gateway_circuit_open_total Times circuit-open branch triggered.",
+        "# TYPE wallet_gateway_circuit_open_total counter",
+        f"wallet_gateway_circuit_open_total {snapshot['circuit_open_total']}",
+        "# HELP wallet_gateway_proxy_retries_total Proxy retry attempts.",
+        "# TYPE wallet_gateway_proxy_retries_total counter",
+        f"wallet_gateway_proxy_retries_total {snapshot['proxy_retries_total']}",
+        "# HELP wallet_gateway_circuit_state Circuit breaker state (1=open, 0=closed).",
+        "# TYPE wallet_gateway_circuit_state gauge",
+        f"wallet_gateway_circuit_state {is_open}",
+    ]
+    return Response(content="\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 @app.get("/readyz")
@@ -207,6 +275,7 @@ async def create_account(
     payload: AccountCreateRequest,
     claims: dict[str, Any] = Depends(enforce_rate_limits),
 ):
+    _inc_counter("requests_total")
     _audit("create_account", subject=claims["sub"], external_owner_id=payload.external_owner_id)
     return await _proxy("POST", "/v1/accounts", payload.model_dump(mode="json"))
 
@@ -217,6 +286,7 @@ async def get_account(
     account_id: UUID,
     claims: dict[str, Any] = Depends(enforce_rate_limits),
 ):
+    _inc_counter("requests_total")
     _audit("read_account", subject=claims["sub"], account_id=str(account_id))
     return await _proxy("GET", f"/v1/accounts/{account_id}")
 
@@ -228,6 +298,7 @@ async def deposit(
     claims: dict[str, Any] = Depends(enforce_rate_limits),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
+    _inc_counter("requests_total")
     _audit(
         "deposit_attempt",
         subject=claims["sub"],
@@ -249,6 +320,7 @@ async def withdraw(
     claims: dict[str, Any] = Depends(enforce_rate_limits),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
+    _inc_counter("requests_total")
     _audit(
         "withdraw_attempt",
         subject=claims["sub"],
@@ -270,6 +342,7 @@ async def transfer(
     claims: dict[str, Any] = Depends(enforce_rate_limits),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
+    _inc_counter("requests_total")
     _audit(
         "transfer_attempt",
         subject=claims["sub"],

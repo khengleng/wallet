@@ -4,6 +4,7 @@ from . import views
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
+    path('metrics', views.metrics, name='metrics'),
     path('fx/exchange/', views.wallet_fx_exchange, name='wallet_fx_exchange'),
     path('backoffice/', views.backoffice, name='backoffice'),
     path('backoffice/rbac/', views.rbac_management, name='rbac_management'),

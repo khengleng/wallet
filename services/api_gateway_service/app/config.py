@@ -24,6 +24,7 @@ class Settings:
         os.getenv("LEDGER_CIRCUIT_FAILURE_THRESHOLD", "5")
     )
     circuit_reset_seconds: int = int(os.getenv("LEDGER_CIRCUIT_RESET_SECONDS", "30"))
+    metrics_token: str = os.getenv("METRICS_TOKEN", "")
     per_ip_limit: str = os.getenv("RATE_LIMIT_PER_IP", "120/minute")
     per_user_limit: str = os.getenv("RATE_LIMIT_PER_USER", "240/minute")
 

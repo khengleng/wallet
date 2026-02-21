@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+import time
 
 from django.contrib import messages
 from django.conf import settings
@@ -9,6 +10,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from dj_wallet.models import Transaction, Wallet
@@ -40,6 +42,8 @@ from .rbac import (
     user_is_checker,
     user_is_maker,
 )
+
+APP_START_MONOTONIC = time.monotonic()
 
 
 def _parse_amount(raw_value: str) -> Decimal:
@@ -249,6 +253,46 @@ def portal_login(request):
         return redirect("dashboard")
 
     return render(request, "wallets_demo/login.html")
+
+
+def metrics(request):
+    expected = getattr(settings, "METRICS_TOKEN", "")
+    if expected:
+        provided = request.headers.get("X-Metrics-Token", "")
+        if provided != expected:
+            return HttpResponse("Unauthorized\n", status=401, content_type="text/plain")
+
+    uptime_seconds = int(time.monotonic() - APP_START_MONOTONIC)
+    lines = [
+        "# HELP wallet_web_uptime_seconds Web process uptime in seconds.",
+        "# TYPE wallet_web_uptime_seconds gauge",
+        f"wallet_web_uptime_seconds {uptime_seconds}",
+        "# HELP wallet_web_users_total Total users.",
+        "# TYPE wallet_web_users_total gauge",
+        f"wallet_web_users_total {User.objects.count()}",
+        "# HELP wallet_web_wallets_total Total wallets.",
+        "# TYPE wallet_web_wallets_total gauge",
+        f"wallet_web_wallets_total {Wallet.objects.count()}",
+        "# HELP wallet_web_transactions_total Total wallet transactions.",
+        "# TYPE wallet_web_transactions_total gauge",
+        f"wallet_web_transactions_total {Transaction.objects.count()}",
+        "# HELP wallet_web_approvals_pending Pending approval requests.",
+        "# TYPE wallet_web_approvals_pending gauge",
+        f"wallet_web_approvals_pending {ApprovalRequest.objects.filter(status=ApprovalRequest.STATUS_PENDING).count()}",
+        "# HELP wallet_web_treasury_pending Pending treasury transfer requests.",
+        "# TYPE wallet_web_treasury_pending gauge",
+        f"wallet_web_treasury_pending {TreasuryTransferRequest.objects.filter(status=TreasuryTransferRequest.STATUS_PENDING).count()}",
+        "# HELP wallet_web_journal_drafts Draft journal entries.",
+        "# TYPE wallet_web_journal_drafts gauge",
+        f"wallet_web_journal_drafts {JournalEntry.objects.filter(status=JournalEntry.STATUS_DRAFT).count()}",
+        "# HELP wallet_web_journal_posted Posted journal entries.",
+        "# TYPE wallet_web_journal_posted gauge",
+        f"wallet_web_journal_posted {JournalEntry.objects.filter(status=JournalEntry.STATUS_POSTED).count()}",
+        "# HELP wallet_web_fx_rates_active Active FX rates.",
+        "# TYPE wallet_web_fx_rates_active gauge",
+        f"wallet_web_fx_rates_active {FxRate.objects.filter(is_active=True).count()}",
+    ]
+    return HttpResponse("\n".join(lines) + "\n", content_type="text/plain; version=0.0.4")
 
 
 @login_required
