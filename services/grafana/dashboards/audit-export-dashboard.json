@@ -1,0 +1,51 @@
+{
+  "title": "Audit Export Pipeline",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Export Lag (logs)",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "audit_export_lag_logs", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Pending Dead Letters",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "audit_export_pending_dead_letters", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Dead Letter Total",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "audit_export_dead_letter_total", "refId": "A" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Batch Success vs Failure Rate",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        { "expr": "rate(audit_export_batches_success_total[5m])", "refId": "A", "legendFormat": "success/s" },
+        { "expr": "rate(audit_export_batches_failed_total[5m])", "refId": "B", "legendFormat": "failed/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Export Throughput (logs/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [{ "expr": "rate(audit_export_logs_exported_total[5m])", "refId": "A", "legendFormat": "exported/s" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Replay Success vs Failure",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 14 },
+      "targets": [
+        { "expr": "increase(audit_export_replay_success_total[15m])", "refId": "A", "legendFormat": "replay_success" },
+        { "expr": "increase(audit_export_replay_failed_total[15m])", "refId": "B", "legendFormat": "replay_failed" }
+      ]
+    }
+  ]
+}

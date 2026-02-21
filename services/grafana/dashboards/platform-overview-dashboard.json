@@ -1,0 +1,68 @@
+{
+  "title": "Wallet Platform Overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Ledger Up",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "max(up{job='wallet-ledger-service'})", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Gateway Up",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "max(up{job='api-gateway-service'})", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Ops/Risk Up",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "max(up{job='ops-risk-service'})", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Audit Export Up",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "max(up{job='audit-export-worker'})", "refId": "A" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway Requests/s",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "targets": [{ "expr": "rate(wallet_gateway_requests_total[5m])", "refId": "A", "legendFormat": "req/s" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "Ledger Transactions/s",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "targets": [
+        { "expr": "rate(wallet_ledger_deposits_success_total[5m])", "refId": "A", "legendFormat": "deposits/s" },
+        { "expr": "rate(wallet_ledger_withdrawals_success_total[5m])", "refId": "B", "legendFormat": "withdrawals/s" },
+        { "expr": "rate(wallet_ledger_transfers_success_total[5m])", "refId": "C", "legendFormat": "transfers/s" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Gateway Protection Events",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "targets": [
+        { "expr": "increase(wallet_gateway_rate_limited_total[5m])", "refId": "A", "legendFormat": "rate_limited" },
+        { "expr": "increase(wallet_gateway_waf_blocked_total[5m])", "refId": "B", "legendFormat": "waf_blocked" },
+        { "expr": "increase(wallet_gateway_auth_failed_total[5m])", "refId": "C", "legendFormat": "auth_failed" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Ledger Error Indicators",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "targets": [
+        { "expr": "increase(wallet_ledger_insufficient_funds_total[5m])", "refId": "A", "legendFormat": "insufficient_funds" },
+        { "expr": "wallet_ledger_outbox_dead_letter", "refId": "B", "legendFormat": "outbox_dead_letter" }
+      ]
+    }
+  ]
+}

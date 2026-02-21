@@ -1,0 +1,32 @@
+groups:
+  - name: audit-export-worker
+    rules:
+      - alert: AuditExportPipelineLagHigh
+        expr: audit_export_lag_logs > 500
+        for: 5m
+        labels:
+          severity: warning
+          service: audit-export-worker
+        annotations:
+          summary: "Audit export lag is growing"
+          description: "Unexported audit logs exceeded 500 for more than 5 minutes."
+
+      - alert: AuditExportDeadLettersPresent
+        expr: audit_export_dead_letter_total > 0
+        for: 2m
+        labels:
+          severity: critical
+          service: audit-export-worker
+        annotations:
+          summary: "Audit export dead letters detected"
+          description: "One or more audit log exports exhausted retries and require replay/triage."
+
+      - alert: AuditExportBatchFailures
+        expr: increase(audit_export_batches_failed_total[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: audit-export-worker
+        annotations:
+          summary: "Audit export batch failures detected"
+          description: "At least one batch failed in the last 10 minutes."

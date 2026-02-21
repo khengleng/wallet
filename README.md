@@ -231,6 +231,8 @@ This repository now includes deployment and architecture scaffolding for high-sc
   - Ledger service root: `services/wallet_ledger_service` (uses local `nixpacks.toml`)
   - API gateway service root: `services/api_gateway_service` (uses local `nixpacks.toml`)
   - Ops/risk service root: `services/ops_risk_service` (uses local `nixpacks.toml`)
+  - Prometheus service root: `services/prometheus` (uses local `Dockerfile`)
+  - Grafana service root: `services/grafana` (uses local `Dockerfile`)
 
 Production defaults enforce:
 - explicit `SECRET_KEY`
