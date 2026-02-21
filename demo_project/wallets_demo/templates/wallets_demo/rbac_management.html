@@ -1,0 +1,52 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}RBAC Management - DJ Wallet{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>RBAC Role Management</h2>
+    <p class="text-muted">Assign platform roles directly from Backoffice.</p>
+    <a class="btn btn-outline mt-4" href="{% url 'backoffice' %}">Back to Backoffice</a>
+</div>
+
+<div class="card">
+    <h3>Users and Roles</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>User</th>
+                <th>Current Roles</th>
+                <th>Update</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in users %}
+                <tr>
+                    <td>{{ u.username }}</td>
+                    <td>{{ u.role_names|join:", " }}</td>
+                    <td>
+                        <form method="post">
+                            {% csrf_token %}
+                            <input type="hidden" name="user_id" value="{{ u.id }}">
+                            <div class="flex gap-2" style="flex-wrap: wrap; margin-bottom: 0.75rem;">
+                                {% for role_name, role_def in role_items %}
+                                    <label style="display:flex; align-items:center; gap:0.25rem; margin-right:0.75rem;">
+                                        <input type="checkbox" name="role_{{ role_name }}"
+                                               {% if role_name in u.role_names %}checked{% endif %}>
+                                        <span>{{ role_name }}</span>
+                                    </label>
+                                {% endfor %}
+                            </div>
+                            <button type="submit" class="btn btn-primary">Save Roles</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="3" class="text-muted" style="text-align:center;">No users found.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

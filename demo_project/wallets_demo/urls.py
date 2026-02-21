@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('backoffice/', views.backoffice, name='backoffice'),
+    path('backoffice/rbac/', views.rbac_management, name='rbac_management'),
     path('backoffice/treasury/', views.treasury_dashboard, name='treasury_dashboard'),
     path(
         'backoffice/treasury/<int:request_id>/decision/',

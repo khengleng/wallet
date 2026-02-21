@@ -109,6 +109,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
 }
 
 BACKOFFICE_ROLES: tuple[str, ...] = tuple(ROLE_DEFINITIONS.keys())
+RBAC_ADMIN_ROLES: tuple[str, ...] = ("admin", "super_admin")
 MAKER_ROLES: tuple[str, ...] = ("finance", "operation", "sales")
 CHECKER_ROLES: tuple[str, ...] = ("admin", "super_admin", "risk")
 

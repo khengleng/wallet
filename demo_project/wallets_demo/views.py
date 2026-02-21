@@ -14,6 +14,9 @@ from .rbac import (
     BACKOFFICE_ROLES,
     CHECKER_ROLES,
     MAKER_ROLES,
+    RBAC_ADMIN_ROLES,
+    ROLE_DEFINITIONS,
+    assign_roles,
     user_has_any_role,
     user_is_checker,
     user_is_maker,
@@ -97,6 +100,7 @@ def backoffice(request):
         "role_names": request.user.role_names,
         "maker_roles": MAKER_ROLES,
         "checker_roles": CHECKER_ROLES,
+        "can_manage_rbac": user_has_any_role(request.user, RBAC_ADMIN_ROLES),
     }
     return render(request, "wallets_demo/backoffice.html", context)
 
@@ -195,6 +199,38 @@ def treasury_decision(request, request_id: int):
     except Exception as exc:
         messages.error(request, f"Treasury decision failed: {exc}")
     return redirect("treasury_dashboard")
+
+
+@login_required
+def rbac_management(request):
+    if not user_has_any_role(request.user, RBAC_ADMIN_ROLES):
+        raise PermissionDenied("You do not have access to RBAC management.")
+
+    if request.method == "POST":
+        target_user = get_object_or_404(User, id=request.POST.get("user_id"))
+        selected_roles = [
+            role_name
+            for role_name in ROLE_DEFINITIONS.keys()
+            if request.POST.get(f"role_{role_name}") == "on"
+        ]
+        assign_roles(target_user, selected_roles)
+        messages.success(
+            request,
+            f"Updated roles for {target_user.username}: "
+            f"{', '.join(selected_roles) if selected_roles else 'no role assigned'}",
+        )
+        return redirect("rbac_management")
+
+    users = User.objects.order_by("username")
+    role_items = sorted(ROLE_DEFINITIONS.items(), key=lambda item: item[0])
+    return render(
+        request,
+        "wallets_demo/rbac_management.html",
+        {
+            "users": users,
+            "role_items": role_items,
+        },
+    )
 
 
 @login_required

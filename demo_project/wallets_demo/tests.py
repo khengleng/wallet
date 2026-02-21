@@ -105,3 +105,26 @@ class TreasuryWorkflowTests(TestCase):
         self.assertEqual(req.status, TreasuryTransferRequest.STATUS_APPROVED)
         self.assertEqual(str(self.from_account.balance), "750.00")
         self.assertEqual(str(self.to_account.balance), "350.00")
+
+
+class RBACManagementViewTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.admin = User.objects.create_user(username="rbac_admin", password="pass12345")
+        self.staff = User.objects.create_user(username="staff_user", password="pass12345")
+        assign_roles(self.admin, ["admin"])
+
+    def test_admin_can_assign_roles_from_rbac_view(self):
+        self.client.login(username="rbac_admin", password="pass12345")
+        response = self.client.post(
+            reverse("rbac_management"),
+            {
+                "user_id": self.staff.id,
+                "role_finance": "on",
+                "role_operation": "on",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.staff.refresh_from_db()
+        self.assertCountEqual(self.staff.role_names, ["finance", "operation"])
