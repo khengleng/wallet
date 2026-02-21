@@ -3,17 +3,26 @@
 JWT-authenticated gateway in front of `wallet-ledger-service`.
 
 ## Responsibilities
-- Verify bearer JWT on all `/v1/*` operations.
+- Verify bearer JWT on all `/v1/*` operations (`AUTH_MODE=local_jwt` or `AUTH_MODE=keycloak_oidc`).
 - Apply per-IP and per-user rate limiting.
 - Forward validated requests to ledger with internal `X-Service-Api-Key`.
 - Emit audit logs for auth failures and transaction attempts.
 
 ## Required Env Vars
 - `ENVIRONMENT=production`
-- `JWT_SECRET`
-- `JWT_ALGORITHM` (default `HS256`)
-- `JWT_AUDIENCE`
-- `JWT_ISSUER`
+- `AUTH_MODE` (`local_jwt` default, `keycloak_oidc` for Keycloak introspection)
+- If `AUTH_MODE=local_jwt`:
+  - `JWT_SECRET`
+  - `JWT_ALGORITHM` (default `HS256`)
+  - `JWT_AUDIENCE`
+  - `JWT_ISSUER`
+- If `AUTH_MODE=keycloak_oidc`:
+  - `KEYCLOAK_BASE_URL` (e.g. `https://id.example.com`)
+  - `KEYCLOAK_REALM`
+  - `KEYCLOAK_CLIENT_ID`
+  - `KEYCLOAK_CLIENT_SECRET`
+  - `KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS` (default `2.0`)
+  - `JWT_AUDIENCE` (expected audience claim)
 - `LEDGER_BASE_URL` (for Railway use internal domain when possible)
 - `LEDGER_API_KEY` (must match ledger `SERVICE_API_KEY`)
 - `LEDGER_TIMEOUT_SECONDS` (default `10`)

@@ -182,6 +182,14 @@ FX_PROVIDER_FALLBACK = os.getenv("FX_PROVIDER_FALLBACK", "open_er_api").strip().
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 FX_RATE_CACHE_TTL_SECONDS = int(os.getenv("FX_RATE_CACHE_TTL_SECONDS", "60"))
 METRICS_TOKEN = os.getenv("METRICS_TOKEN", "").strip()
+AUTH_MODE = os.getenv("AUTH_MODE", "local").strip().lower()
+KEYCLOAK_BASE_URL = os.getenv("KEYCLOAK_BASE_URL", "").strip().rstrip("/")
+KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "").strip()
+KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "").strip()
+KEYCLOAK_CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET", "").strip()
+KEYCLOAK_REDIRECT_URI = os.getenv("KEYCLOAK_REDIRECT_URI", "").strip()
+KEYCLOAK_POST_LOGOUT_REDIRECT_URI = os.getenv("KEYCLOAK_POST_LOGOUT_REDIRECT_URI", "").strip()
+KEYCLOAK_SCOPES = os.getenv("KEYCLOAK_SCOPES", "openid profile email").strip()
 
 if REDIS_URL:
     CACHES = {
@@ -226,6 +234,23 @@ if IS_PRODUCTION and not CSRF_TRUSTED_ORIGINS and not IS_BUILD:
     raise ImproperlyConfigured(
         "CSRF_TRUSTED_ORIGINS must be set in production."
     )
+
+if AUTH_MODE == "keycloak_oidc":
+    missing_keycloak = [
+        key
+        for key, value in (
+            ("KEYCLOAK_BASE_URL", KEYCLOAK_BASE_URL),
+            ("KEYCLOAK_REALM", KEYCLOAK_REALM),
+            ("KEYCLOAK_CLIENT_ID", KEYCLOAK_CLIENT_ID),
+            ("KEYCLOAK_CLIENT_SECRET", KEYCLOAK_CLIENT_SECRET),
+            ("KEYCLOAK_REDIRECT_URI", KEYCLOAK_REDIRECT_URI),
+        )
+        if not value
+    ]
+    if missing_keycloak and IS_PRODUCTION and not IS_BUILD:
+        raise ImproperlyConfigured(
+            "Missing required Keycloak settings: " + ", ".join(missing_keycloak)
+        )
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

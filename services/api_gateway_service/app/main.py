@@ -8,6 +8,7 @@ from collections import defaultdict, deque
 from threading import Lock
 from typing import Any
 from uuid import UUID
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -37,6 +38,9 @@ metrics_counters = {
     "proxy_retries_total": 0,
 }
 APP_START_MONOTONIC = time.monotonic()
+TOKEN_CACHE_TTL_SECONDS = 30
+token_cache_lock = Lock()
+token_introspection_cache: dict[str, dict[str, Any]] = {}
 
 
 def _inc_counter(key: str, value: int = 1) -> None:
@@ -60,12 +64,91 @@ def _forward_headers(idempotency_key: str | None = None) -> dict[str, str]:
     return headers
 
 
-def _decode_jwt(authorization: str | None) -> dict[str, Any]:
-    if not authorization or not authorization.startswith("Bearer "):
-        _audit("auth_failed", reason="missing_bearer")
+def _realm_issuer() -> str:
+    return f"{settings.keycloak_base_url}/realms/{settings.keycloak_realm}"
+
+
+def _token_endpoint_host() -> str:
+    endpoint = f"{_realm_issuer()}/protocol/openid-connect/token/introspect"
+    return urlparse(endpoint).hostname or "keycloak"
+
+
+async def _decode_keycloak_token(token: str) -> dict[str, Any]:
+    now_epoch = int(time.time())
+    with token_cache_lock:
+        cached = token_introspection_cache.get(token)
+        if cached and int(cached.get("cache_until", 0)) > now_epoch:
+            return dict(cached["claims"])
+
+    endpoint = f"{_realm_issuer()}/protocol/openid-connect/token/introspect"
+    data = {
+        "token": token,
+        "client_id": settings.keycloak_client_id,
+        "client_secret": settings.keycloak_client_secret,
+    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.keycloak_introspection_timeout_seconds
+        ) as client:
+            resp = await client.post(endpoint, data=data, headers=headers)
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        _audit(
+            "auth_failed",
+            reason="keycloak_unavailable",
+            keycloak_host=_token_endpoint_host(),
+        )
         _inc_counter("auth_failed_total")
-        raise HTTPException(status_code=401, detail="Missing or invalid bearer token")
-    token = authorization.split(" ", 1)[1]
+        raise HTTPException(status_code=503, detail="Identity provider unavailable") from exc
+
+    claims = resp.json()
+    if not claims.get("active"):
+        _audit("auth_failed", reason="token_inactive")
+        _inc_counter("auth_failed_total")
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    sub = claims.get("sub")
+    if not sub:
+        _audit("auth_failed", reason="missing_subject")
+        _inc_counter("auth_failed_total")
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    exp = int(claims.get("exp", now_epoch))
+    if exp <= now_epoch:
+        _audit("auth_failed", reason="token_expired")
+        _inc_counter("auth_failed_total")
+        raise HTTPException(status_code=401, detail="Token expired")
+
+    audience = claims.get("aud")
+    if settings.jwt_audience:
+        if isinstance(audience, list) and settings.jwt_audience not in audience:
+            _audit("auth_failed", reason="aud_mismatch")
+            _inc_counter("auth_failed_total")
+            raise HTTPException(status_code=401, detail="Invalid token audience")
+        if isinstance(audience, str) and audience != settings.jwt_audience:
+            _audit("auth_failed", reason="aud_mismatch")
+            _inc_counter("auth_failed_total")
+            raise HTTPException(status_code=401, detail="Invalid token audience")
+
+    issuer = str(claims.get("iss", ""))
+    if settings.keycloak_base_url and settings.keycloak_realm:
+        expected_issuer = _realm_issuer()
+        if issuer and issuer != expected_issuer:
+            _audit("auth_failed", reason="issuer_mismatch")
+            _inc_counter("auth_failed_total")
+            raise HTTPException(status_code=401, detail="Invalid token issuer")
+
+    cache_until = min(exp, now_epoch + TOKEN_CACHE_TTL_SECONDS)
+    with token_cache_lock:
+        token_introspection_cache[token] = {
+            "cache_until": cache_until,
+            "claims": dict(claims),
+        }
+    return claims
+
+
+def _decode_local_jwt(token: str) -> dict[str, Any]:
     try:
         claims = jwt.decode(
             token,
@@ -86,10 +169,17 @@ def _decode_jwt(authorization: str | None) -> dict[str, Any]:
     return claims
 
 
-def require_user(
+async def require_user(
     authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> dict[str, Any]:
-    return _decode_jwt(authorization)
+    if not authorization or not authorization.startswith("Bearer "):
+        _audit("auth_failed", reason="missing_bearer")
+        _inc_counter("auth_failed_total")
+        raise HTTPException(status_code=401, detail="Missing or invalid bearer token")
+    token = authorization.split(" ", 1)[1]
+    if settings.auth_mode == "keycloak_oidc":
+        return await _decode_keycloak_token(token)
+    return _decode_local_jwt(token)
 
 
 def _parse_rate_limit(rate: str) -> tuple[int, int]:
@@ -127,7 +217,7 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
-def enforce_rate_limits(
+async def enforce_rate_limits(
     request: Request,
     claims: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:

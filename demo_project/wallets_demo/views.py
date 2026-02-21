@@ -1,10 +1,14 @@
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+import json
+import secrets
 import time
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from django.contrib import messages
 from django.conf import settings
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -201,6 +205,102 @@ def _should_use_maker_checker(user) -> bool:
     return user_is_maker(user) and not user_is_checker(user)
 
 
+def _use_keycloak_oidc() -> bool:
+    return getattr(settings, "AUTH_MODE", "local").lower() == "keycloak_oidc"
+
+
+def _keycloak_realm_base_url() -> str:
+    return f"{settings.KEYCLOAK_BASE_URL}/realms/{settings.KEYCLOAK_REALM}"
+
+
+def _keycloak_auth_url(state: str, nonce: str) -> str:
+    query = urlencode(
+        {
+            "client_id": settings.KEYCLOAK_CLIENT_ID,
+            "response_type": "code",
+            "scope": settings.KEYCLOAK_SCOPES,
+            "redirect_uri": settings.KEYCLOAK_REDIRECT_URI,
+            "state": state,
+            "nonce": nonce,
+        }
+    )
+    return f"{_keycloak_realm_base_url()}/protocol/openid-connect/auth?{query}"
+
+
+def _keycloak_token_exchange(code: str) -> dict:
+    data = urlencode(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": settings.KEYCLOAK_CLIENT_ID,
+            "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
+            "redirect_uri": settings.KEYCLOAK_REDIRECT_URI,
+        }
+    ).encode("utf-8")
+    request = Request(
+        f"{_keycloak_realm_base_url()}/protocol/openid-connect/token",
+        data=data,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read())
+
+
+def _keycloak_userinfo(access_token: str) -> dict:
+    request = Request(
+        f"{_keycloak_realm_base_url()}/protocol/openid-connect/userinfo",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read())
+
+
+def _find_or_create_user_from_claims(claims: dict) -> User:
+    subject = str(claims.get("sub", "")).strip()
+    preferred = str(claims.get("preferred_username", "")).strip()
+    email = str(claims.get("email", "")).strip().lower()
+    first_name = str(claims.get("given_name", "")).strip()
+    last_name = str(claims.get("family_name", "")).strip()
+
+    if email:
+        existing_by_email = User.objects.filter(email__iexact=email).first()
+        if existing_by_email:
+            user = existing_by_email
+        else:
+            base_username = preferred or email.split("@")[0] or f"user_{subject[:12]}"
+            username = base_username
+            suffix = 1
+            while User.objects.filter(username=username).exists():
+                suffix += 1
+                username = f"{base_username}_{suffix}"
+            user = User.objects.create_user(username=username, email=email)
+    else:
+        base_username = preferred or f"user_{subject[:12]}"
+        user = User.objects.filter(username=base_username).first()
+        if user is None:
+            username = base_username
+            suffix = 1
+            while User.objects.filter(username=username).exists():
+                suffix += 1
+                username = f"{base_username}_{suffix}"
+            user = User.objects.create_user(username=username)
+
+    changed_fields = []
+    if email and user.email != email:
+        user.email = email
+        changed_fields.append("email")
+    if first_name and user.first_name != first_name:
+        user.first_name = first_name
+        changed_fields.append("first_name")
+    if last_name and user.last_name != last_name:
+        user.last_name = last_name
+        changed_fields.append("last_name")
+    if changed_fields:
+        user.save(update_fields=changed_fields)
+    return user
+
+
 def _submit_approval_request(
     *,
     maker: User,
@@ -229,6 +329,22 @@ def portal_login(request):
     if request.user.is_authenticated:
         return redirect("dashboard")
 
+    if _use_keycloak_oidc():
+        if request.method != "POST" and request.GET.get("start") != "1":
+            return render(
+                request,
+                "wallets_demo/login.html",
+                {
+                    "auth_mode": "keycloak_oidc",
+                    "keycloak_start_url": f"{request.path}?start=1",
+                },
+            )
+        state = secrets.token_urlsafe(32)
+        nonce = secrets.token_urlsafe(32)
+        request.session["oidc_state"] = state
+        request.session["oidc_nonce"] = nonce
+        return redirect(_keycloak_auth_url(state, nonce))
+
     if request.method == "POST":
         username = (request.POST.get("username") or "").strip()
         password = request.POST.get("password") or ""
@@ -239,20 +355,67 @@ def portal_login(request):
                 request,
                 "Too many failed login attempts. Please try again later.",
             )
-            return render(request, "wallets_demo/login.html")
+            return render(request, "wallets_demo/login.html", {"auth_mode": "local"})
 
         user = authenticate(request, username=username, password=password)
         if user is None:
             _register_failed_login(username, ip)
             messages.error(request, "Invalid username or password.")
-            return render(request, "wallets_demo/login.html")
+            return render(request, "wallets_demo/login.html", {"auth_mode": "local"})
 
         _clear_login_lockout(username, ip)
         login(request, user)
         request.session.cycle_key()
         return redirect("dashboard")
 
-    return render(request, "wallets_demo/login.html")
+    return render(request, "wallets_demo/login.html", {"auth_mode": "local"})
+
+
+def keycloak_callback(request):
+    if not _use_keycloak_oidc():
+        return redirect("login")
+
+    expected_state = request.session.pop("oidc_state", "")
+    provided_state = request.GET.get("state", "")
+    code = request.GET.get("code", "")
+    if not expected_state or expected_state != provided_state or not code:
+        messages.error(request, "Invalid login callback state.")
+        return redirect("login")
+
+    try:
+        token_payload = _keycloak_token_exchange(code)
+        access_token = token_payload.get("access_token", "")
+        if not access_token:
+            raise ValidationError("Missing access token.")
+        claims = _keycloak_userinfo(access_token)
+        user = _find_or_create_user_from_claims(claims)
+    except Exception:
+        messages.error(request, "Keycloak sign-in failed. Please try again.")
+        return redirect("login")
+
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    request.session.cycle_key()
+    request.session["oidc_access_token"] = token_payload.get("access_token", "")
+    request.session["oidc_id_token"] = token_payload.get("id_token", "")
+    request.session["oidc_refresh_token"] = token_payload.get("refresh_token", "")
+    return redirect("dashboard")
+
+
+def portal_logout(request):
+    id_token = request.session.get("oidc_id_token", "")
+    auth_logout(request)
+    if _use_keycloak_oidc() and id_token:
+        post_logout = settings.KEYCLOAK_POST_LOGOUT_REDIRECT_URI or settings.KEYCLOAK_REDIRECT_URI
+        query = urlencode(
+            {
+                "id_token_hint": id_token,
+                "post_logout_redirect_uri": post_logout,
+                "client_id": settings.KEYCLOAK_CLIENT_ID,
+            }
+        )
+        logout_url = f"{_keycloak_realm_base_url()}/protocol/openid-connect/logout?{query}"
+        return redirect(logout_url)
+    return redirect("login")
 
 
 def metrics(request):

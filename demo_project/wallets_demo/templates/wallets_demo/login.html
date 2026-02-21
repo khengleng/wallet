@@ -8,6 +8,10 @@
         <h1 style="text-align: center;">Login</h1>
         <p class="text-muted" style="text-align: center; margin-bottom: 2rem;">Access your virtual wallet.</p>
 
+        {% if auth_mode == "keycloak_oidc" %}
+        <p class="text-muted" style="text-align: center;">Use your corporate identity provider to continue.</p>
+        <a href="{{ keycloak_start_url|default:'#' }}" class="btn btn-primary" style="width: 100%; text-align: center; display: inline-block;">Continue with SSO</a>
+        {% else %}
         <form method="post">
             {% csrf_token %}
             <div class="form-group">
@@ -20,6 +24,7 @@
             </div>
             <button type="submit" class="btn btn-primary" style="width: 100%;">Login</button>
         </form>
+        {% endif %}
 
         <p class="mt-4 text-muted" style="text-align: center; font-size: 0.875rem;">
             Don't have an account? <a href="{% url 'register' %}"

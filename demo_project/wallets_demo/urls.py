@@ -1,5 +1,4 @@
 from django.urls import path
-from django.contrib.auth import views as auth_views
 from . import views
 
 urlpatterns = [
@@ -31,5 +30,6 @@ urlpatterns = [
     path('transfer/', views.transfer, name='transfer'),
     path('register/', views.register, name='register'),
     path('login/', views.portal_login, name='login'),
-    path('logout/', auth_views.LogoutView.as_view(next_page='login'), name='logout'),
+    path('auth/keycloak/callback/', views.keycloak_callback, name='keycloak_callback'),
+    path('logout/', views.portal_logout, name='logout'),
 ]
