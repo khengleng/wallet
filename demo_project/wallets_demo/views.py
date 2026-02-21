@@ -15,9 +15,11 @@ from django.conf import settings
 from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
+from django.core.paginator import Paginator
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -1673,9 +1675,18 @@ def wallet_management(request):
                 slug = (request.POST.get("wallet_slug") or "default").strip()
                 action = (request.POST.get("action") or "").strip().lower()
                 if holder_scope == "merchant":
-                    holder = Merchant.objects.get(id=request.POST.get("holder_id"))
+                    merchant_id = request.POST.get("merchant_id") or request.POST.get("holder_id")
+                    holder = Merchant.objects.get(id=merchant_id)
+                    holder_label = holder.code
                 else:
-                    holder = User.objects.get(id=request.POST.get("holder_id"))
+                    cif_id = request.POST.get("cif_id")
+                    if cif_id:
+                        customer_cif = CustomerCIF.objects.select_related("user").get(id=cif_id)
+                        holder = customer_cif.user
+                        holder_label = f"{customer_cif.cif_no} ({holder.username})"
+                    else:
+                        holder = User.objects.get(id=request.POST.get("holder_id"))
+                        holder_label = holder.username
                 if action == "freeze":
                     holder.freeze_wallet(slug)
                 elif action == "unfreeze":
@@ -1687,9 +1698,9 @@ def wallet_management(request):
                     "wallet.freeze_toggle",
                     target_type=holder.__class__.__name__,
                     target_id=str(holder.id),
-                    metadata={"slug": slug, "action": action},
+                    metadata={"slug": slug, "action": action, "holder_scope": holder_scope},
                 )
-                messages.success(request, f"Wallet {slug} {action}d successfully.")
+                messages.success(request, f"Wallet {slug} {action}d successfully for {holder_label}.")
                 return redirect("wallet_management")
 
             if form_type == "wallet_adjust_user":
@@ -1889,6 +1900,25 @@ def wallet_management(request):
         except Exception as exc:
             messages.error(request, f"Wallet operation failed: {exc}")
 
+    cif_query = (request.GET.get("q") or "").strip()
+    cif_status = (request.GET.get("cif_status") or "").strip().lower()
+    cifs_qs = CustomerCIF.objects.select_related("user").order_by("cif_no")
+    if cif_query:
+        cifs_qs = cifs_qs.filter(
+            Q(cif_no__icontains=cif_query)
+            | Q(legal_name__icontains=cif_query)
+            | Q(user__username__icontains=cif_query)
+            | Q(email__icontains=cif_query)
+            | Q(mobile_no__icontains=cif_query)
+        )
+    if cif_status in {
+        CustomerCIF.STATUS_ACTIVE,
+        CustomerCIF.STATUS_BLOCKED,
+        CustomerCIF.STATUS_CLOSED,
+    }:
+        cifs_qs = cifs_qs.filter(status=cif_status)
+    cifs_page = Paginator(cifs_qs, 25).get_page(request.GET.get("page") or 1)
+
     user_ct = ContentType.objects.get_for_model(User)
     merchant_ct = ContentType.objects.get_for_model(Merchant)
     user_wallets = (
@@ -1916,8 +1946,10 @@ def wallet_management(request):
         {
             "users": User.objects.order_by("username")[:300],
             "users_for_cif": User.objects.order_by("username")[:300],
-            "customer_cifs": CustomerCIF.objects.select_related("user").order_by("cif_no")[:500],
+            "customer_cifs": cifs_page,
             "cif_status_choices": CustomerCIF.STATUS_CHOICES,
+            "selected_cif_status": cif_status,
+            "cif_query": cif_query,
             "merchants": Merchant.objects.order_by("code")[:200],
             "supported_currencies": _supported_currencies(),
             "user_wallet_rows": [

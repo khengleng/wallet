@@ -1,6 +1,7 @@
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
 from dj_wallet.models import Wallet
@@ -9,9 +10,11 @@ from .models import (
     ApprovalRequest,
     BackofficeAuditLog,
     ChartOfAccount,
+    CustomerCIF,
     FxRate,
     JournalEntry,
     JournalLine,
+    Merchant,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -282,3 +285,135 @@ class BackofficeAuditExportTests(TestCase):
         self.assertIn("X-Audit-Export-Signature", response)
         self.assertIn("X-Audit-Export-SHA256", response)
         self.assertIn("test.action", response.content.decode("utf-8"))
+
+
+class CustomerCIFWalletManagementTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.admin = User.objects.create_user(
+            username="wallet_admin",
+            email="wallet_admin@example.com",
+            password="pass12345",
+        )
+        assign_roles(self.admin, ["admin"])
+        self.user = User.objects.create_user(
+            username="wallet_customer",
+            email="wallet_customer@example.com",
+            password="pass12345",
+        )
+        self.cif = CustomerCIF.objects.create(
+            cif_no="CIF-0001",
+            user=self.user,
+            legal_name="Wallet Customer",
+            mobile_no="+12025550100",
+            email=self.user.email,
+            status=CustomerCIF.STATUS_ACTIVE,
+            created_by=self.admin,
+        )
+        self.client.login(username="wallet_admin", password="pass12345")
+
+    def test_cif_number_is_immutable(self):
+        self.cif.cif_no = "CIF-NEW-0001"
+        with self.assertRaises(ValidationError):
+            self.cif.save()
+
+    def test_wallet_management_rejects_cif_number_change(self):
+        response = self.client.post(
+            reverse("wallet_management"),
+            {
+                "form_type": "cif_onboard",
+                "user_id": self.user.id,
+                "cif_no": "CIF-OTHER-999",
+                "legal_name": "Wallet Customer Updated",
+                "mobile_no": "+12025550199",
+                "email": "wallet_customer_updated@example.com",
+                "status": CustomerCIF.STATUS_ACTIVE,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.cif.refresh_from_db()
+        self.assertEqual(self.cif.cif_no, "CIF-0001")
+
+    def test_wallet_management_freeze_unfreeze_with_cif_selector(self):
+        wallet = self.user.get_wallet("default")
+        self.assertFalse(wallet.is_frozen)
+
+        response = self.client.post(
+            reverse("wallet_management"),
+            {
+                "form_type": "wallet_toggle_freeze",
+                "holder_scope": "user",
+                "cif_id": self.cif.id,
+                "wallet_slug": "default",
+                "action": "freeze",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        wallet.refresh_from_db()
+        self.assertTrue(wallet.is_frozen)
+
+        response = self.client.post(
+            reverse("wallet_management"),
+            {
+                "form_type": "wallet_toggle_freeze",
+                "holder_scope": "user",
+                "cif_id": self.cif.id,
+                "wallet_slug": "default",
+                "action": "unfreeze",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        wallet.refresh_from_db()
+        self.assertFalse(wallet.is_frozen)
+
+    def test_wallet_management_freeze_with_merchant_selector(self):
+        merchant = Merchant.objects.create(
+            code="MRC-1001",
+            name="Merchant 1001",
+            created_by=self.admin,
+            updated_by=self.admin,
+            owner=self.admin,
+        )
+        merchant_wallet = merchant.get_wallet("default")
+        self.assertFalse(merchant_wallet.is_frozen)
+
+        response = self.client.post(
+            reverse("wallet_management"),
+            {
+                "form_type": "wallet_toggle_freeze",
+                "holder_scope": "merchant",
+                "merchant_id": merchant.id,
+                "wallet_slug": "default",
+                "action": "freeze",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        merchant_wallet.refresh_from_db()
+        self.assertTrue(merchant_wallet.is_frozen)
+
+    def test_wallet_management_cif_search_and_pagination(self):
+        for index in range(2, 31):
+            user = User.objects.create_user(
+                username=f"wallet_customer_{index:02d}",
+                email=f"wallet_customer_{index:02d}@example.com",
+                password="pass12345",
+            )
+            CustomerCIF.objects.create(
+                cif_no=f"CIF-{index:04d}",
+                user=user,
+                legal_name=f"Wallet Customer {index:02d}",
+                email=user.email,
+                status=CustomerCIF.STATUS_ACTIVE,
+                created_by=self.admin,
+            )
+
+        response = self.client.get(reverse("wallet_management"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["customer_cifs"].paginator.num_pages, 2)
+
+        response = self.client.get(reverse("wallet_management"), {"q": "CIF-0030"})
+        self.assertEqual(response.status_code, 200)
+        filtered = list(response.context["customer_cifs"].object_list)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0].cif_no, "CIF-0030")
