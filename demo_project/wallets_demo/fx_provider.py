@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from decimal import Decimal
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -19,7 +20,13 @@ class FxSnapshot:
 
 
 def _http_get_json(url: str) -> dict:
-    request = Request(url, headers={"Accept": "application/json"})
+    request = Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "wallet-platform-fx-sync/1.0",
+        },
+    )
     timeout = getattr(settings, "FX_PROVIDER_TIMEOUT_SECONDS", 10)
     with urlopen(request, timeout=timeout) as response:
         payload = response.read().decode("utf-8")
@@ -44,6 +51,26 @@ def _load_frankfurter(base_currency: str, quote_currencies: list[str]) -> FxSnap
     )
 
 
+def _load_open_er_api(base_currency: str, quote_currencies: list[str]) -> FxSnapshot:
+    base_url = getattr(settings, "FX_PROVIDER_BASE_URL", "https://open.er-api.com/v6")
+    url = f"{base_url.rstrip('/')}/latest/{base_currency}"
+    payload = _http_get_json(url)
+    if payload.get("result") != "success":
+        raise ValidationError(f"open_er_api returned non-success result: {payload.get('result')}")
+    raw_rates = payload.get("rates") or {}
+    rates = {
+        ccy: Decimal(str(raw_rates[ccy]))
+        for ccy in quote_currencies
+        if ccy in raw_rates
+    }
+    return FxSnapshot(
+        provider="open_er_api",
+        base_currency=base_currency,
+        rates=rates,
+        source_reference=url,
+    )
+
+
 def fetch_fx_snapshot(base_currency: str, quote_currencies: list[str]) -> FxSnapshot:
     base = base_currency.upper()
     quotes = [c.upper() for c in quote_currencies if c.upper() != base]
@@ -51,6 +78,14 @@ def fetch_fx_snapshot(base_currency: str, quote_currencies: list[str]) -> FxSnap
         raise ValidationError("No quote currencies were provided.")
 
     provider = getattr(settings, "FX_PROVIDER", "frankfurter").lower()
+    fallback_provider = getattr(settings, "FX_PROVIDER_FALLBACK", "open_er_api").lower()
     if provider == "frankfurter":
-        return _load_frankfurter(base, quotes)
+        try:
+            return _load_frankfurter(base, quotes)
+        except HTTPError:
+            if fallback_provider == "open_er_api":
+                return _load_open_er_api(base, quotes)
+            raise
+    if provider == "open_er_api":
+        return _load_open_er_api(base, quotes)
     raise ValidationError(f"Unsupported FX provider: {provider}")

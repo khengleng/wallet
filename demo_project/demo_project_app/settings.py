@@ -178,6 +178,7 @@ FX_PROVIDER_BASE_URL = os.getenv(
     "FX_PROVIDER_BASE_URL", "https://api.frankfurter.app"
 ).strip()
 FX_PROVIDER_API_KEY = os.getenv("FX_PROVIDER_API_KEY", "").strip()
+FX_PROVIDER_FALLBACK = os.getenv("FX_PROVIDER_FALLBACK", "open_er_api").strip().lower()
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
