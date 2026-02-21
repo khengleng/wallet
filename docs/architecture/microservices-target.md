@@ -63,3 +63,14 @@
 - API gateway now includes:
   - bounded retry with exponential backoff,
   - circuit-breaker behavior for ledger upstream failures.
+
+## Phase 4 Progress
+- Added `audit-export-worker`:
+  - incremental export of immutable backoffice audit logs to SIEM webhook,
+  - HMAC-signed export payload headers,
+  - retry with exponential backoff and dead-letter persistence,
+  - replay tooling (`python -m app.replay_dead_letters --limit 200`),
+  - Prometheus metrics for lag/failures/replay outcomes.
+- Added monitoring assets:
+  - alert rules: `infra/monitoring/alerts/audit-export-alerts.yml`,
+  - dashboard template: `infra/monitoring/dashboards/audit-export-dashboard.json`.
