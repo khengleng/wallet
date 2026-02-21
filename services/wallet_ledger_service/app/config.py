@@ -10,6 +10,14 @@ class Settings:
         "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/wallet_ledger"
     )
     default_currency: str = os.getenv("DEFAULT_CURRENCY", "USD")
+    service_api_key: str = os.getenv("SERVICE_API_KEY", "")
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() in {"prod", "production"}
 
 
 settings = Settings()
+
+if settings.is_production and not settings.service_api_key:
+    raise RuntimeError("SERVICE_API_KEY must be set in production.")

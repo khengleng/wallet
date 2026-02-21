@@ -21,7 +21,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 ## Required Env Vars
 - `DATABASE_URL`
 - `ENVIRONMENT`
+- `SERVICE_API_KEY` (required for all `/v1/*` API calls via `X-Service-Api-Key`)
 - `SECRET_KEY` (for platform-level secret hygiene; this service itself does not issue auth tokens)
+
+## Database Migration
+Run schema migration as a separate command before starting traffic:
+
+```bash
+python -m app.migrate
+```
 
 ## Railway Deployment (Standalone Service)
 1. Create a dedicated Railway service for ledger.
@@ -30,7 +38,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 4. Set service variables:
    - `DATABASE_URL` (PostgreSQL connection string)
    - `ENVIRONMENT=production`
-5. Deploy and verify:
+   - `SERVICE_API_KEY=<strong-random-secret>`
+6. Run migration as one-off command in the service runtime:
+   - `python -m app.migrate`
+7. Deploy and verify:
    - `GET /healthz`
    - `GET /readyz`
 

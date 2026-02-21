@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .db import Base, SessionLocal, engine
+from .db import SessionLocal
 from .schemas import (
     AccountCreateRequest,
     LedgerResult,
@@ -38,9 +38,13 @@ def get_db():
         db.close()
 
 
-@app.on_event("startup")
-def startup():
-    Base.metadata.create_all(bind=engine)
+def require_service_api_key(
+    x_service_api_key: Annotated[str | None, Header(alias="X-Service-Api-Key")] = None,
+):
+    if not settings.service_api_key:
+        raise HTTPException(status_code=503, detail="Service API key is not configured")
+    if x_service_api_key != settings.service_api_key:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @app.get("/healthz")
@@ -56,7 +60,9 @@ def readyz(db: Annotated[Session, Depends(get_db)]):
 
 @app.post("/v1/accounts")
 def create_account_endpoint(
-    payload: AccountCreateRequest, db: Annotated[Session, Depends(get_db)]
+    payload: AccountCreateRequest,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[None, Depends(require_service_api_key)],
 ):
     with db.begin():
         account = create_account(
@@ -70,7 +76,11 @@ def create_account_endpoint(
 
 
 @app.get("/v1/accounts/{account_id}")
-def get_account_endpoint(account_id: UUID, db: Annotated[Session, Depends(get_db)]):
+def get_account_endpoint(
+    account_id: UUID,
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[None, Depends(require_service_api_key)],
+):
     account = get_account(db, account_id=account_id)
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -87,6 +97,7 @@ def deposit_endpoint(
     payload: MoneyRequest,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[None, Depends(require_service_api_key)],
 ):
     try:
         result = apply_deposit(
@@ -112,6 +123,7 @@ def withdraw_endpoint(
     payload: MoneyRequest,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[None, Depends(require_service_api_key)],
 ):
     try:
         result = apply_withdrawal(
@@ -139,6 +151,7 @@ def transfer_endpoint(
     payload: TransferRequest,
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
     db: Annotated[Session, Depends(get_db)],
+    _: Annotated[None, Depends(require_service_api_key)],
 ):
     try:
         result = apply_transfer(
