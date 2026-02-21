@@ -16,10 +16,10 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
     "super_admin": RoleDefinition(
         label="Super Admin",
         permissions=(
-            ("auth", "view_user"),
-            ("auth", "add_user"),
-            ("auth", "change_user"),
-            ("auth", "delete_user"),
+            ("wallets_demo", "view_user"),
+            ("wallets_demo", "add_user"),
+            ("wallets_demo", "change_user"),
+            ("wallets_demo", "delete_user"),
             ("auth", "view_group"),
             ("auth", "change_group"),
             ("dj_wallet", "view_wallet"),
@@ -35,8 +35,8 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
     "admin": RoleDefinition(
         label="Admin",
         permissions=(
-            ("auth", "view_user"),
-            ("auth", "change_user"),
+            ("wallets_demo", "view_user"),
+            ("wallets_demo", "change_user"),
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
             ("dj_wallet", "view_transfer"),
@@ -55,7 +55,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
     "customer_service": RoleDefinition(
         label="Customer Service",
         permissions=(
-            ("auth", "view_user"),
+            ("wallets_demo", "view_user"),
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
             ("dj_wallet", "view_transfer"),
@@ -64,7 +64,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
     "risk": RoleDefinition(
         label="Risk",
         permissions=(
-            ("auth", "view_user"),
+            ("wallets_demo", "view_user"),
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
             ("dj_wallet", "view_transfer"),
@@ -73,7 +73,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
     "operation": RoleDefinition(
         label="Operation",
         permissions=(
-            ("auth", "view_user"),
+            ("wallets_demo", "view_user"),
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
         ),
@@ -81,7 +81,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
     "sales": RoleDefinition(
         label="Sales",
         permissions=(
-            ("auth", "view_user"),
+            ("wallets_demo", "view_user"),
             ("dj_wallet", "view_wallet"),
             ("dj_wallet", "view_transaction"),
         ),
