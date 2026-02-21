@@ -21,6 +21,11 @@ from dj_wallet.models import Transaction, Wallet
 from dj_wallet.utils import get_exchange_service, get_wallet_service
 
 from .fx_sync import sync_external_fx_rates
+from .keycloak_auth import (
+    decode_access_token_claims,
+    next_introspection_deadline,
+    sync_user_roles_from_keycloak_claims,
+)
 from .models import (
     ApprovalRequest,
     BackofficeAuditLog,
@@ -408,6 +413,8 @@ def keycloak_callback(request):
             raise ValidationError("Missing access token.")
         claims = _keycloak_userinfo(access_token)
         user = _find_or_create_user_from_claims(claims)
+        access_claims = decode_access_token_claims(access_token)
+        sync_user_roles_from_keycloak_claims(user, access_claims)
     except Exception:
         messages.error(request, "Keycloak sign-in failed. Please try again.")
         return redirect("login")
@@ -417,6 +424,7 @@ def keycloak_callback(request):
     request.session["oidc_access_token"] = token_payload.get("access_token", "")
     request.session["oidc_id_token"] = token_payload.get("id_token", "")
     request.session["oidc_refresh_token"] = token_payload.get("refresh_token", "")
+    request.session["oidc_next_introspection_at"] = next_introspection_deadline()
     return redirect("dashboard")
 
 

@@ -67,6 +67,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "wallets_demo.middleware.KeycloakSessionGuardMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -190,6 +191,34 @@ KEYCLOAK_CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET", "").strip()
 KEYCLOAK_REDIRECT_URI = os.getenv("KEYCLOAK_REDIRECT_URI", "").strip()
 KEYCLOAK_POST_LOGOUT_REDIRECT_URI = os.getenv("KEYCLOAK_POST_LOGOUT_REDIRECT_URI", "").strip()
 KEYCLOAK_SCOPES = os.getenv("KEYCLOAK_SCOPES", "openid profile email").strip()
+KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS = float(
+    os.getenv("KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS", "3.0")
+)
+KEYCLOAK_SESSION_CHECK_INTERVAL_SECONDS = int(
+    os.getenv("KEYCLOAK_SESSION_CHECK_INTERVAL_SECONDS", "120")
+)
+
+
+def _parse_keycloak_role_group_map() -> dict[str, str]:
+    raw_value = os.getenv(
+        "KEYCLOAK_ROLE_GROUP_MAP",
+        "super_admin:super_admin,admin:admin,finance:finance,treasury:treasury,"
+        "customer_service:customer_service,risk:risk,operation:operation,sales:sales",
+    )
+    result: dict[str, str] = {}
+    for entry in raw_value.split(","):
+        pair = entry.strip()
+        if not pair or ":" not in pair:
+            continue
+        left, right = pair.split(":", 1)
+        key = left.strip().lower().replace(" ", "_").replace("-", "_")
+        value = right.strip().lower().replace(" ", "_").replace("-", "_")
+        if key and value:
+            result[key] = value
+    return result
+
+
+KEYCLOAK_ROLE_GROUP_MAP = _parse_keycloak_role_group_map()
 
 if REDIS_URL:
     CACHES = {
