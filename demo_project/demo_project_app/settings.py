@@ -202,6 +202,11 @@ LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 SESSION_COOKIE_AGE = int(os.getenv("SESSION_COOKIE_AGE_SECONDS", "43200"))
 SESSION_SAVE_EVERY_REQUEST = True
+SESSION_ENGINE = os.getenv(
+    "SESSION_ENGINE",
+    "django.contrib.sessions.backends.cache" if REDIS_URL else "django.contrib.sessions.backends.db",
+)
+SESSION_CACHE_ALIAS = "default"
 
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
@@ -214,6 +219,7 @@ LOGIN_LOCKOUT_THRESHOLD = int(os.getenv("LOGIN_LOCKOUT_THRESHOLD", "5"))
 LOGIN_LOCKOUT_DURATION_MINUTES = int(
     os.getenv("LOGIN_LOCKOUT_DURATION_MINUTES", "30")
 )
+LOGIN_LOCKOUT_USE_CACHE = os.getenv("LOGIN_LOCKOUT_USE_CACHE", "True").lower() == "true"
 
 if IS_PRODUCTION and not CSRF_TRUSTED_ORIGINS and not IS_BUILD:
     raise ImproperlyConfigured(

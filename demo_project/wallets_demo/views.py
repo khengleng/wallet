@@ -5,6 +5,7 @@ from django.contrib import messages
 from django.conf import settings
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -137,6 +138,10 @@ def _require_role_or_perm(
 
 
 def _is_locked(username: str, ip: str) -> bool:
+    if getattr(settings, "LOGIN_LOCKOUT_USE_CACHE", True):
+        data = cache.get(f"login_lockout:v1:{username}:{ip}") or {}
+        lock_until = data.get("lock_until")
+        return lock_until is not None and lock_until > timezone.now()
     row = LoginLockout.objects.filter(username=username, ip_address=ip).first()
     return row.is_locked() if row else False
 
@@ -147,6 +152,24 @@ def _register_failed_login(username: str, ip: str):
     threshold = getattr(settings, "LOGIN_LOCKOUT_THRESHOLD", 5)
     lock_minutes = getattr(settings, "LOGIN_LOCKOUT_DURATION_MINUTES", 30)
     window_start = now - timedelta(minutes=window_minutes)
+
+    if getattr(settings, "LOGIN_LOCKOUT_USE_CACHE", True):
+        key = f"login_lockout:v1:{username}:{ip}"
+        data = cache.get(key) or {
+            "failed_attempts": 0,
+            "first_failed_at": now,
+            "lock_until": None,
+        }
+        if data.get("first_failed_at", now) < window_start:
+            data["failed_attempts"] = 0
+            data["first_failed_at"] = now
+            data["lock_until"] = None
+        data["failed_attempts"] = int(data.get("failed_attempts", 0)) + 1
+        if data["failed_attempts"] >= threshold:
+            data["lock_until"] = now + timedelta(minutes=lock_minutes)
+        ttl_seconds = int((window_minutes + lock_minutes + 5) * 60)
+        cache.set(key, data, timeout=ttl_seconds)
+        return
 
     row, _created = LoginLockout.objects.get_or_create(
         username=username,
@@ -164,6 +187,9 @@ def _register_failed_login(username: str, ip: str):
 
 
 def _clear_login_lockout(username: str, ip: str):
+    if getattr(settings, "LOGIN_LOCKOUT_USE_CACHE", True):
+        cache.delete(f"login_lockout:v1:{username}:{ip}")
+        return
     LoginLockout.objects.filter(username=username, ip_address=ip).delete()
 
 
