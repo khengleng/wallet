@@ -25,7 +25,11 @@ IS_PRODUCTION = os.getenv("ENVIRONMENT", "").lower() in {
     "production",
 } or not DEBUG
 
-if not SECRET_KEY and IS_PRODUCTION:
+import sys
+
+IS_BUILD = "collectstatic" in sys.argv
+
+if not SECRET_KEY and IS_PRODUCTION and not IS_BUILD:
     raise ImproperlyConfigured("SECRET_KEY must be set in production.")
 
 if not SECRET_KEY:
@@ -37,7 +41,7 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
-if IS_PRODUCTION and (not ALLOWED_HOSTS or ALLOWED_HOSTS == ["*"]):
+if IS_PRODUCTION and (not ALLOWED_HOSTS or ALLOWED_HOSTS == ["*"]) and not IS_BUILD:
     raise ImproperlyConfigured(
         "ALLOWED_HOSTS must be explicitly set in production and cannot be '*'."
     )
@@ -104,7 +108,7 @@ if DATABASE_URL:
     DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
     DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 else:
-    if IS_PRODUCTION:
+    if IS_PRODUCTION and not IS_BUILD:
         raise ImproperlyConfigured(
             "DATABASE_URL must be set in production (PostgreSQL required)."
         )
