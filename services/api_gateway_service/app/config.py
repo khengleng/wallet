@@ -35,6 +35,14 @@ class Settings:
     metrics_token: str = os.getenv("METRICS_TOKEN", "")
     per_ip_limit: str = os.getenv("RATE_LIMIT_PER_IP", "120/minute")
     per_user_limit: str = os.getenv("RATE_LIMIT_PER_USER", "240/minute")
+    read_per_ip_limit: str = os.getenv("RATE_LIMIT_READ_PER_IP", "300/minute")
+    read_per_user_limit: str = os.getenv("RATE_LIMIT_READ_PER_USER", "600/minute")
+    write_per_ip_limit: str = os.getenv("RATE_LIMIT_WRITE_PER_IP", "120/minute")
+    write_per_user_limit: str = os.getenv("RATE_LIMIT_WRITE_PER_USER", "240/minute")
+    critical_per_ip_limit: str = os.getenv("RATE_LIMIT_CRITICAL_PER_IP", "60/minute")
+    critical_per_user_limit: str = os.getenv(
+        "RATE_LIMIT_CRITICAL_PER_USER", "120/minute"
+    )
 
     @property
     def is_production(self) -> bool:

@@ -217,25 +217,56 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
+def _rate_limit_profile(request: Request) -> tuple[str, str, str]:
+    method = request.method.upper()
+    path = request.url.path
+    if method == "GET" and path.startswith("/v1/accounts/"):
+        return ("read", settings.read_per_ip_limit, settings.read_per_user_limit)
+    if method == "POST" and path in {
+        "/v1/transactions/transfer",
+        "/v1/transactions/withdraw",
+    }:
+        return (
+            "critical",
+            settings.critical_per_ip_limit,
+            settings.critical_per_user_limit,
+        )
+    if method == "POST" and path in {
+        "/v1/accounts",
+        "/v1/transactions/deposit",
+    }:
+        return ("write", settings.write_per_ip_limit, settings.write_per_user_limit)
+    return ("default", settings.per_ip_limit, settings.per_user_limit)
+
+
 async def enforce_rate_limits(
     request: Request,
     claims: dict[str, Any] = Depends(require_user),
 ) -> dict[str, Any]:
-    ip_limit, ip_window = _parse_rate_limit(settings.per_ip_limit)
-    user_limit, user_window = _parse_rate_limit(settings.per_user_limit)
+    profile_name, per_ip_limit, per_user_limit = _rate_limit_profile(request)
+    ip_limit, ip_window = _parse_rate_limit(per_ip_limit)
+    user_limit, user_window = _parse_rate_limit(per_user_limit)
     ip = _client_ip(request)
     subject = str(claims["sub"])
 
     if not _consume(f"ip:{ip}", ip_limit, ip_window):
-        _audit("rate_limited", reason="ip_limit", ip=ip)
+        _audit("rate_limited", reason="ip_limit", ip=ip, tier=profile_name, path=request.url.path)
         _inc_counter("rate_limited_total")
         raise HTTPException(status_code=429, detail="Too many requests")
     if not _consume(f"user:{subject}", user_limit, user_window):
-        _audit("rate_limited", reason="user_limit", subject=subject, ip=ip)
+        _audit(
+            "rate_limited",
+            reason="user_limit",
+            subject=subject,
+            ip=ip,
+            tier=profile_name,
+            path=request.url.path,
+        )
         _inc_counter("rate_limited_total")
         raise HTTPException(status_code=429, detail="Too many requests")
 
     request.state.subject = subject
+    request.state.rate_tier = profile_name
     return claims
 
 

@@ -32,6 +32,13 @@ JWT-authenticated gateway in front of `wallet-ledger-service`.
 - `LEDGER_CIRCUIT_RESET_SECONDS` (default `30`)
 - `RATE_LIMIT_PER_IP` (default `120/minute`)
 - `RATE_LIMIT_PER_USER` (default `240/minute`)
+- Tiered endpoint rate limits:
+  - `RATE_LIMIT_READ_PER_IP` (default `300/minute`) for `GET /v1/accounts/{id}`
+  - `RATE_LIMIT_READ_PER_USER` (default `600/minute`)
+  - `RATE_LIMIT_WRITE_PER_IP` (default `120/minute`) for account create/deposit
+  - `RATE_LIMIT_WRITE_PER_USER` (default `240/minute`)
+  - `RATE_LIMIT_CRITICAL_PER_IP` (default `60/minute`) for withdraw/transfer
+  - `RATE_LIMIT_CRITICAL_PER_USER` (default `120/minute`)
 
 ## Run Locally
 ```bash
