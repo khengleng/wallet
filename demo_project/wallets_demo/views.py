@@ -1,5 +1,9 @@
+import csv
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+import hashlib
+import hmac
+import io
 import json
 import secrets
 import time
@@ -545,8 +549,114 @@ def backoffice(request):
         "checker_roles": CHECKER_ROLES,
         "can_manage_rbac": user_has_any_role(request.user, RBAC_ADMIN_ROLES),
         "can_access_accounting": user_has_any_role(request.user, ACCOUNTING_ROLES),
+        "can_export_audit": user_has_any_role(request.user, ("super_admin",)),
     }
     return render(request, "wallets_demo/backoffice.html", context)
+
+
+@login_required
+def backoffice_audit_export(request):
+    _require_role_or_perm(request.user, roles=("super_admin",))
+
+    fmt = (request.GET.get("format") or "jsonl").strip().lower()
+    if fmt not in {"jsonl", "csv"}:
+        raise ValidationError("Unsupported export format.")
+
+    try:
+        requested_days = int(request.GET.get("days") or "7")
+    except ValueError as exc:
+        raise ValidationError("Invalid days filter.") from exc
+    max_days = int(getattr(settings, "AUDIT_EXPORT_MAX_DAYS", 90))
+    days = min(max(requested_days, 1), max_days)
+    since = timezone.now() - timedelta(days=days)
+
+    rows = (
+        BackofficeAuditLog.objects.select_related("actor")
+        .filter(created_at__gte=since)
+        .order_by("created_at", "id")
+    )
+
+    if fmt == "csv":
+        buff = io.StringIO()
+        writer = csv.writer(buff)
+        writer.writerow(
+            [
+                "id",
+                "timestamp",
+                "actor",
+                "action",
+                "target_type",
+                "target_id",
+                "ip_address",
+                "user_agent",
+                "metadata_json",
+            ]
+        )
+        for row in rows:
+            writer.writerow(
+                [
+                    row.id,
+                    row.created_at.isoformat(),
+                    row.actor.username,
+                    row.action,
+                    row.target_type,
+                    row.target_id,
+                    row.ip_address or "",
+                    row.user_agent,
+                    json.dumps(row.metadata_json, separators=(",", ":"), sort_keys=True),
+                ]
+            )
+        payload = buff.getvalue().encode("utf-8")
+        content_type = "text/csv; charset=utf-8"
+        extension = "csv"
+    else:
+        lines: list[str] = []
+        for row in rows:
+            lines.append(
+                json.dumps(
+                    {
+                        "id": row.id,
+                        "timestamp": row.created_at.isoformat(),
+                        "actor": row.actor.username,
+                        "action": row.action,
+                        "target_type": row.target_type,
+                        "target_id": row.target_id,
+                        "ip_address": row.ip_address,
+                        "user_agent": row.user_agent,
+                        "metadata": row.metadata_json,
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+        payload = ("\n".join(lines) + ("\n" if lines else "")).encode("utf-8")
+        content_type = "application/x-ndjson"
+        extension = "jsonl"
+
+    digest = hashlib.sha256(payload).hexdigest()
+    export_epoch = str(int(time.time()))
+    secret = getattr(settings, "AUDIT_EXPORT_HMAC_SECRET", "") or (settings.SECRET_KEY or "")
+    signature = hmac.new(
+        secret.encode("utf-8"),
+        f"{export_epoch}:{digest}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    filename = f"backoffice_audit_{timezone.now().strftime('%Y%m%d_%H%M%S')}.{extension}"
+
+    response = HttpResponse(payload, content_type=content_type)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response["X-Audit-Export-SHA256"] = digest
+    response["X-Audit-Export-Epoch"] = export_epoch
+    response["X-Audit-Export-Signature"] = signature
+    response["X-Audit-Export-Signature-Alg"] = "HMAC-SHA256"
+
+    _audit(
+        request,
+        "backoffice.audit_export",
+        target_type="BackofficeAuditLog",
+        metadata={"format": fmt, "days": days, "row_count": len(lines) if fmt == "jsonl" else rows.count()},
+    )
+    return response
 
 
 @login_required

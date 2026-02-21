@@ -7,6 +7,7 @@ from dj_wallet.models import Wallet
 
 from .models import (
     ApprovalRequest,
+    BackofficeAuditLog,
     ChartOfAccount,
     FxRate,
     JournalEntry,
@@ -253,3 +254,31 @@ class FxProviderSyncTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(FxRate.objects.filter(base_currency="USD", quote_currency="EUR").exists())
         self.assertTrue(FxRate.objects.filter(base_currency="USD", quote_currency="SGD").exists())
+
+
+class BackofficeAuditExportTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.super_admin = User.objects.create_user(
+            username="super_export",
+            email="super_export@example.com",
+            password="pass12345",
+        )
+        assign_roles(self.super_admin, ["super_admin"])
+        BackofficeAuditLog.objects.create(
+            actor=self.super_admin,
+            action="test.action",
+            target_type="Test",
+            target_id="1",
+            metadata_json={"check": "ok"},
+        )
+
+    def test_super_admin_can_export_audit_jsonl(self):
+        self.client.login(username="super_export", password="pass12345")
+        response = self.client.get(reverse("backoffice_audit_export"), {"format": "jsonl", "days": 7})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Audit-Export-Signature-Alg"], "HMAC-SHA256")
+        self.assertIn("X-Audit-Export-Signature", response)
+        self.assertIn("X-Audit-Export-SHA256", response)
+        self.assertIn("test.action", response.content.decode("utf-8"))

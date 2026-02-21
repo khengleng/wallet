@@ -6,6 +6,7 @@ urlpatterns = [
     path('metrics', views.metrics, name='metrics'),
     path('fx/exchange/', views.wallet_fx_exchange, name='wallet_fx_exchange'),
     path('backoffice/', views.backoffice, name='backoffice'),
+    path('backoffice/audit/export/', views.backoffice_audit_export, name='backoffice_audit_export'),
     path('backoffice/rbac/', views.rbac_management, name='rbac_management'),
     path('backoffice/fx/', views.fx_management, name='fx_management'),
     path('backoffice/accounting/', views.accounting_dashboard, name='accounting_dashboard'),

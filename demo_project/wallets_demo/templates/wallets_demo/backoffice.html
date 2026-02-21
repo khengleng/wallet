@@ -14,6 +14,12 @@
     {% if can_manage_rbac %}
     <p><a class="btn btn-outline" href="{% url 'rbac_management' %}">Manage RBAC Roles</a></p>
     {% endif %}
+    {% if can_export_audit %}
+    <p class="flex gap-2">
+        <a class="btn btn-outline" href="{% url 'backoffice_audit_export' %}?format=jsonl&days=7">Export Audit (JSONL)</a>
+        <a class="btn btn-outline" href="{% url 'backoffice_audit_export' %}?format=csv&days=7">Export Audit (CSV)</a>
+    </p>
+    {% endif %}
     <div class="flex gap-2 mt-4">
         <span class="badge badge-info">Users: {{ total_users }}</span>
         <span class="badge badge-info">Wallets: {{ total_wallets }}</span>

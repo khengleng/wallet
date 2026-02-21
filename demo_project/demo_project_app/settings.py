@@ -219,6 +219,8 @@ def _parse_keycloak_role_group_map() -> dict[str, str]:
 
 
 KEYCLOAK_ROLE_GROUP_MAP = _parse_keycloak_role_group_map()
+AUDIT_EXPORT_HMAC_SECRET = os.getenv("AUDIT_EXPORT_HMAC_SECRET", SECRET_KEY or "").strip()
+AUDIT_EXPORT_MAX_DAYS = int(os.getenv("AUDIT_EXPORT_MAX_DAYS", "90"))
 
 if REDIS_URL:
     CACHES = {
