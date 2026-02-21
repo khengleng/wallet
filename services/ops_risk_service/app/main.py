@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+import time
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from sqlalchemy import func, select, text
 
 from .config import settings
@@ -12,6 +14,14 @@ app = FastAPI(
     version="1.0.0",
     description="Idempotent event consumer support service for operations/risk workflows.",
 )
+APP_START_MONOTONIC = time.monotonic()
+
+
+def _require_metrics_token(
+    x_metrics_token: str | None = Header(default=None, alias="X-Metrics-Token"),
+):
+    if settings.metrics_token and x_metrics_token != settings.metrics_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @app.get("/healthz")
@@ -27,7 +37,7 @@ def readyz():
 
 
 @app.get("/metrics")
-def metrics():
+def metrics(_: None = Depends(_require_metrics_token)):
     with SessionLocal() as db:
         processed_total = int(db.scalar(select(func.count()).select_from(ProcessedEvent)) or 0)
         alerts_total = int(db.scalar(select(func.count()).select_from(RiskAlert)) or 0)
@@ -47,9 +57,22 @@ def metrics():
             )
             or 0
         )
-    return {
-        "processed_total": processed_total,
-        "alerts_total": alerts_total,
-        "dead_letter_pending": dead_letter_pending,
-        "dead_letter_replayed": dead_letter_replayed,
-    }
+    uptime_seconds = int(time.monotonic() - APP_START_MONOTONIC)
+    lines = [
+        "# HELP ops_risk_uptime_seconds Process uptime in seconds.",
+        "# TYPE ops_risk_uptime_seconds gauge",
+        f"ops_risk_uptime_seconds {uptime_seconds}",
+        "# HELP ops_risk_processed_total Total processed events.",
+        "# TYPE ops_risk_processed_total counter",
+        f"ops_risk_processed_total {processed_total}",
+        "# HELP ops_risk_alerts_total Total risk alerts.",
+        "# TYPE ops_risk_alerts_total counter",
+        f"ops_risk_alerts_total {alerts_total}",
+        "# HELP ops_risk_dead_letter_pending Pending dead letter events.",
+        "# TYPE ops_risk_dead_letter_pending gauge",
+        f"ops_risk_dead_letter_pending {dead_letter_pending}",
+        "# HELP ops_risk_dead_letter_replayed Replayed dead letter events.",
+        "# TYPE ops_risk_dead_letter_replayed gauge",
+        f"ops_risk_dead_letter_replayed {dead_letter_replayed}",
+    ]
+    return Response(content="\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")

@@ -32,6 +32,7 @@ python -m app.replay_dead_letters --limit 200
 ## Required Env Vars
 - `DATABASE_URL`
 - `BROKER_URL`
+- `METRICS_TOKEN` (recommended; required by observability collectors if set)
 - `EVENT_EXCHANGE_NAME` (default `wallet.events`)
 - `EVENT_EXCHANGE_TYPE` (default `topic`)
 - `EVENT_QUEUE_NAME` (default `ops_risk_events`)

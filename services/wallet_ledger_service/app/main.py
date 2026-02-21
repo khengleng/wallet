@@ -4,13 +4,14 @@ import time
 from threading import Lock
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Response
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 import json
 import logging
 
 from .config import settings
 from .db import SessionLocal
+from .models import OutboxEvent
 from .schemas import (
     AccountCreateRequest,
     LedgerResult,
@@ -99,6 +100,12 @@ def metrics(_: Annotated[None, Depends(require_metrics_token)]):
     uptime_seconds = int(time.monotonic() - APP_START_MONOTONIC)
     with metrics_lock:
         snapshot = dict(metrics_counters)
+    with SessionLocal() as db:
+        outbox_rows = db.execute(
+            select(OutboxEvent.status, func.count()).group_by(OutboxEvent.status)
+        ).all()
+    outbox_by_status = {status: int(count) for status, count in outbox_rows}
+    outbox_total = sum(outbox_by_status.values())
     lines = [
         "# HELP wallet_ledger_uptime_seconds Process uptime in seconds.",
         "# TYPE wallet_ledger_uptime_seconds gauge",
@@ -124,6 +131,24 @@ def metrics(_: Annotated[None, Depends(require_metrics_token)]):
         "# HELP wallet_ledger_not_found_total Account not found errors.",
         "# TYPE wallet_ledger_not_found_total counter",
         f"wallet_ledger_not_found_total {snapshot['not_found_total']}",
+        "# HELP wallet_ledger_outbox_total Total outbox events.",
+        "# TYPE wallet_ledger_outbox_total gauge",
+        f"wallet_ledger_outbox_total {outbox_total}",
+        "# HELP wallet_ledger_outbox_pending Events waiting for publish.",
+        "# TYPE wallet_ledger_outbox_pending gauge",
+        f"wallet_ledger_outbox_pending {outbox_by_status.get('pending', 0)}",
+        "# HELP wallet_ledger_outbox_error Events waiting for retry after failure.",
+        "# TYPE wallet_ledger_outbox_error gauge",
+        f"wallet_ledger_outbox_error {outbox_by_status.get('error', 0)}",
+        "# HELP wallet_ledger_outbox_processing Events currently being processed.",
+        "# TYPE wallet_ledger_outbox_processing gauge",
+        f"wallet_ledger_outbox_processing {outbox_by_status.get('processing', 0)}",
+        "# HELP wallet_ledger_outbox_dead_letter Events moved to dead letter state.",
+        "# TYPE wallet_ledger_outbox_dead_letter gauge",
+        f"wallet_ledger_outbox_dead_letter {outbox_by_status.get('dead_letter', 0)}",
+        "# HELP wallet_ledger_outbox_sent Events successfully published.",
+        "# TYPE wallet_ledger_outbox_sent gauge",
+        f"wallet_ledger_outbox_sent {outbox_by_status.get('sent', 0)}",
     ]
     return Response(content="\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 

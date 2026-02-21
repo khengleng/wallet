@@ -10,6 +10,7 @@ class Settings:
         "DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/ops_risk"
     )
     broker_url: str = os.getenv("BROKER_URL", "amqp://guest:guest@localhost:5672/%2F")
+    metrics_token: str = os.getenv("METRICS_TOKEN", "")
     exchange_name: str = os.getenv("EVENT_EXCHANGE_NAME", "wallet.events")
     exchange_type: str = os.getenv("EVENT_EXCHANGE_TYPE", "topic")
     queue_name: str = os.getenv("EVENT_QUEUE_NAME", "ops_risk_events")
