@@ -14,6 +14,7 @@ from django.contrib import messages
 from django.conf import settings
 from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
+from django.contrib.contenttypes.models import ContentType
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -35,6 +36,7 @@ from .models import (
     ApprovalRequest,
     BackofficeAuditLog,
     ChartOfAccount,
+    CustomerCIF,
     FxRate,
     JournalEntry,
     JournalLine,
@@ -1597,6 +1599,334 @@ def operations_center(request):
             "case_priority_choices": OperationCase.PRIORITY_CHOICES,
             "case_status_choices": OperationCase.STATUS_CHOICES,
             "event_type_choices": MerchantLoyaltyEvent.TYPE_CHOICES,
+        },
+    )
+
+
+@login_required
+def wallet_management(request):
+    management_roles = ("super_admin", "admin", "operation", "finance", "customer_service", "risk")
+    if not user_has_any_role(request.user, management_roles):
+        raise PermissionDenied("You do not have access to wallet management.")
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "").strip().lower()
+        try:
+            wallet_service = get_wallet_service()
+            if form_type == "wallet_open_user":
+                customer_cif = CustomerCIF.objects.select_related("user").get(
+                    id=request.POST.get("cif_id")
+                )
+                if customer_cif.status != CustomerCIF.STATUS_ACTIVE:
+                    raise ValidationError("Selected CIF is not active.")
+                target_user = customer_cif.user
+                currency = _normalize_currency(request.POST.get("currency"))
+                wallet = _wallet_for_currency(target_user, currency)
+                _audit(
+                    request,
+                    "wallet.open_user",
+                    target_type="Wallet",
+                    target_id=str(wallet.id),
+                    metadata={
+                        "username": target_user.username,
+                        "cif_no": customer_cif.cif_no,
+                        "currency": currency,
+                    },
+                )
+                _track(
+                    request,
+                    "wallet_opened",
+                    properties={
+                        "holder_type": "user",
+                        "holder": target_user.username,
+                        "cif_no": customer_cif.cif_no,
+                        "currency": currency,
+                    },
+                )
+                messages.success(
+                    request,
+                    f"Wallet opened for CIF {customer_cif.cif_no} ({target_user.username}, {currency}).",
+                )
+                return redirect("wallet_management")
+
+            if form_type == "wallet_open_merchant":
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                currency = _normalize_currency(request.POST.get("currency"))
+                wallet = _merchant_wallet_for_currency(merchant, currency)
+                _audit(
+                    request,
+                    "wallet.open_merchant",
+                    target_type="Wallet",
+                    target_id=str(wallet.id),
+                    metadata={"merchant_code": merchant.code, "currency": currency},
+                )
+                _track(
+                    request,
+                    "wallet_opened",
+                    properties={"holder_type": "merchant", "holder": merchant.code, "currency": currency},
+                )
+                messages.success(request, f"Merchant wallet opened for {merchant.code} ({currency}).")
+                return redirect("wallet_management")
+
+            if form_type == "wallet_toggle_freeze":
+                holder_scope = (request.POST.get("holder_scope") or "user").strip().lower()
+                slug = (request.POST.get("wallet_slug") or "default").strip()
+                action = (request.POST.get("action") or "").strip().lower()
+                if holder_scope == "merchant":
+                    holder = Merchant.objects.get(id=request.POST.get("holder_id"))
+                else:
+                    holder = User.objects.get(id=request.POST.get("holder_id"))
+                if action == "freeze":
+                    holder.freeze_wallet(slug)
+                elif action == "unfreeze":
+                    holder.unfreeze_wallet(slug)
+                else:
+                    raise ValidationError("Invalid wallet freeze action.")
+                _audit(
+                    request,
+                    "wallet.freeze_toggle",
+                    target_type=holder.__class__.__name__,
+                    target_id=str(holder.id),
+                    metadata={"slug": slug, "action": action},
+                )
+                messages.success(request, f"Wallet {slug} {action}d successfully.")
+                return redirect("wallet_management")
+
+            if form_type == "wallet_adjust_user":
+                customer_cif = CustomerCIF.objects.select_related("user").get(
+                    id=request.POST.get("cif_id")
+                )
+                if customer_cif.status != CustomerCIF.STATUS_ACTIVE:
+                    raise ValidationError("Selected CIF is not active.")
+                target_user = customer_cif.user
+                currency = _normalize_currency(request.POST.get("currency"))
+                amount = _parse_amount(request.POST.get("amount"))
+                adjustment_type = (request.POST.get("adjustment_type") or "").strip().lower()
+                reason = (request.POST.get("reason") or "Backoffice adjustment").strip()
+
+                if _should_use_maker_checker(request.user):
+                    action = (
+                        ApprovalRequest.ACTION_DEPOSIT
+                        if adjustment_type == "deposit"
+                        else ApprovalRequest.ACTION_WITHDRAW
+                    )
+                    approval_request = _submit_approval_request(
+                        maker=request.user,
+                        source_user=target_user,
+                        action=action,
+                        amount=amount,
+                        currency=currency,
+                        description=reason,
+                        maker_note=f"wallet_management:{customer_cif.cif_no}:{target_user.username}",
+                    )
+                    messages.success(
+                        request,
+                        f"Adjustment request #{approval_request.id} submitted for checker approval.",
+                    )
+                    return redirect("wallet_management")
+
+                wallet = _wallet_for_currency(target_user, currency)
+                with transaction.atomic():
+                    if adjustment_type == "deposit":
+                        wallet_service.deposit(wallet, amount, meta={"reason": reason, "currency": currency})
+                    elif adjustment_type == "withdraw":
+                        wallet_service.withdraw(wallet, amount, meta={"reason": reason, "currency": currency})
+                    else:
+                        raise ValidationError("Invalid adjustment type.")
+                _audit(
+                    request,
+                    "wallet.adjust_user",
+                    target_type="Wallet",
+                    target_id=str(wallet.id),
+                    metadata={
+                        "username": target_user.username,
+                        "cif_no": customer_cif.cif_no,
+                        "adjustment_type": adjustment_type,
+                        "amount": str(amount),
+                        "currency": currency,
+                    },
+                )
+                _track(
+                    request,
+                    "wallet_adjusted",
+                    properties={
+                        "holder_type": "user",
+                        "holder": target_user.username,
+                        "cif_no": customer_cif.cif_no,
+                        "adjustment_type": adjustment_type,
+                        "amount": str(amount),
+                        "currency": currency,
+                    },
+                )
+                messages.success(
+                    request,
+                    f"Wallet adjusted for CIF {customer_cif.cif_no} ({target_user.username}).",
+                )
+                return redirect("wallet_management")
+
+            if form_type == "cif_onboard":
+                target_user = User.objects.get(id=request.POST.get("user_id"))
+                cif_no = (request.POST.get("cif_no") or "").strip().upper()
+                legal_name = (request.POST.get("legal_name") or "").strip()
+                mobile_no = (request.POST.get("mobile_no") or "").strip()
+                email = (request.POST.get("email") or "").strip()
+                status = (request.POST.get("status") or CustomerCIF.STATUS_ACTIVE).strip().lower()
+                if not cif_no:
+                    raise ValidationError("CIF number is required.")
+                if not legal_name:
+                    raise ValidationError("Legal name is required.")
+                if status not in {
+                    CustomerCIF.STATUS_ACTIVE,
+                    CustomerCIF.STATUS_BLOCKED,
+                    CustomerCIF.STATUS_CLOSED,
+                }:
+                    raise ValidationError("Invalid CIF status.")
+                if CustomerCIF.objects.filter(cif_no=cif_no).exclude(user=target_user).exists():
+                    raise ValidationError("CIF number already exists for another user.")
+
+                customer_cif, created = CustomerCIF.objects.get_or_create(
+                    user=target_user,
+                    defaults={
+                        "cif_no": cif_no,
+                        "legal_name": legal_name,
+                        "mobile_no": mobile_no,
+                        "email": email,
+                        "status": status,
+                        "created_by": request.user,
+                    },
+                )
+                if not created:
+                    if customer_cif.cif_no != cif_no:
+                        raise ValidationError(
+                            f"CIF number is immutable for {target_user.username}. "
+                            f"Existing CIF: {customer_cif.cif_no}"
+                        )
+                    customer_cif.legal_name = legal_name
+                    customer_cif.mobile_no = mobile_no
+                    customer_cif.email = email
+                    customer_cif.status = status
+                    customer_cif.save(
+                        update_fields=[
+                            "legal_name",
+                            "mobile_no",
+                            "email",
+                            "status",
+                            "updated_at",
+                        ]
+                    )
+
+                if target_user.wallet_type != WALLET_TYPE_CUSTOMER:
+                    target_user.wallet_type = WALLET_TYPE_CUSTOMER
+                    target_user.save(update_fields=["wallet_type"])
+
+                _audit(
+                    request,
+                    "customer_cif.onboard",
+                    target_type="CustomerCIF",
+                    target_id=str(customer_cif.id),
+                    metadata={
+                        "username": target_user.username,
+                        "cif_no": customer_cif.cif_no,
+                        "status": customer_cif.status,
+                        "created": created,
+                    },
+                )
+                _track(
+                    request,
+                    "customer_cif_onboarded",
+                    properties={
+                        "username": target_user.username,
+                        "cif_no": customer_cif.cif_no,
+                        "status": customer_cif.status,
+                        "created": created,
+                    },
+                )
+                messages.success(
+                    request,
+                    f"CIF {customer_cif.cif_no} {'created' if created else 'updated'} for {target_user.username}.",
+                )
+                return redirect("wallet_management")
+
+            if form_type == "wallet_adjust_merchant":
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                currency = _normalize_currency(request.POST.get("currency"))
+                amount = _parse_amount(request.POST.get("amount"))
+                adjustment_type = (request.POST.get("adjustment_type") or "").strip().lower()
+                reason = (request.POST.get("reason") or "Merchant wallet adjustment").strip()
+                wallet = _merchant_wallet_for_currency(merchant, currency)
+                with transaction.atomic():
+                    if adjustment_type == "deposit":
+                        wallet_service.deposit(wallet, amount, meta={"reason": reason, "currency": currency})
+                    elif adjustment_type == "withdraw":
+                        wallet_service.withdraw(wallet, amount, meta={"reason": reason, "currency": currency})
+                    else:
+                        raise ValidationError("Invalid adjustment type.")
+                _audit(
+                    request,
+                    "wallet.adjust_merchant",
+                    target_type="Wallet",
+                    target_id=str(wallet.id),
+                    metadata={
+                        "merchant_code": merchant.code,
+                        "adjustment_type": adjustment_type,
+                        "amount": str(amount),
+                        "currency": currency,
+                    },
+                )
+                _track(
+                    request,
+                    "wallet_adjusted",
+                    properties={
+                        "holder_type": "merchant",
+                        "holder": merchant.code,
+                        "adjustment_type": adjustment_type,
+                        "amount": str(amount),
+                        "currency": currency,
+                    },
+                )
+                messages.success(request, f"Merchant wallet adjusted for {merchant.code}.")
+                return redirect("wallet_management")
+        except Exception as exc:
+            messages.error(request, f"Wallet operation failed: {exc}")
+
+    user_ct = ContentType.objects.get_for_model(User)
+    merchant_ct = ContentType.objects.get_for_model(Merchant)
+    user_wallets = (
+        Wallet.objects.filter(holder_type=user_ct)
+        .select_related()
+        .order_by("-id")[:200]
+    )
+    merchant_wallets = (
+        Wallet.objects.filter(holder_type=merchant_ct)
+        .select_related()
+        .order_by("-id")[:200]
+    )
+    user_map = {u.id: u for u in User.objects.filter(id__in=[w.holder_id for w in user_wallets])}
+    cif_map = {
+        cif.user_id: cif
+        for cif in CustomerCIF.objects.filter(user_id__in=[w.holder_id for w in user_wallets])
+    }
+    merchant_map = {
+        m.id: m for m in Merchant.objects.filter(id__in=[w.holder_id for w in merchant_wallets])
+    }
+
+    return render(
+        request,
+        "wallets_demo/wallet_management.html",
+        {
+            "users": User.objects.order_by("username")[:300],
+            "users_for_cif": User.objects.order_by("username")[:300],
+            "customer_cifs": CustomerCIF.objects.select_related("user").order_by("cif_no")[:500],
+            "cif_status_choices": CustomerCIF.STATUS_CHOICES,
+            "merchants": Merchant.objects.order_by("code")[:200],
+            "supported_currencies": _supported_currencies(),
+            "user_wallet_rows": [
+                (wallet, user_map.get(wallet.holder_id), cif_map.get(wallet.holder_id))
+                for wallet in user_wallets
+            ],
+            "merchant_wallet_rows": [
+                (wallet, merchant_map.get(wallet.holder_id)) for wallet in merchant_wallets
+            ],
         },
     )
 

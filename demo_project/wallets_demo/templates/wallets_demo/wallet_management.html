@@ -1,0 +1,132 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}Wallet Management - DJ Wallet{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Wallet Management</h2>
+    <p class="text-muted">CIF-driven onboarding, wallet opening, freeze/unfreeze, and adjustments for users and merchants.</p>
+</div>
+
+<div class="card">
+    <h3>Customer Onboarding (CIF)</h3>
+    <p class="text-muted">CIF number becomes immutable after first creation for a customer.</p>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="cif_onboard" />
+        <div class="form-group"><label>User</label><select name="user_id" required>{% for u in users_for_cif %}<option value="{{ u.id }}">{{ u.username }} ({{ u.email|default:"-" }})</option>{% endfor %}</select></div>
+        <div class="form-group"><label>CIF Number</label><input type="text" name="cif_no" maxlength="40" required /></div>
+        <div class="form-group"><label>Legal Name</label><input type="text" name="legal_name" maxlength="128" required /></div>
+        <div class="form-group"><label>Mobile Number</label><input type="text" name="mobile_no" maxlength="40" /></div>
+        <div class="form-group"><label>Email</label><input type="email" name="email" /></div>
+        <div class="form-group"><label>Status</label><select name="status">{% for value, label in cif_status_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+        <button type="submit" class="btn btn-primary">Create / Update CIF</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Open Customer Wallet (by CIF)</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="wallet_open_user" />
+        <div class="form-group"><label>Customer CIF</label><select name="cif_id" required>{% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} - {{ cif.legal_name }} ({{ cif.user.username }})</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
+        <button type="submit" class="btn btn-primary">Open Customer Wallet</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Open Merchant Wallet</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="wallet_open_merchant" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} ({{ m.wallet_type }})</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
+        <button type="submit" class="btn btn-primary">Open Merchant Wallet</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Adjust Customer Wallet (by CIF)</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="wallet_adjust_user" />
+        <div class="form-group"><label>Customer CIF</label><select name="cif_id" required>{% for cif in customer_cifs %}<option value="{{ cif.id }}">{{ cif.cif_no }} - {{ cif.legal_name }} ({{ cif.user.username }})</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Adjustment Type</label><select name="adjustment_type"><option value="deposit">Deposit</option><option value="withdraw">Withdraw</option></select></div>
+        <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount" required /></div>
+        <div class="form-group"><label>Reason</label><input type="text" name="reason" /></div>
+        <button type="submit" class="btn btn-primary">Adjust Customer Wallet</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Adjust Merchant Wallet</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="wallet_adjust_merchant" />
+        <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} ({{ m.wallet_type }})</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Currency</label><select name="currency">{% for ccy in supported_currencies %}<option value="{{ ccy }}">{{ ccy }}</option>{% endfor %}</select></div>
+        <div class="form-group"><label>Adjustment Type</label><select name="adjustment_type"><option value="deposit">Deposit</option><option value="withdraw">Withdraw</option></select></div>
+        <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount" required /></div>
+        <div class="form-group"><label>Reason</label><input type="text" name="reason" /></div>
+        <button type="submit" class="btn btn-primary">Adjust Merchant Wallet</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Freeze / Unfreeze Wallet</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="wallet_toggle_freeze" />
+        <div class="form-group"><label>Holder Scope</label><select name="holder_scope"><option value="user">User</option><option value="merchant">Merchant</option></select></div>
+        <div class="form-group"><label>Holder ID</label><input type="number" min="1" name="holder_id" required /></div>
+        <div class="form-group"><label>Wallet Slug</label><input type="text" name="wallet_slug" value="default" required /></div>
+        <div class="form-group"><label>Action</label><select name="action"><option value="freeze">Freeze</option><option value="unfreeze">Unfreeze</option></select></div>
+        <button type="submit" class="btn btn-primary">Apply</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Recent User Wallets</h3>
+    <table>
+        <thead><tr><th>Wallet ID</th><th>User</th><th>CIF</th><th>Wallet Type</th><th>Slug</th><th>Balance</th><th>Meta</th></tr></thead>
+        <tbody>
+            {% for wallet, holder, cif in user_wallet_rows %}
+                <tr>
+                    <td>{{ wallet.id }}</td>
+                    <td>{% if holder %}{{ holder.username }}{% else %}#{{ wallet.holder_id }}{% endif %}</td>
+                    <td>{% if cif %}{{ cif.cif_no }}{% else %}-{% endif %}</td>
+                    <td>{% if holder %}{{ holder.wallet_type }}{% else %}-{% endif %}</td>
+                    <td>{{ wallet.slug }}</td>
+                    <td>{{ wallet.balance }}</td>
+                    <td><code>{{ wallet.meta }}</code></td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="7" class="text-muted" style="text-align:center;">No user wallets.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Recent Merchant Wallets</h3>
+    <table>
+        <thead><tr><th>Wallet ID</th><th>Merchant</th><th>Wallet Type</th><th>Slug</th><th>Balance</th><th>Meta</th></tr></thead>
+        <tbody>
+            {% for wallet, holder in merchant_wallet_rows %}
+                <tr>
+                    <td>{{ wallet.id }}</td>
+                    <td>{% if holder %}{{ holder.code }}{% else %}#{{ wallet.holder_id }}{% endif %}</td>
+                    <td>{% if holder %}{{ holder.wallet_type }}{% else %}-{% endif %}</td>
+                    <td>{{ wallet.slug }}</td>
+                    <td>{{ wallet.balance }}</td>
+                    <td><code>{{ wallet.meta }}</code></td>
+                </tr>
+            {% empty %}
+                <tr><td colspan="6" class="text-muted" style="text-align:center;">No merchant wallets.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -917,6 +917,44 @@ class OperationCaseNote(models.Model):
         return f"{self.case.case_no} note by {self.created_by.username}"
 
 
+class CustomerCIF(models.Model):
+    STATUS_ACTIVE = "active"
+    STATUS_BLOCKED = "blocked"
+    STATUS_CLOSED = "closed"
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_BLOCKED, "Blocked"),
+        (STATUS_CLOSED, "Closed"),
+    )
+
+    cif_no = models.CharField(max_length=40, unique=True)
+    user = models.OneToOneField(
+        User, on_delete=models.PROTECT, related_name="customer_cif"
+    )
+    legal_name = models.CharField(max_length=128)
+    mobile_no = models.CharField(max_length=40, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_customer_cifs"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("cif_no",)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            current = CustomerCIF.objects.filter(pk=self.pk).values_list("cif_no", flat=True).first()
+            if current and current != self.cif_no:
+                raise ValidationError("CIF number is immutable and cannot be changed.")
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.cif_no} - {self.legal_name}"
+
+
 class AnalyticsEvent(models.Model):
     SOURCE_WEB = "web"
     SOURCE_API = "api"

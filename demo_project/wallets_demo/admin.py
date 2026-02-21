@@ -6,6 +6,7 @@ from .models import (
     ApprovalRequest,
     BackofficeAuditLog,
     ChartOfAccount,
+    CustomerCIF,
     FxRate,
     JournalEntry,
     JournalLine,
@@ -233,6 +234,18 @@ class OperationCaseNoteAdmin(admin.ModelAdmin):
     list_display = ("case", "created_by", "is_internal", "created_at")
     list_filter = ("is_internal", "created_at")
     search_fields = ("case__case_no", "created_by__username", "note")
+
+
+@admin.register(CustomerCIF)
+class CustomerCIFAdmin(admin.ModelAdmin):
+    list_display = ("cif_no", "user", "legal_name", "mobile_no", "email", "status", "created_by", "updated_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("cif_no", "legal_name", "mobile_no", "email", "user__username")
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj:
+            return ("cif_no",)
+        return ()
 
 
 @admin.register(AnalyticsEvent)

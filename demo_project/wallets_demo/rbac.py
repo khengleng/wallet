@@ -72,6 +72,10 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "add_operationcasenote"),
             ("wallets_demo", "change_operationcasenote"),
+            ("wallets_demo", "view_customercif"),
+            ("wallets_demo", "add_customercif"),
+            ("wallets_demo", "change_customercif"),
+            ("wallets_demo", "delete_customercif"),
         ),
     ),
     "admin": RoleDefinition(
@@ -108,6 +112,9 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "change_operationcase"),
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "change_operationcasenote"),
+            ("wallets_demo", "view_customercif"),
+            ("wallets_demo", "add_customercif"),
+            ("wallets_demo", "change_customercif"),
         ),
     ),
     "finance": RoleDefinition(
@@ -154,6 +161,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "add_operationcasenote"),
             ("wallets_demo", "change_operationcasenote"),
+            ("wallets_demo", "view_customercif"),
         ),
     ),
     "treasury": RoleDefinition(
@@ -181,6 +189,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "change_operationcase"),
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "add_operationcasenote"),
+            ("wallets_demo", "view_customercif"),
         ),
     ),
     "customer_service": RoleDefinition(
@@ -202,6 +211,9 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "change_operationcase"),
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "add_operationcasenote"),
+            ("wallets_demo", "view_customercif"),
+            ("wallets_demo", "add_customercif"),
+            ("wallets_demo", "change_customercif"),
         ),
     ),
     "risk": RoleDefinition(
@@ -231,6 +243,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "change_operationcase"),
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "add_operationcasenote"),
+            ("wallets_demo", "view_customercif"),
         ),
     ),
     "operation": RoleDefinition(
@@ -264,6 +277,9 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "change_operationcase"),
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "add_operationcasenote"),
+            ("wallets_demo", "view_customercif"),
+            ("wallets_demo", "add_customercif"),
+            ("wallets_demo", "change_customercif"),
         ),
     ),
     "sales": RoleDefinition(
@@ -286,6 +302,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "change_operationcase"),
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "add_operationcasenote"),
+            ("wallets_demo", "view_customercif"),
         ),
     ),
 }
