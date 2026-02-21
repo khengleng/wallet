@@ -86,6 +86,11 @@ class OperationSetting(models.Model):
     recon_no_prefix = models.CharField(max_length=16, default="RECON")
     chargeback_no_prefix = models.CharField(max_length=16, default="CB")
     access_review_no_prefix = models.CharField(max_length=16, default="AR")
+    enabled_currencies = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of active currency codes on this platform. Leave empty to use SUPPORTED_CURRENCIES setting.",
+    )
     updated_by = models.ForeignKey(
         User,
         on_delete=models.PROTECT,

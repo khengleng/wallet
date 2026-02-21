@@ -121,6 +121,12 @@ def _parse_amount(raw_value: str) -> Decimal:
 
 
 def _supported_currencies() -> list[str]:
+    try:
+        row = OperationSetting.get_solo()
+        if row.enabled_currencies:
+            return [c.upper() for c in row.enabled_currencies if c]
+    except Exception:
+        pass
     return list(getattr(settings, "SUPPORTED_CURRENCIES", ["USD"]))
 
 
@@ -3656,13 +3662,20 @@ def operations_settings(request):
                 )
                 for key in SERVICE_PREFIX_KEYS
             }
+            selected_currencies = [
+                c.strip().upper()
+                for c in request.POST.getlist("enabled_currencies")
+                if c.strip()
+            ]
+            if selected_currencies:
+                settings_row.enabled_currencies = selected_currencies
             settings_row.updated_by = request.user
             settings_row.full_clean()
             settings_row.save()
-            messages.success(request, "Operation settings updated.")
+            messages.success(request, "System settings updated.")
             return redirect("operations_settings")
         except Exception as exc:
-            messages.error(request, f"Unable to update operation settings: {exc}")
+            messages.error(request, f"Unable to update system settings: {exc}")
 
     preview = {
         "Merchant ID": _new_merchant_code(),
@@ -3681,6 +3694,34 @@ def operations_settings(request):
         )
         for key in ("deposit", "withdraw", "transfer", "b2b", "b2c", "c2b", "p2g", "g2p", "refund")
     }
+    # All known world currencies available for selection
+    all_currencies = [
+        ("USD", "US Dollar"),
+        ("EUR", "Euro"),
+        ("GBP", "British Pound"),
+        ("SGD", "Singapore Dollar"),
+        ("KHR", "Cambodian Riel"),
+        ("THB", "Thai Baht"),
+        ("VND", "Vietnamese Dong"),
+        ("MYR", "Malaysian Ringgit"),
+        ("IDR", "Indonesian Rupiah"),
+        ("PHP", "Philippine Peso"),
+        ("CNY", "Chinese Yuan"),
+        ("JPY", "Japanese Yen"),
+        ("HKD", "Hong Kong Dollar"),
+        ("AUD", "Australian Dollar"),
+        ("INR", "Indian Rupee"),
+        ("BDT", "Bangladeshi Taka"),
+        ("MMK", "Myanmar Kyat"),
+        ("LAK", "Lao Kip"),
+        ("KRW", "South Korean Won"),
+        ("TWD", "Taiwan Dollar"),
+    ]
+    active_currencies = set(
+        settings_row.enabled_currencies
+        if settings_row.enabled_currencies
+        else getattr(settings, "SUPPORTED_CURRENCIES", ["USD"])
+    )
     return render(
         request,
         "wallets_demo/operations_settings.html",
@@ -3689,6 +3730,8 @@ def operations_settings(request):
             "preview": preview,
             "service_prefixes": merged_service_prefixes,
             "preview_service_txn": preview_service_txn,
+            "all_currencies": all_currencies,
+            "active_currencies": active_currencies,
         },
     )
 

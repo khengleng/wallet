@@ -212,7 +212,7 @@ dj_wallet = {
 PLATFORM_BASE_CURRENCY = os.getenv("PLATFORM_BASE_CURRENCY", "USD").upper()
 SUPPORTED_CURRENCIES = [
     c.strip().upper()
-    for c in os.getenv("SUPPORTED_CURRENCIES", "USD,EUR,SGD,GBP").split(",")
+    for c in os.getenv("SUPPORTED_CURRENCIES", "USD,EUR,SGD,GBP,KHR").split(",")
     if c.strip()
 ]
 FX_PROVIDER = os.getenv("FX_PROVIDER", "frankfurter").strip().lower()

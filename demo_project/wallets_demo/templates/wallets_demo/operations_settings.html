@@ -42,7 +42,7 @@
         <div class="form-group"><label>Access Review Prefix</label><input type="text" name="access_review_no_prefix"
                 value="{{ operation_settings.access_review_no_prefix }}" maxlength="16" required /></div>
 
-        <h3 style="margin-top:1rem;">Transaction Prefix by Service Type</h3>
+        <h3 style="margin-top:1.5rem;">Transaction Prefix by Service Type</h3>
         <p class="text-muted">Each service/flow can have its own transaction prefix.</p>
         {% for service_key, prefix in service_prefixes.items %}
         <div class="form-group">
@@ -50,6 +50,23 @@
             <input type="text" name="service_prefix_{{ service_key }}" value="{{ prefix }}" maxlength="16" required />
         </div>
         {% endfor %}
+
+        <h3 style="margin-top:1.5rem;">Active Currencies</h3>
+        <p class="text-muted">Select which currencies are available on this platform for wallets, deposits, transfers,
+            and FX.</p>
+        <div
+            style="display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:0.75rem; margin-bottom:1.25rem;">
+            {% for code, name in all_currencies %}
+            <label
+                style="display:flex; align-items:center; gap:0.5rem; padding:0.6rem 0.75rem; border:1px solid var(--border); border-radius:0.5rem; cursor:pointer; transition:background 0.15s; {% if code in active_currencies %}background:rgba(99,102,241,0.08); border-color:var(--primary);{% endif %}">
+                <input type="checkbox" name="enabled_currencies" value="{{ code }}" {% if code in active_currencies
+                    %}checked{% endif %} style="width:auto; accent-color:var(--primary);" />
+                <span><strong>{{ code }}</strong>&nbsp;<span class="text-muted" style="font-size:0.8rem;">{{ name
+                        }}</span></span>
+            </label>
+            {% endfor %}
+        </div>
+
         <button type="submit" class="btn btn-primary">Save System Setting</button>
     </form>
 </div>
