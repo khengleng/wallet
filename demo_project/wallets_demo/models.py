@@ -999,6 +999,209 @@ class MerchantSettlementRecord(models.Model):
         return f"{self.settlement_no}:{self.merchant.code}:{self.status}"
 
 
+class DisputeRefundRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_EXECUTED = "executed"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+        (STATUS_EXECUTED, "Executed"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    case = models.ForeignKey(
+        "OperationCase", on_delete=models.PROTECT, related_name="refund_requests"
+    )
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.PROTECT, related_name="refund_requests"
+    )
+    customer = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="refund_requests"
+    )
+    amount = models.DecimalField(max_digits=20, decimal_places=2)
+    currency = models.CharField(max_length=12, default="USD")
+    reason = models.CharField(max_length=255, blank=True, default="")
+    maker = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="made_refund_requests"
+    )
+    checker = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="checked_refund_requests",
+    )
+    status = models.CharField(
+        max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True
+    )
+    maker_note = models.TextField(blank=True, default="")
+    checker_note = models.TextField(blank=True, default="")
+    source_cashflow_event = models.ForeignKey(
+        MerchantCashflowEvent,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="refund_requests",
+    )
+    executed_event = models.ForeignKey(
+        MerchantCashflowEvent,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="executed_refund_requests",
+    )
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def clean(self):
+        if self.amount <= Decimal("0"):
+            raise ValidationError("Refund amount must be greater than 0.")
+
+    def __str__(self):
+        return f"REFUND:{self.id}:{self.merchant.code}:{self.status}"
+
+
+class SettlementPayout(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_SENT = "sent"
+    STATUS_SETTLED = "settled"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SENT, "Sent"),
+        (STATUS_SETTLED, "Settled"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    settlement = models.OneToOneField(
+        MerchantSettlementRecord, on_delete=models.CASCADE, related_name="payout"
+    )
+    payout_reference = models.CharField(max_length=48, unique=True)
+    payout_channel = models.CharField(max_length=32, default="bank_transfer")
+    destination_account = models.CharField(max_length=128, blank=True, default="")
+    amount = models.DecimalField(max_digits=20, decimal_places=2)
+    currency = models.CharField(max_length=12, default="USD")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    provider_response = models.JSONField(default=dict, blank=True)
+    initiated_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="initiated_settlement_payouts"
+    )
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="approved_settlement_payouts",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    settled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.payout_reference}:{self.status}"
+
+
+class ReconciliationRun(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_COMPLETED = "completed"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_COMPLETED, "Completed"),
+    )
+
+    source = models.CharField(max_length=64, default="internal_vs_settlement")
+    run_no = models.CharField(max_length=40, unique=True)
+    currency = models.CharField(max_length=12, default="USD")
+    period_start = models.DateField()
+    period_end = models.DateField()
+    internal_count = models.PositiveIntegerField(default=0)
+    internal_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    external_count = models.PositiveIntegerField(default=0)
+    external_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    delta_count = models.IntegerField(default=0)
+    delta_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_reconciliation_runs"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.run_no}:{self.status}"
+
+
+class ReconciliationBreak(models.Model):
+    STATUS_OPEN = "open"
+    STATUS_IN_REVIEW = "in_review"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_REVIEW, "In Review"),
+        (STATUS_RESOLVED, "Resolved"),
+    )
+
+    run = models.ForeignKey(
+        ReconciliationRun, on_delete=models.CASCADE, related_name="breaks"
+    )
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reconciliation_breaks",
+    )
+    reference = models.CharField(max_length=128, blank=True, default="")
+    issue_type = models.CharField(max_length=64, default="amount_mismatch")
+    expected_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    actual_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    delta_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    note = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="assigned_reconciliation_breaks",
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_reconciliation_breaks"
+    )
+    resolved_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="resolved_reconciliation_breaks",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.run.run_no}:{self.status}:{self.issue_type}"
+
+
 class OperationCase(models.Model):
     TYPE_COMPLAINT = "complaint"
     TYPE_DISPUTE = "dispute"

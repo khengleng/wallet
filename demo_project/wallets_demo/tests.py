@@ -11,6 +11,7 @@ from .models import (
     BackofficeAuditLog,
     ChartOfAccount,
     CustomerCIF,
+    DisputeRefundRequest,
     FxRate,
     JournalEntry,
     JournalLine,
@@ -22,6 +23,10 @@ from .models import (
     MerchantRiskProfile,
     MerchantSettlementRecord,
     MerchantWalletCapability,
+    OperationCase,
+    ReconciliationBreak,
+    ReconciliationRun,
+    SettlementPayout,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -611,3 +616,156 @@ class MerchantEnterpriseOperationsTests(TestCase):
         self.merchant.refresh_from_db()
         self.assertEqual(kyb.status, MerchantKYBRequest.STATUS_APPROVED)
         self.assertEqual(self.merchant.name, "Merchant Ops Legal")
+
+
+class MerchantOpsWorkflowTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.admin = User.objects.create_user(username="ops_admin", password="pass12345")
+        self.ops = User.objects.create_user(username="ops_user", password="pass12345")
+        self.risk = User.objects.create_user(username="risk_user", password="pass12345")
+        self.customer = User.objects.create_user(username="ops_customer", password="pass12345")
+        assign_roles(self.admin, ["admin"])
+        assign_roles(self.ops, ["operation"])
+        assign_roles(self.risk, ["risk"])
+        self.customer.deposit(300)
+        self.merchant = Merchant.objects.create(
+            code="MOPS200",
+            name="Merchant 200",
+            created_by=self.admin,
+            updated_by=self.admin,
+            owner=self.admin,
+        )
+        MerchantWalletCapability.objects.create(merchant=self.merchant)
+        MerchantLoyaltyProgram.objects.create(merchant=self.merchant)
+        MerchantRiskProfile.objects.create(
+            merchant=self.merchant,
+            daily_txn_limit=1000,
+            daily_amount_limit=Decimal("9999999"),
+            single_txn_limit=Decimal("999999"),
+            reserve_ratio_bps=0,
+            require_manual_review_above=Decimal("0"),
+            updated_by=self.admin,
+        )
+        self.merchant.deposit(100)
+        self.case = OperationCase.objects.create(
+            case_no="CASE-TEST-OPS-1",
+            case_type=OperationCase.TYPE_DISPUTE,
+            priority=OperationCase.PRIORITY_MEDIUM,
+            title="Dispute case",
+            customer=self.customer,
+            merchant=self.merchant,
+            assigned_to=self.ops,
+            created_by=self.ops,
+        )
+
+    def test_dispute_refund_maker_checker_execution(self):
+        self.client.login(username="ops_user", password="pass12345")
+        resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "dispute_refund_submit",
+                "case_id": self.case.id,
+                "amount": "10.00",
+                "currency": "USD",
+                "reason": "refund dispute",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        refund = DisputeRefundRequest.objects.get(case=self.case)
+        self.assertEqual(refund.status, DisputeRefundRequest.STATUS_PENDING)
+
+        self.client.logout()
+        self.client.login(username="risk_user", password="pass12345")
+        resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "dispute_refund_decision",
+                "refund_request_id": refund.id,
+                "decision": "approve",
+                "checker_note": "ok",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        refund.refresh_from_db()
+        self.case.refresh_from_db()
+        self.assertEqual(refund.status, DisputeRefundRequest.STATUS_EXECUTED)
+        self.assertEqual(self.case.status, OperationCase.STATUS_RESOLVED)
+
+    def test_settlement_payout_execution(self):
+        settlement = MerchantSettlementRecord.objects.create(
+            merchant=self.merchant,
+            settlement_no="SETTLE-OPS-1",
+            currency="USD",
+            period_start=self.case.created_at.date(),
+            period_end=self.case.created_at.date(),
+            gross_amount=Decimal("100"),
+            fee_amount=Decimal("1"),
+            net_amount=Decimal("99"),
+            event_count=1,
+            status=MerchantSettlementRecord.STATUS_POSTED,
+            created_by=self.admin,
+        )
+        self.client.login(username="ops_admin", password="pass12345")
+        resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "settlement_payout_submit",
+                "settlement_id": settlement.id,
+                "payout_channel": "bank_transfer",
+                "destination_account": "ACC-123",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        payout = SettlementPayout.objects.get(settlement=settlement)
+        self.assertEqual(payout.status, SettlementPayout.STATUS_PENDING)
+
+        self.client.logout()
+        self.client.login(username="risk_user", password="pass12345")
+        resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "settlement_payout_decision",
+                "payout_id": payout.id,
+                "decision": "settle",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        payout.refresh_from_db()
+        settlement.refresh_from_db()
+        self.assertEqual(payout.status, SettlementPayout.STATUS_SETTLED)
+        self.assertEqual(settlement.status, MerchantSettlementRecord.STATUS_PAID)
+
+    def test_reconciliation_run_and_break_resolution(self):
+        self.client.login(username="ops_admin", password="pass12345")
+        resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "reconciliation_run_create",
+                "source": "internal_vs_settlement",
+                "currency": "USD",
+                "period_start": self.case.created_at.date().isoformat(),
+                "period_end": self.case.created_at.date().isoformat(),
+                "external_count": "10",
+                "external_amount": "1000.00",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        run = ReconciliationRun.objects.latest("id")
+        self.assertEqual(run.status, ReconciliationRun.STATUS_COMPLETED)
+        br = ReconciliationBreak.objects.filter(run=run).first()
+        self.assertIsNotNone(br)
+
+        resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "reconciliation_break_update",
+                "break_id": br.id,
+                "status": "resolved",
+                "note": "balanced manually",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        br.refresh_from_db()
+        self.assertEqual(br.status, ReconciliationBreak.STATUS_RESOLVED)

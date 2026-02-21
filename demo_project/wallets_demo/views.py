@@ -39,6 +39,7 @@ from .models import (
     BackofficeAuditLog,
     ChartOfAccount,
     CustomerCIF,
+    DisputeRefundRequest,
     FxRate,
     JournalEntry,
     JournalLine,
@@ -55,6 +56,9 @@ from .models import (
     MerchantWalletCapability,
     OperationCase,
     OperationCaseNote,
+    ReconciliationBreak,
+    ReconciliationRun,
+    SettlementPayout,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
@@ -935,6 +939,14 @@ def _new_settlement_no() -> str:
     return f"SETTLE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
 
 
+def _new_payout_ref() -> str:
+    return f"PAYOUT-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+def _new_recon_no() -> str:
+    return f"RECON-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
 def _hash_api_secret(secret: str) -> str:
     secret_key = (settings.SECRET_KEY or "wallet-secret").encode("utf-8")
     return hmac.new(secret_key, secret.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -1610,6 +1622,370 @@ def operations_center(request):
                 messages.success(request, f"Settlement {settlement.settlement_no} updated to {status}.")
                 return redirect("operations_center")
 
+            if form_type == "dispute_refund_submit":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "finance", "customer_service"),
+                )
+                case = OperationCase.objects.select_related("merchant", "customer").get(
+                    id=request.POST.get("case_id")
+                )
+                merchant = case.merchant
+                if merchant is None:
+                    raise ValidationError("Selected case has no merchant.")
+                amount = _parse_amount(request.POST.get("amount"))
+                currency = _normalize_currency(request.POST.get("currency"))
+                source_event_id = request.POST.get("source_cashflow_event_id")
+                source_event = (
+                    MerchantCashflowEvent.objects.filter(id=source_event_id).first()
+                    if source_event_id
+                    else None
+                )
+                refund = DisputeRefundRequest.objects.create(
+                    case=case,
+                    merchant=merchant,
+                    customer=case.customer,
+                    amount=amount,
+                    currency=currency,
+                    reason=(request.POST.get("reason") or "").strip(),
+                    maker=request.user,
+                    maker_note=(request.POST.get("maker_note") or "").strip(),
+                    source_cashflow_event=source_event,
+                )
+                case.case_type = OperationCase.TYPE_REFUND
+                case.status = OperationCase.STATUS_IN_PROGRESS
+                case.save(update_fields=["case_type", "status", "updated_at"])
+                _audit(
+                    request,
+                    "dispute_refund.submit",
+                    target_type="DisputeRefundRequest",
+                    target_id=str(refund.id),
+                    metadata={"case_no": case.case_no, "merchant_code": merchant.code},
+                )
+                messages.success(request, f"Refund request #{refund.id} submitted for checker decision.")
+                return redirect("operations_center")
+
+            if form_type == "dispute_refund_decision":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk"),
+                    perms=("wallets_demo.change_disputerefundrequest",),
+                )
+                refund = DisputeRefundRequest.objects.select_related(
+                    "merchant", "customer", "case"
+                ).get(id=request.POST.get("refund_request_id"))
+                if refund.status != DisputeRefundRequest.STATUS_PENDING:
+                    raise ValidationError("Refund request is not pending.")
+                decision = (request.POST.get("decision") or "").strip().lower()
+                checker_note = (request.POST.get("checker_note") or "").strip()
+                if decision not in {"approve", "reject"}:
+                    raise ValidationError("Invalid refund decision.")
+                if decision == "reject":
+                    refund.status = DisputeRefundRequest.STATUS_REJECTED
+                    refund.checker = request.user
+                    refund.checker_note = checker_note
+                    refund.decided_at = timezone.now()
+                    refund.save(update_fields=["status", "checker", "checker_note", "decided_at"])
+                    refund.case.status = OperationCase.STATUS_ESCALATED
+                    refund.case.save(update_fields=["status", "updated_at"])
+                    messages.success(request, f"Refund request #{refund.id} rejected.")
+                    return redirect("operations_center")
+
+                wallet_service = get_wallet_service()
+                merchant_wallet = _merchant_wallet_for_currency(refund.merchant, refund.currency)
+                customer_wallet = _wallet_for_currency(refund.customer, refund.currency)
+                try:
+                    with transaction.atomic():
+                        wallet_service.withdraw(
+                            merchant_wallet,
+                            refund.amount,
+                            meta={"type": "refund", "refund_request_id": refund.id},
+                        )
+                        wallet_service.deposit(
+                            customer_wallet,
+                            refund.amount,
+                            meta={"type": "refund", "refund_request_id": refund.id},
+                        )
+                        executed_event = MerchantCashflowEvent.objects.create(
+                            merchant=refund.merchant,
+                            flow_type=FLOW_B2C,
+                            amount=refund.amount,
+                            fee_amount=Decimal("0.00"),
+                            net_amount=refund.amount,
+                            currency=refund.currency,
+                            to_user=refund.customer,
+                            reference=f"REFUND-{refund.id}",
+                            note=f"Refund for case {refund.case.case_no}",
+                            created_by=request.user,
+                        )
+                        refund.status = DisputeRefundRequest.STATUS_EXECUTED
+                        refund.checker = request.user
+                        refund.checker_note = checker_note
+                        refund.decided_at = timezone.now()
+                        refund.executed_event = executed_event
+                        refund.error_message = ""
+                        refund.save(
+                            update_fields=[
+                                "status",
+                                "checker",
+                                "checker_note",
+                                "decided_at",
+                                "executed_event",
+                                "error_message",
+                            ]
+                        )
+                        refund.case.status = OperationCase.STATUS_RESOLVED
+                        refund.case.resolved_at = timezone.now()
+                        refund.case.save(update_fields=["status", "resolved_at", "updated_at"])
+                except Exception as exc:
+                    refund.status = DisputeRefundRequest.STATUS_FAILED
+                    refund.checker = request.user
+                    refund.checker_note = checker_note
+                    refund.decided_at = timezone.now()
+                    refund.error_message = str(exc)
+                    refund.save(
+                        update_fields=[
+                            "status",
+                            "checker",
+                            "checker_note",
+                            "decided_at",
+                            "error_message",
+                        ]
+                    )
+                    raise
+                _audit(
+                    request,
+                    "dispute_refund.approve",
+                    target_type="DisputeRefundRequest",
+                    target_id=str(refund.id),
+                    metadata={"case_no": refund.case.case_no},
+                )
+                messages.success(request, f"Refund request #{refund.id} approved and executed.")
+                return redirect("operations_center")
+
+            if form_type == "settlement_payout_submit":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "treasury"),
+                )
+                settlement = MerchantSettlementRecord.objects.select_related("merchant").get(
+                    id=request.POST.get("settlement_id")
+                )
+                if settlement.status not in {
+                    MerchantSettlementRecord.STATUS_POSTED,
+                    MerchantSettlementRecord.STATUS_PAID,
+                }:
+                    raise ValidationError("Settlement must be at least POSTED before payout.")
+                payout, _created = SettlementPayout.objects.get_or_create(
+                    settlement=settlement,
+                    defaults={
+                        "payout_reference": _new_payout_ref(),
+                        "payout_channel": (request.POST.get("payout_channel") or "bank_transfer").strip(),
+                        "destination_account": (request.POST.get("destination_account") or "").strip(),
+                        "amount": settlement.net_amount,
+                        "currency": settlement.currency,
+                        "initiated_by": request.user,
+                    },
+                )
+                payout.destination_account = (
+                    request.POST.get("destination_account") or payout.destination_account
+                ).strip()
+                payout.payout_channel = (
+                    request.POST.get("payout_channel") or payout.payout_channel
+                ).strip()
+                payout.status = SettlementPayout.STATUS_PENDING
+                payout.provider_response = {}
+                payout.save(
+                    update_fields=[
+                        "destination_account",
+                        "payout_channel",
+                        "status",
+                        "provider_response",
+                        "updated_at",
+                    ]
+                )
+                _audit(
+                    request,
+                    "settlement_payout.submit",
+                    target_type="SettlementPayout",
+                    target_id=str(payout.id),
+                    metadata={"settlement_no": settlement.settlement_no},
+                )
+                messages.success(request, f"Payout {payout.payout_reference} submitted for approval.")
+                return redirect("operations_center")
+
+            if form_type == "settlement_payout_decision":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk"),
+                    perms=("wallets_demo.change_settlementpayout",),
+                )
+                payout = SettlementPayout.objects.select_related("settlement").get(
+                    id=request.POST.get("payout_id")
+                )
+                decision = (request.POST.get("decision") or "").strip().lower()
+                if payout.status not in {
+                    SettlementPayout.STATUS_PENDING,
+                    SettlementPayout.STATUS_SENT,
+                }:
+                    raise ValidationError("Payout is not in actionable status.")
+                if decision not in {"send", "settle", "fail"}:
+                    raise ValidationError("Invalid payout decision.")
+                now = timezone.now()
+                if decision == "send":
+                    payout.status = SettlementPayout.STATUS_SENT
+                    payout.sent_at = now
+                    payout.approved_by = request.user
+                    payout.approved_at = now
+                    payout.provider_response = {"status": "sent", "at": now.isoformat()}
+                elif decision == "settle":
+                    payout.status = SettlementPayout.STATUS_SETTLED
+                    payout.sent_at = payout.sent_at or now
+                    payout.settled_at = now
+                    payout.approved_by = request.user
+                    payout.approved_at = payout.approved_at or now
+                    payout.provider_response = {"status": "settled", "at": now.isoformat()}
+                    settlement = payout.settlement
+                    settlement.status = MerchantSettlementRecord.STATUS_PAID
+                    settlement.approved_by = request.user
+                    settlement.approved_at = now
+                    settlement.save(
+                        update_fields=["status", "approved_by", "approved_at", "updated_at"]
+                    )
+                else:
+                    payout.status = SettlementPayout.STATUS_FAILED
+                    payout.approved_by = request.user
+                    payout.approved_at = now
+                    payout.provider_response = {"status": "failed", "at": now.isoformat()}
+                payout.save(
+                    update_fields=[
+                        "status",
+                        "sent_at",
+                        "settled_at",
+                        "approved_by",
+                        "approved_at",
+                        "provider_response",
+                        "updated_at",
+                    ]
+                )
+                _audit(
+                    request,
+                    "settlement_payout.decision",
+                    target_type="SettlementPayout",
+                    target_id=str(payout.id),
+                    metadata={"decision": decision},
+                )
+                messages.success(request, f"Payout {payout.payout_reference} updated to {payout.status}.")
+                return redirect("operations_center")
+
+            if form_type == "reconciliation_run_create":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "risk", "operation"),
+                )
+                currency = _normalize_currency(request.POST.get("currency"))
+                period_start = _parse_iso_date(
+                    request.POST.get("period_start"),
+                    default=timezone.localdate() - timedelta(days=1),
+                )
+                period_end = _parse_iso_date(
+                    request.POST.get("period_end"),
+                    default=timezone.localdate(),
+                )
+                if period_start > period_end:
+                    raise ValidationError("Reconciliation start date cannot be after end date.")
+                internal_qs = MerchantCashflowEvent.objects.filter(
+                    currency=currency,
+                    created_at__date__gte=period_start,
+                    created_at__date__lte=period_end,
+                    settled_at__isnull=False,
+                )
+                internal_count = internal_qs.count()
+                internal_amount = (
+                    internal_qs.aggregate(total=models.Sum("net_amount")).get("total")
+                    or Decimal("0.00")
+                )
+                external_count = int(request.POST.get("external_count") or 0)
+                external_amount = Decimal(request.POST.get("external_amount") or "0")
+                run = ReconciliationRun.objects.create(
+                    source=(request.POST.get("source") or "internal_vs_settlement").strip(),
+                    run_no=_new_recon_no(),
+                    currency=currency,
+                    period_start=period_start,
+                    period_end=period_end,
+                    internal_count=internal_count,
+                    internal_amount=internal_amount,
+                    external_count=external_count,
+                    external_amount=external_amount,
+                    delta_count=internal_count - external_count,
+                    delta_amount=(internal_amount - external_amount).quantize(Decimal("0.01")),
+                    status=ReconciliationRun.STATUS_COMPLETED,
+                    created_by=request.user,
+                )
+                if run.delta_count != 0 or run.delta_amount != Decimal("0.00"):
+                    ReconciliationBreak.objects.create(
+                        run=run,
+                        issue_type="summary_mismatch",
+                        expected_amount=run.internal_amount,
+                        actual_amount=run.external_amount,
+                        delta_amount=run.delta_amount,
+                        note=f"Count delta {run.delta_count}",
+                        status=ReconciliationBreak.STATUS_OPEN,
+                        assigned_to=request.user,
+                        created_by=request.user,
+                    )
+                _audit(
+                    request,
+                    "reconciliation.run.create",
+                    target_type="ReconciliationRun",
+                    target_id=str(run.id),
+                    metadata={"run_no": run.run_no},
+                )
+                messages.success(request, f"Reconciliation run {run.run_no} completed.")
+                return redirect("operations_center")
+
+            if form_type == "reconciliation_break_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "risk", "finance", "operation"),
+                )
+                recon_break = ReconciliationBreak.objects.get(id=request.POST.get("break_id"))
+                status = (request.POST.get("status") or "").strip().lower()
+                if status not in {
+                    ReconciliationBreak.STATUS_OPEN,
+                    ReconciliationBreak.STATUS_IN_REVIEW,
+                    ReconciliationBreak.STATUS_RESOLVED,
+                }:
+                    raise ValidationError("Invalid reconciliation break status.")
+                recon_break.status = status
+                recon_break.note = (request.POST.get("note") or recon_break.note).strip()
+                assigned_to_id = request.POST.get("assigned_to")
+                recon_break.assigned_to = (
+                    User.objects.filter(id=assigned_to_id).first() if assigned_to_id else recon_break.assigned_to
+                )
+                if status == ReconciliationBreak.STATUS_RESOLVED:
+                    recon_break.resolved_by = request.user
+                    recon_break.resolved_at = timezone.now()
+                recon_break.save(
+                    update_fields=[
+                        "status",
+                        "note",
+                        "assigned_to",
+                        "resolved_by",
+                        "resolved_at",
+                        "updated_at",
+                    ]
+                )
+                _audit(
+                    request,
+                    "reconciliation.break.update",
+                    target_type="ReconciliationBreak",
+                    target_id=str(recon_break.id),
+                    metadata={"status": status},
+                )
+                messages.success(request, f"Reconciliation break #{recon_break.id} updated.")
+                return redirect("operations_center")
+
             if form_type == "case_create":
                 _require_role_or_perm(request.user, roles=operation_roles)
                 customer = User.objects.get(id=request.POST.get("case_customer_id"))
@@ -1977,6 +2353,18 @@ def operations_center(request):
     settlements = MerchantSettlementRecord.objects.select_related(
         "merchant", "created_by", "approved_by"
     ).order_by("-created_at")[:100]
+    refund_requests = DisputeRefundRequest.objects.select_related(
+        "case", "merchant", "customer", "maker", "checker"
+    ).order_by("-created_at")[:100]
+    payouts = SettlementPayout.objects.select_related(
+        "settlement", "settlement__merchant", "initiated_by", "approved_by"
+    ).order_by("-created_at")[:100]
+    reconciliation_runs = ReconciliationRun.objects.select_related(
+        "created_by"
+    ).order_by("-created_at")[:100]
+    reconciliation_breaks = ReconciliationBreak.objects.select_related(
+        "run", "merchant", "assigned_to", "resolved_by"
+    ).order_by("-created_at")[:100]
     return render(
         request,
         "wallets_demo/operations_center.html",
@@ -1990,6 +2378,10 @@ def operations_center(request):
             "risk_profiles": risk_profiles,
             "api_credentials": api_credentials,
             "settlements": settlements,
+            "refund_requests": refund_requests,
+            "payouts": payouts,
+            "reconciliation_runs": reconciliation_runs,
+            "reconciliation_breaks": reconciliation_breaks,
             "users": User.objects.order_by("username")[:300],
             "supported_currencies": _supported_currencies(),
             "flow_choices": FLOW_CHOICES,

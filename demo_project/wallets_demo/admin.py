@@ -7,6 +7,7 @@ from .models import (
     BackofficeAuditLog,
     ChartOfAccount,
     CustomerCIF,
+    DisputeRefundRequest,
     FxRate,
     JournalEntry,
     JournalLine,
@@ -21,6 +22,9 @@ from .models import (
     MerchantRiskProfile,
     MerchantSettlementRecord,
     MerchantWalletCapability,
+    ReconciliationBreak,
+    ReconciliationRun,
+    SettlementPayout,
     OperationCase,
     OperationCaseNote,
     TreasuryAccount,
@@ -287,6 +291,77 @@ class MerchantSettlementRecordAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "currency", "period_start", "period_end", "created_at")
     search_fields = ("settlement_no", "merchant__code")
+
+
+@admin.register(DisputeRefundRequest)
+class DisputeRefundRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "case",
+        "merchant",
+        "customer",
+        "amount",
+        "currency",
+        "status",
+        "maker",
+        "checker",
+        "created_at",
+    )
+    list_filter = ("status", "currency", "created_at")
+    search_fields = ("case__case_no", "merchant__code", "customer__username", "reason")
+
+
+@admin.register(SettlementPayout)
+class SettlementPayoutAdmin(admin.ModelAdmin):
+    list_display = (
+        "payout_reference",
+        "settlement",
+        "payout_channel",
+        "amount",
+        "currency",
+        "status",
+        "initiated_by",
+        "approved_by",
+        "created_at",
+    )
+    list_filter = ("status", "currency", "payout_channel", "created_at")
+    search_fields = ("payout_reference", "settlement__settlement_no", "settlement__merchant__code")
+
+
+@admin.register(ReconciliationRun)
+class ReconciliationRunAdmin(admin.ModelAdmin):
+    list_display = (
+        "run_no",
+        "source",
+        "currency",
+        "period_start",
+        "period_end",
+        "internal_count",
+        "external_count",
+        "delta_count",
+        "delta_amount",
+        "status",
+        "created_at",
+    )
+    list_filter = ("status", "source", "currency", "created_at")
+    search_fields = ("run_no",)
+
+
+@admin.register(ReconciliationBreak)
+class ReconciliationBreakAdmin(admin.ModelAdmin):
+    list_display = (
+        "run",
+        "merchant",
+        "reference",
+        "issue_type",
+        "delta_amount",
+        "status",
+        "assigned_to",
+        "resolved_by",
+        "created_at",
+    )
+    list_filter = ("status", "issue_type", "created_at")
+    search_fields = ("run__run_no", "merchant__code", "reference", "note")
 
 
 @admin.register(OperationCase)
