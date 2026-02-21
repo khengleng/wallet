@@ -31,7 +31,9 @@ This is a demonstration of the `dj-wallet` virtual wallet system for Django.
    - `DEBUG=False`
    - `ALLOWED_HOSTS=<your-railway-domain>`
    - `CSRF_TRUSTED_ORIGINS=https://<your-railway-domain>`
-4. Deploy from repo root (`Procfile` runs migrations + collectstatic + gunicorn).
+4. Deploy from repo root (`Procfile` runs collectstatic + gunicorn).
+5. Run migrations as a one-off command after deploy:
+   - `cd demo_project && python manage.py migrate --noinput`
 
 ## Concurrency Notes
 - Database: PostgreSQL with connection pooling (PgBouncer recommended).

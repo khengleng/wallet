@@ -223,6 +223,9 @@ This repository now includes deployment and architecture scaffolding for high-sc
 - Production environment template: `.env.production.example`
 - Local multi-service infrastructure (PostgreSQL/Redis/RabbitMQ): `infra/docker-compose.microservices.yml`
 - Kubernetes deployment/HPA/PDB baseline: `infra/k8s/wallet-api.yaml`
+- Railway split deployment:
+  - Django web service root: repository root (uses `Procfile`)
+  - Ledger service root: `services/wallet_ledger_service` (uses local `nixpacks.toml`)
 
 Production defaults enforce:
 - explicit `SECRET_KEY`
