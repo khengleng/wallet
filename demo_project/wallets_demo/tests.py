@@ -1,7 +1,15 @@
 from django.test import Client, TestCase
 from django.urls import reverse
 
-from .models import ApprovalRequest, TreasuryAccount, TreasuryTransferRequest, User
+from .models import (
+    ApprovalRequest,
+    ChartOfAccount,
+    JournalEntry,
+    JournalLine,
+    TreasuryAccount,
+    TreasuryTransferRequest,
+    User,
+)
 from .rbac import assign_roles, seed_role_groups
 
 
@@ -128,3 +136,49 @@ class RBACManagementViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.staff.refresh_from_db()
         self.assertCountEqual(self.staff.role_names, ["finance", "operation"])
+
+
+class AccountingWorkflowTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.finance = User.objects.create_user(username="finance_user", password="pass12345")
+        self.checker = User.objects.create_user(username="checker_user", password="pass12345")
+        assign_roles(self.finance, ["finance"])
+        assign_roles(self.checker, ["admin"])
+        self.cash = ChartOfAccount.objects.create(
+            code="1010",
+            name="Cash and Bank",
+            account_type=ChartOfAccount.TYPE_ASSET,
+            currency="USD",
+        )
+        self.liability = ChartOfAccount.objects.create(
+            code="2010",
+            name="Customer Wallet Liability",
+            account_type=ChartOfAccount.TYPE_LIABILITY,
+            currency="USD",
+        )
+
+    def test_balanced_entry_can_be_posted(self):
+        entry = JournalEntry.objects.create(
+            entry_no="JE-TEST-1",
+            created_by=self.finance,
+            description="Initial load",
+        )
+        JournalLine.objects.create(entry=entry, account=self.cash, debit="100.00", credit="0")
+        JournalLine.objects.create(entry=entry, account=self.liability, debit="0", credit="100.00")
+
+        entry.post(self.checker)
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, JournalEntry.STATUS_POSTED)
+
+    def test_unbalanced_entry_cannot_be_posted(self):
+        entry = JournalEntry.objects.create(
+            entry_no="JE-TEST-2",
+            created_by=self.finance,
+            description="Bad entry",
+        )
+        JournalLine.objects.create(entry=entry, account=self.cash, debit="120.00", credit="0")
+        JournalLine.objects.create(entry=entry, account=self.liability, debit="0", credit="100.00")
+
+        with self.assertRaises(Exception):
+            entry.post(self.checker)

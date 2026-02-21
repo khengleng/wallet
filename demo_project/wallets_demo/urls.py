@@ -6,6 +6,12 @@ urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('backoffice/', views.backoffice, name='backoffice'),
     path('backoffice/rbac/', views.rbac_management, name='rbac_management'),
+    path('backoffice/accounting/', views.accounting_dashboard, name='accounting_dashboard'),
+    path(
+        'backoffice/accounting/entries/<int:entry_id>/post/',
+        views.accounting_post_entry,
+        name='accounting_post_entry',
+    ),
     path('backoffice/treasury/', views.treasury_dashboard, name='treasury_dashboard'),
     path(
         'backoffice/treasury/<int:request_id>/decision/',

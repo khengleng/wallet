@@ -5,12 +5,23 @@ from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.utils import timezone
 from django.shortcuts import get_object_or_404, redirect, render
 
 from dj_wallet.models import Transaction, Wallet
 
-from .models import ApprovalRequest, TreasuryAccount, TreasuryTransferRequest, User
+from .models import (
+    ApprovalRequest,
+    ChartOfAccount,
+    JournalEntry,
+    JournalLine,
+    TreasuryAccount,
+    TreasuryTransferRequest,
+    User,
+)
 from .rbac import (
+    ACCOUNTING_CHECKER_ROLES,
+    ACCOUNTING_ROLES,
     BACKOFFICE_ROLES,
     CHECKER_ROLES,
     MAKER_ROLES,
@@ -101,6 +112,7 @@ def backoffice(request):
         "maker_roles": MAKER_ROLES,
         "checker_roles": CHECKER_ROLES,
         "can_manage_rbac": user_has_any_role(request.user, RBAC_ADMIN_ROLES),
+        "can_access_accounting": user_has_any_role(request.user, ACCOUNTING_ROLES),
     }
     return render(request, "wallets_demo/backoffice.html", context)
 
@@ -199,6 +211,154 @@ def treasury_decision(request, request_id: int):
     except Exception as exc:
         messages.error(request, f"Treasury decision failed: {exc}")
     return redirect("treasury_dashboard")
+
+
+def _new_entry_no() -> str:
+    return f"JE-{timezone.now().strftime('%Y%m%d%H%M%S%f')}"
+
+
+@login_required
+def accounting_dashboard(request):
+    if not user_has_any_role(request.user, ACCOUNTING_ROLES):
+        raise PermissionDenied("You do not have access to accounting.")
+
+    if request.method == "POST":
+        form_type = request.POST.get("form_type")
+        if form_type == "coa_create":
+            try:
+                if not user_has_any_role(request.user, ("finance", "treasury", "admin", "super_admin")):
+                    raise PermissionDenied("You do not have permission to manage chart of accounts.")
+                code = (request.POST.get("code") or "").strip().upper()
+                name = (request.POST.get("name") or "").strip()
+                account_type = (request.POST.get("account_type") or "").strip()
+                currency = (request.POST.get("currency") or "USD").strip().upper()
+                if not code or not name or not account_type:
+                    raise ValidationError("Code, name and account type are required.")
+                ChartOfAccount.objects.create(
+                    code=code,
+                    name=name,
+                    account_type=account_type,
+                    currency=currency,
+                )
+                messages.success(request, f"Chart of account {code} created.")
+                return redirect("accounting_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Unable to create chart account: {exc}")
+
+        if form_type == "journal_create":
+            try:
+                reference = (request.POST.get("reference") or "").strip()
+                description = (request.POST.get("description") or "").strip()
+                account_ids = request.POST.getlist("line_account")
+                sides = request.POST.getlist("line_side")
+                amounts = request.POST.getlist("line_amount")
+                memos = request.POST.getlist("line_memo")
+
+                parsed_lines: list[tuple[ChartOfAccount, Decimal, Decimal, str]] = []
+                for idx, account_id in enumerate(account_ids):
+                    if not account_id:
+                        continue
+                    side = (sides[idx] if idx < len(sides) else "").lower()
+                    amount_raw = amounts[idx] if idx < len(amounts) else ""
+                    memo = memos[idx] if idx < len(memos) else ""
+                    amount = _parse_amount(amount_raw)
+                    account = ChartOfAccount.objects.get(id=account_id, is_active=True)
+                    if side == "debit":
+                        parsed_lines.append((account, amount, Decimal("0"), memo))
+                    elif side == "credit":
+                        parsed_lines.append((account, Decimal("0"), amount, memo))
+                    else:
+                        raise ValidationError("Line side must be debit or credit.")
+
+                if len(parsed_lines) < 2:
+                    raise ValidationError("Journal entry needs at least 2 lines.")
+
+                with transaction.atomic():
+                    entry = JournalEntry.objects.create(
+                        entry_no=_new_entry_no(),
+                        reference=reference,
+                        description=description,
+                        created_by=request.user,
+                    )
+                    for account, debit, credit, memo in parsed_lines:
+                        line = JournalLine(
+                            entry=entry,
+                            account=account,
+                            debit=debit,
+                            credit=credit,
+                            memo=memo,
+                        )
+                        line.full_clean()
+                        line.save()
+                    if not entry.is_balanced():
+                        raise ValidationError("Journal is not balanced (debit must equal credit).")
+
+                    if request.POST.get("post_now") == "on" and user_has_any_role(
+                        request.user, ACCOUNTING_CHECKER_ROLES
+                    ):
+                        entry.post(request.user)
+
+                messages.success(request, f"Journal entry {entry.entry_no} saved.")
+                return redirect("accounting_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Unable to save journal entry: {exc}")
+
+    accounts = ChartOfAccount.objects.order_by("code")
+    drafts = JournalEntry.objects.filter(status=JournalEntry.STATUS_DRAFT).order_by("-created_at")[:30]
+    posted_entries = JournalEntry.objects.filter(status=JournalEntry.STATUS_POSTED).order_by("-posted_at")[:30]
+
+    totals: dict[int, dict[str, Decimal]] = {}
+    for line in JournalLine.objects.filter(entry__status=JournalEntry.STATUS_POSTED).select_related("account"):
+        store = totals.setdefault(
+            line.account_id,
+            {
+                "account": line.account,
+                "debit": Decimal("0"),
+                "credit": Decimal("0"),
+            },
+        )
+        store["debit"] += line.debit
+        store["credit"] += line.credit
+
+    trial_balance = []
+    for row in totals.values():
+        net = row["debit"] - row["credit"]
+        trial_balance.append(
+            {
+                "account": row["account"],
+                "debit": row["debit"],
+                "credit": row["credit"],
+                "net": net,
+            }
+        )
+    trial_balance.sort(key=lambda item: item["account"].code)
+
+    return render(
+        request,
+        "wallets_demo/accounting.html",
+        {
+            "accounts": accounts,
+            "draft_entries": drafts,
+            "posted_entries": posted_entries,
+            "trial_balance": trial_balance,
+            "can_post_entries": user_has_any_role(request.user, ACCOUNTING_CHECKER_ROLES),
+        },
+    )
+
+
+@login_required
+def accounting_post_entry(request, entry_id: int):
+    if request.method != "POST":
+        return redirect("accounting_dashboard")
+    if not user_has_any_role(request.user, ACCOUNTING_CHECKER_ROLES):
+        raise PermissionDenied("You do not have permission to post entries.")
+    entry = get_object_or_404(JournalEntry, id=entry_id)
+    try:
+        entry.post(request.user)
+        messages.success(request, f"Entry {entry.entry_no} posted.")
+    except Exception as exc:
+        messages.error(request, f"Unable to post entry: {exc}")
+    return redirect("accounting_dashboard")
 
 
 @login_required

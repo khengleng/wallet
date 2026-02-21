@@ -1,7 +1,15 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
-from .models import ApprovalRequest, TreasuryAccount, TreasuryTransferRequest, User
+from .models import (
+    ApprovalRequest,
+    ChartOfAccount,
+    JournalEntry,
+    JournalLine,
+    TreasuryAccount,
+    TreasuryTransferRequest,
+    User,
+)
 
 
 @admin.register(User)
@@ -53,3 +61,23 @@ class TreasuryTransferRequestAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "created_at")
     search_fields = ("maker__username", "checker__username", "reason")
+
+
+class JournalLineInline(admin.TabularInline):
+    model = JournalLine
+    extra = 0
+
+
+@admin.register(ChartOfAccount)
+class ChartOfAccountAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "account_type", "currency", "is_active")
+    list_filter = ("account_type", "currency", "is_active")
+    search_fields = ("code", "name")
+
+
+@admin.register(JournalEntry)
+class JournalEntryAdmin(admin.ModelAdmin):
+    list_display = ("entry_no", "status", "reference", "created_by", "posted_by", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("entry_no", "reference", "description")
+    inlines = [JournalLineInline]

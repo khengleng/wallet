@@ -7,6 +7,9 @@
     <h2>Backoffice Console</h2>
     <p class="text-muted">Roles: {{ role_names|join:", " }}</p>
     <p><a class="btn btn-outline" href="{% url 'treasury_dashboard' %}">Open Treasury Console</a></p>
+    {% if can_access_accounting %}
+    <p><a class="btn btn-outline" href="{% url 'accounting_dashboard' %}">Open Accounting Console</a></p>
+    {% endif %}
     {% if can_manage_rbac %}
     <p><a class="btn btn-outline" href="{% url 'rbac_management' %}">Manage RBAC Roles</a></p>
     {% endif %}

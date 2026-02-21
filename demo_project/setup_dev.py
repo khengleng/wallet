@@ -4,7 +4,7 @@ import django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'demo_project_app.settings')
 django.setup()
 
-from wallets_demo.models import TreasuryAccount, User
+from wallets_demo.models import ChartOfAccount, TreasuryAccount, User
 from dj_wallet.models import Wallet
 from wallets_demo.rbac import (
     DEFAULT_DEMO_ROLE_ASSIGNMENTS,
@@ -50,6 +50,27 @@ def setup():
         )
         if created:
             print(f"Treasury account created: {name} ({currency}) balance={balance}")
+
+    coa_defaults = [
+        ("1010", "Cash and Bank", "asset"),
+        ("1020", "Treasury Float", "asset"),
+        ("2010", "Customer Wallet Liability", "liability"),
+        ("3010", "Owner Equity", "equity"),
+        ("4010", "Platform Fee Revenue", "revenue"),
+        ("5010", "Operations Expense", "expense"),
+    ]
+    for code, name, account_type in coa_defaults:
+        coa, created = ChartOfAccount.objects.get_or_create(
+            code=code,
+            defaults={
+                "name": name,
+                "account_type": account_type,
+                "currency": "USD",
+                "is_active": True,
+            },
+        )
+        if created:
+            print(f"COA created: {coa.code} {coa.name} ({coa.account_type})")
 
 if __name__ == '__main__':
     setup()

@@ -296,3 +296,117 @@ class TreasuryTransferRequest(models.Model):
         self.checker_note = checker_note
         self.decided_at = timezone.now()
         self.save(update_fields=["status", "checker", "checker_note", "decided_at"])
+
+
+class ChartOfAccount(models.Model):
+    TYPE_ASSET = "asset"
+    TYPE_LIABILITY = "liability"
+    TYPE_EQUITY = "equity"
+    TYPE_REVENUE = "revenue"
+    TYPE_EXPENSE = "expense"
+    ACCOUNT_TYPE_CHOICES = (
+        (TYPE_ASSET, "Asset"),
+        (TYPE_LIABILITY, "Liability"),
+        (TYPE_EQUITY, "Equity"),
+        (TYPE_REVENUE, "Revenue"),
+        (TYPE_EXPENSE, "Expense"),
+    )
+
+    code = models.CharField(max_length=24, unique=True)
+    name = models.CharField(max_length=128)
+    account_type = models.CharField(max_length=16, choices=ACCOUNT_TYPE_CHOICES)
+    currency = models.CharField(max_length=12, default="USD")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("code",)
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class JournalEntry(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_POSTED = "posted"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_POSTED, "Posted"),
+    )
+
+    entry_no = models.CharField(max_length=40, unique=True)
+    reference = models.CharField(max_length=128, blank=True, default="")
+    description = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_journal_entries"
+    )
+    posted_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="posted_journal_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    posted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.entry_no} ({self.status})"
+
+    @property
+    def total_debit(self) -> Decimal:
+        return sum((line.debit for line in self.lines.all()), Decimal("0"))
+
+    @property
+    def total_credit(self) -> Decimal:
+        return sum((line.credit for line in self.lines.all()), Decimal("0"))
+
+    def is_balanced(self) -> bool:
+        return self.total_debit == self.total_credit and self.total_debit > Decimal("0")
+
+    def post(self, actor: User):
+        if self.status != self.STATUS_DRAFT:
+            raise ValidationError("Only draft journal entries can be posted.")
+        if not self.lines.exists():
+            raise ValidationError("Cannot post empty journal entry.")
+        if not self.is_balanced():
+            raise ValidationError("Journal entry is not balanced.")
+
+        self.status = self.STATUS_POSTED
+        self.posted_by = actor
+        self.posted_at = timezone.now()
+        self.save(update_fields=["status", "posted_by", "posted_at"])
+
+
+class JournalLine(models.Model):
+    entry = models.ForeignKey(
+        JournalEntry, on_delete=models.CASCADE, related_name="lines"
+    )
+    account = models.ForeignKey(
+        ChartOfAccount, on_delete=models.PROTECT, related_name="journal_lines"
+    )
+    debit = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    credit = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    memo = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("id",)
+
+    def clean(self):
+        if self.debit < Decimal("0") or self.credit < Decimal("0"):
+            raise ValidationError("Debit/Credit cannot be negative.")
+        if self.debit > Decimal("0") and self.credit > Decimal("0"):
+            raise ValidationError("Line cannot have both debit and credit.")
+        if self.debit == Decimal("0") and self.credit == Decimal("0"):
+            raise ValidationError("Line must contain debit or credit amount.")
+
+    def __str__(self):
+        side = "DR" if self.debit > Decimal("0") else "CR"
+        amount = self.debit if self.debit > Decimal("0") else self.credit
+        return f"{self.entry.entry_no} {self.account.code} {side} {amount}"
