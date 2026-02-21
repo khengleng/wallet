@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
 from .models import (
+    AnalyticsEvent,
     ApprovalRequest,
     BackofficeAuditLog,
     ChartOfAccount,
@@ -232,3 +233,37 @@ class OperationCaseNoteAdmin(admin.ModelAdmin):
     list_display = ("case", "created_by", "is_internal", "created_at")
     list_filter = ("is_internal", "created_at")
     search_fields = ("case__case_no", "created_by__username", "note")
+
+
+@admin.register(AnalyticsEvent)
+class AnalyticsEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at",
+        "source",
+        "event_name",
+        "user",
+        "external_id",
+        "sent_to_clevertap",
+    )
+    list_filter = ("source", "event_name", "sent_to_clevertap", "created_at")
+    search_fields = ("event_name", "user__username", "external_id", "session_id")
+    readonly_fields = (
+        "source",
+        "event_name",
+        "user",
+        "session_id",
+        "external_id",
+        "properties",
+        "sent_to_clevertap",
+        "clevertap_error",
+        "created_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

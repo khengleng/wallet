@@ -221,6 +221,12 @@ def _parse_keycloak_role_group_map() -> dict[str, str]:
 KEYCLOAK_ROLE_GROUP_MAP = _parse_keycloak_role_group_map()
 AUDIT_EXPORT_HMAC_SECRET = os.getenv("AUDIT_EXPORT_HMAC_SECRET", SECRET_KEY or "").strip()
 AUDIT_EXPORT_MAX_DAYS = int(os.getenv("AUDIT_EXPORT_MAX_DAYS", "90"))
+CLEVERTAP_ENABLED = os.getenv("CLEVERTAP_ENABLED", "false").lower() == "true"
+CLEVERTAP_ACCOUNT_ID = os.getenv("CLEVERTAP_ACCOUNT_ID", "").strip()
+CLEVERTAP_PASSCODE = os.getenv("CLEVERTAP_PASSCODE", "").strip()
+CLEVERTAP_REGION = os.getenv("CLEVERTAP_REGION", "us1").strip()
+CLEVERTAP_EVENT_ENDPOINT = os.getenv("CLEVERTAP_EVENT_ENDPOINT", "").strip()
+CLEVERTAP_TIMEOUT_SECONDS = float(os.getenv("CLEVERTAP_TIMEOUT_SECONDS", "5"))
 
 if REDIS_URL:
     CACHES = {

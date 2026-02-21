@@ -25,6 +25,7 @@ from dj_wallet.models import Transaction, Wallet
 from dj_wallet.utils import get_exchange_service, get_wallet_service
 
 from .fx_sync import sync_external_fx_rates
+from .analytics import track_event
 from .keycloak_auth import (
     decode_access_token_claims,
     next_introspection_deadline,
@@ -161,6 +162,36 @@ def _audit(
         user_agent=(request.META.get("HTTP_USER_AGENT", "") or "")[:255],
         metadata_json=metadata or {},
     )
+
+
+def _track(
+    request,
+    event_name: str,
+    *,
+    properties: dict | None = None,
+    user: User | None = None,
+    external_id: str = "",
+):
+    actor = user
+    if actor is None and getattr(request, "user", None) and request.user.is_authenticated:
+        actor = request.user
+    session_id = ""
+    try:
+        session_id = request.session.session_key or ""
+    except Exception:
+        session_id = ""
+    try:
+        track_event(
+            source="web",
+            event_name=event_name,
+            user=actor,
+            session_id=session_id,
+            external_id=external_id,
+            properties=properties or {},
+        )
+    except Exception:
+        # Analytics must not break user operations.
+        pass
 
 
 def _require_role_or_perm(
@@ -392,12 +423,25 @@ def portal_login(request):
         user = authenticate(request, username=username, password=password)
         if user is None:
             _register_failed_login(username, ip)
+            _track(
+                request,
+                "auth_login_failed",
+                properties={"auth_mode": "local", "username": username, "ip": ip},
+                external_id=username,
+            )
             messages.error(request, "Invalid username or password.")
             return render(request, "wallets_demo/login.html", {"auth_mode": "local"})
 
         _clear_login_lockout(username, ip)
         login(request, user)
         request.session.cycle_key()
+        _track(
+            request,
+            "auth_login_success",
+            properties={"auth_mode": "local", "wallet_type": user.wallet_type},
+            user=user,
+            external_id=user.username,
+        )
         return redirect("dashboard")
 
     return render(request, "wallets_demo/login.html", {"auth_mode": "local"})
@@ -438,6 +482,12 @@ def keycloak_callback(request):
         access_claims = decode_access_token_claims(access_token)
         sync_user_roles_from_keycloak_claims(user, access_claims)
     except Exception:
+        _track(
+            request,
+            "auth_login_failed",
+            properties={"auth_mode": "keycloak_oidc"},
+            external_id=str(request.GET.get("state", "") or ""),
+        )
         messages.error(request, "Keycloak sign-in failed. Please try again.")
         return redirect("login")
 
@@ -447,6 +497,13 @@ def keycloak_callback(request):
     request.session["oidc_id_token"] = token_payload.get("id_token", "")
     request.session["oidc_refresh_token"] = token_payload.get("refresh_token", "")
     request.session["oidc_next_introspection_at"] = next_introspection_deadline()
+    _track(
+        request,
+        "auth_login_success",
+        properties={"auth_mode": "keycloak_oidc", "wallet_type": user.wallet_type},
+        user=user,
+        external_id=user.username,
+    )
     return redirect("dashboard")
 
 
@@ -1111,6 +1168,15 @@ def operations_center(request):
                     target_id=str(merchant.id),
                     metadata={"code": merchant.code, "currency": settlement_currency},
                 )
+                _track(
+                    request,
+                    "merchant_created",
+                    properties={
+                        "merchant_code": merchant.code,
+                        "wallet_type": merchant.wallet_type,
+                        "settlement_currency": settlement_currency,
+                    },
+                )
                 messages.success(request, f"Merchant {merchant.code} created.")
                 return redirect("operations_center")
 
@@ -1159,6 +1225,15 @@ def operations_center(request):
                     target_id=str(merchant.id),
                     metadata={"code": merchant.code, "status": merchant.status},
                 )
+                _track(
+                    request,
+                    "merchant_updated",
+                    properties={
+                        "merchant_code": merchant.code,
+                        "status": merchant.status,
+                        "wallet_type": merchant.wallet_type,
+                    },
+                )
                 messages.success(request, f"Merchant {merchant.code} updated.")
                 return redirect("operations_center")
 
@@ -1188,6 +1263,15 @@ def operations_center(request):
                     target_id=str(case.id),
                     metadata={"case_no": case.case_no, "case_type": case.case_type},
                 )
+                _track(
+                    request,
+                    "ops_case_created",
+                    properties={
+                        "case_no": case.case_no,
+                        "case_type": case.case_type,
+                        "priority": case.priority,
+                    },
+                )
                 messages.success(request, f"Case {case.case_no} created.")
                 return redirect("operations_center")
 
@@ -1210,6 +1294,14 @@ def operations_center(request):
                     target_type="User",
                     target_id=str(target_user.id),
                     metadata={"wallet_type": wallet_type},
+                )
+                _track(
+                    request,
+                    "wallet_type_updated",
+                    properties={
+                        "target_user": target_user.username,
+                        "wallet_type": wallet_type,
+                    },
                 )
                 messages.success(
                     request,
@@ -1240,6 +1332,11 @@ def operations_center(request):
                     target_type="OperationCase",
                     target_id=str(case.id),
                     metadata={"status": case.status},
+                )
+                _track(
+                    request,
+                    "ops_case_updated",
+                    properties={"case_no": case.case_no, "status": case.status},
                 )
                 messages.success(request, f"Case {case.case_no} updated.")
                 return redirect("operations_center")
@@ -1312,6 +1409,17 @@ def operations_center(request):
                     target_type="Merchant",
                     target_id=str(merchant.id),
                     metadata={
+                        "event_type": event_type,
+                        "flow_type": flow_type,
+                        "points": str(points),
+                        "customer": customer.username,
+                    },
+                )
+                _track(
+                    request,
+                    "loyalty_event_created",
+                    properties={
+                        "merchant_code": merchant.code,
                         "event_type": event_type,
                         "flow_type": flow_type,
                         "points": str(points),
@@ -1437,6 +1545,17 @@ def operations_center(request):
                     target_type="Merchant",
                     target_id=str(merchant.id),
                     metadata={
+                        "flow_type": flow_type,
+                        "amount": str(amount),
+                        "currency": currency,
+                        "reference": reference,
+                    },
+                )
+                _track(
+                    request,
+                    "merchant_cashflow_executed",
+                    properties={
+                        "merchant_code": merchant.code,
                         "flow_type": flow_type,
                         "amount": str(amount),
                         "currency": currency,
@@ -1597,6 +1716,15 @@ def deposit(request):
                     request,
                     f"Deposit request #{approval_request.id} submitted for checker approval.",
                 )
+                _track(
+                    request,
+                    "wallet_deposit_requested",
+                    properties={
+                        "amount": str(amount),
+                        "currency": selected_currency,
+                        "approval_request_id": approval_request.id,
+                    },
+                )
                 return redirect("dashboard")
 
             with transaction.atomic():
@@ -1608,6 +1736,11 @@ def deposit(request):
                     meta={"description": description, "currency": selected_currency},
                 )
             messages.success(request, f"Successfully deposited {amount} {selected_currency}.")
+            _track(
+                request,
+                "wallet_deposit_success",
+                properties={"amount": str(amount), "currency": selected_currency},
+            )
             return redirect("dashboard")
         except ValidationError as exc:
             messages.error(request, str(exc))
@@ -1653,6 +1786,15 @@ def withdraw(request):
                     request,
                     f"Withdrawal request #{approval_request.id} submitted for checker approval.",
                 )
+                _track(
+                    request,
+                    "wallet_withdraw_requested",
+                    properties={
+                        "amount": str(amount),
+                        "currency": selected_currency,
+                        "approval_request_id": approval_request.id,
+                    },
+                )
                 return redirect("dashboard")
 
             with transaction.atomic():
@@ -1663,6 +1805,11 @@ def withdraw(request):
                     meta={"description": description, "currency": selected_currency},
                 )
             messages.success(request, f"Successfully withdrew {amount} {selected_currency}.")
+            _track(
+                request,
+                "wallet_withdraw_success",
+                properties={"amount": str(amount), "currency": selected_currency},
+            )
             return redirect("dashboard")
         except ValidationError as exc:
             messages.error(request, str(exc))
@@ -1724,6 +1871,16 @@ def transfer(request):
                     request,
                     f"Transfer request #{approval_request.id} submitted for checker approval.",
                 )
+                _track(
+                    request,
+                    "wallet_transfer_requested",
+                    properties={
+                        "amount": str(amount),
+                        "currency": selected_currency,
+                        "recipient": recipient.username,
+                        "approval_request_id": approval_request.id,
+                    },
+                )
                 return redirect("dashboard")
 
             with transaction.atomic():
@@ -1742,6 +1899,15 @@ def transfer(request):
             messages.success(
                 request,
                 f"Successfully transferred {amount} {selected_currency} to {recipient.username}.",
+            )
+            _track(
+                request,
+                "wallet_transfer_success",
+                properties={
+                    "amount": str(amount),
+                    "currency": selected_currency,
+                    "recipient": recipient.username,
+                },
             )
             return redirect("dashboard")
         except User.DoesNotExist:
@@ -1791,6 +1957,17 @@ def register(request):
                     wallet,
                     Decimal("100"),
                     meta={"description": "Welcome Bonus", "currency": base_currency},
+                )
+                _track(
+                    request,
+                    "user_registered",
+                    properties={
+                        "username": user.username,
+                        "wallet_type": user.wallet_type,
+                        "base_currency": base_currency,
+                    },
+                    user=user,
+                    external_id=user.username,
                 )
                 messages.success(
                     request,

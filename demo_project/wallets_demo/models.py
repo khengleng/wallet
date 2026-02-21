@@ -915,3 +915,36 @@ class OperationCaseNote(models.Model):
 
     def __str__(self):
         return f"{self.case.case_no} note by {self.created_by.username}"
+
+
+class AnalyticsEvent(models.Model):
+    SOURCE_WEB = "web"
+    SOURCE_API = "api"
+    SOURCE_MOBILE = "mobile"
+    SOURCE_CHOICES = (
+        (SOURCE_WEB, "Web"),
+        (SOURCE_API, "API"),
+        (SOURCE_MOBILE, "Mobile"),
+    )
+
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=SOURCE_WEB)
+    event_name = models.CharField(max_length=128, db_index=True)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="analytics_events",
+    )
+    session_id = models.CharField(max_length=64, blank=True, default="")
+    external_id = models.CharField(max_length=128, blank=True, default="")
+    properties = models.JSONField(default=dict, blank=True)
+    sent_to_clevertap = models.BooleanField(default=False)
+    clevertap_error = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.source}:{self.event_name}"
