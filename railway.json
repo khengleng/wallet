@@ -5,6 +5,7 @@
     "buildCommand": "cd demo_project && python manage.py collectstatic --noinput"
   },
   "deploy": {
+    "startCommand": "cd demo_project && python manage.py migrate --noinput && gunicorn demo_project_app.wsgi:application -c ../gunicorn.conf.py",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
   }
