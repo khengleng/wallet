@@ -1,0 +1,124 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}Backoffice - DJ Wallet{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Backoffice Console</h2>
+    <p class="text-muted">Roles: {{ role_names|join:", " }}</p>
+    <div class="flex gap-2 mt-4">
+        <span class="badge badge-info">Users: {{ total_users }}</span>
+        <span class="badge badge-info">Wallets: {{ total_wallets }}</span>
+        <span class="badge badge-danger">Pending Approvals: {{ total_pending_approvals }}</span>
+    </div>
+</div>
+
+<div class="card">
+    <h3>My Maker Requests</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Action</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Recipient</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for req in my_requests %}
+                <tr>
+                    <td>#{{ req.id }}</td>
+                    <td>{{ req.action }}</td>
+                    <td>${{ req.amount }}</td>
+                    <td>{{ req.status }}</td>
+                    <td>{{ req.source_user.username }}</td>
+                    <td>{% if req.recipient_user %}{{ req.recipient_user.username }}{% else %}-{% endif %}</td>
+                    <td>{{ req.created_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="7" class="text-muted" style="text-align:center;">No requests yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Checker Queue</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Maker</th>
+                <th>Action</th>
+                <th>Amount</th>
+                <th>Source</th>
+                <th>Recipient</th>
+                <th>Status</th>
+                <th>Decision</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for req in pending_approvals %}
+                <tr>
+                    <td>#{{ req.id }}</td>
+                    <td>{{ req.maker.username }}</td>
+                    <td>{{ req.action }}</td>
+                    <td>${{ req.amount }}</td>
+                    <td>{{ req.source_user.username }}</td>
+                    <td>{% if req.recipient_user %}{{ req.recipient_user.username }}{% else %}-{% endif %}</td>
+                    <td>{{ req.status }}</td>
+                    <td>
+                        <form method="post" action="{% url 'approval_decision' req.id %}" class="flex gap-2">
+                            {% csrf_token %}
+                            <input type="text" name="checker_note" placeholder="Note (optional)" />
+                            <button type="submit" class="btn btn-primary" name="decision" value="approve">Approve</button>
+                            <button type="submit" class="btn btn-outline" name="decision" value="reject">Reject</button>
+                        </form>
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="8" class="text-muted" style="text-align:center;">No pending approvals.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>Recent Platform Transactions</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Wallet</th>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tx in recent_transactions %}
+                <tr>
+                    <td>#{{ tx.id }}</td>
+                    <td>{{ tx.wallet.id }}</td>
+                    <td>{{ tx.type }}</td>
+                    <td>${{ tx.amount }}</td>
+                    <td>{{ tx.status }}</td>
+                    <td>{{ tx.created_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="6" class="text-muted" style="text-align:center;">No transactions yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

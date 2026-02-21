@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+{% load rbac_tags %}
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -218,6 +219,9 @@
                 <a href="{% url 'transfer' %}">Transfer</a>
                 <a href="{% url 'deposit' %}">Deposit</a>
                 <a href="{% url 'withdraw' %}">Withdraw</a>
+                {% if user|has_any_role:"admin,super_admin,finance,customer_service,risk,operation,sales" %}
+                    <a href="{% url 'backoffice' %}">Backoffice</a>
+                {% endif %}
                 <span class="text-muted">|</span>
                 <span class="font-bold">{{ user.username }}</span>
                 <form action="{% url 'logout' %}" method="post" style="display: inline;">
