@@ -1122,7 +1122,7 @@ def fx_management(request):
         "wallets_demo/fx_management.html",
         {
             "supported_currencies": _supported_currencies(),
-            "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:100],
+            "fx_rates": FxRate.objects.filter(is_active=True).select_related("created_by").order_by("-effective_at")[:100],
             "base_currency": getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper(),
             "fx_provider": getattr(settings, "FX_PROVIDER", "frankfurter"),
         },
@@ -3145,22 +3145,33 @@ def merchant_portal(request):
             messages.error(request, f"Merchant portal operation failed: {exc}")
 
     merchants = list(merchants_qs[:200])
-    settlement_map = {
-        m.id: MerchantSettlementRecord.objects.filter(merchant=m).order_by("-created_at")[:10]
-        for m in merchants
-    }
-    payout_map = {
-        m.id: SettlementPayout.objects.filter(settlement__merchant=m).order_by("-created_at")[:10]
-        for m in merchants
-    }
-    credential_map = {
-        c.merchant_id: c
-        for c in MerchantApiCredential.objects.filter(merchant_id__in=[m.id for m in merchants])
-    }
-    webhook_map = {
-        m.id: MerchantWebhookEvent.objects.filter(credential__merchant=m).order_by("-created_at")[:10]
-        for m in merchants
-    }
+    merchant_ids = [m.id for m in merchants]
+    
+    # Bulk fetch related data to avoid N+1
+    settlements_qs = MerchantSettlementRecord.objects.filter(merchant_id__in=merchant_ids).order_by("-created_at")
+    payouts_qs = SettlementPayout.objects.filter(settlement__merchant_id__in=merchant_ids).select_related("settlement").order_by("-created_at")
+    credentials_qs = MerchantApiCredential.objects.filter(merchant_id__in=merchant_ids)
+    webhooks_qs = MerchantWebhookEvent.objects.filter(credential__merchant_id__in=merchant_ids).select_related("credential").order_by("-created_at")
+
+    settlement_map = {}
+    for s in settlements_qs:
+        if s.merchant_id not in settlement_map: settlement_map[s.merchant_id] = []
+        if len(settlement_map[s.merchant_id]) < 10: settlement_map[s.merchant_id].append(s)
+
+    payout_map = {}
+    for p in payouts_qs:
+        m_id = p.settlement.merchant_id
+        if m_id not in payout_map: payout_map[m_id] = []
+        if len(payout_map[m_id]) < 10: payout_map[m_id].append(p)
+
+    credential_map = {c.merchant_id: c for c in credentials_qs}
+    
+    webhook_map = {}
+    for e in webhooks_qs:
+        m_id = e.credential.merchant_id
+        if m_id not in webhook_map: webhook_map[m_id] = []
+        if len(webhook_map[m_id]) < 10: webhook_map[m_id].append(e)
+
     return render(
         request,
         "wallets_demo/merchant_portal.html",
