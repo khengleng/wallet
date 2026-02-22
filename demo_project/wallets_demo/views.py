@@ -98,6 +98,7 @@ from .models import (
     SettlementPayout,
     SettlementBatchFile,
     SettlementException,
+    TariffRule,
     TreasuryAccount,
     TreasuryPolicy,
     TreasuryTransferRequest,
@@ -198,6 +199,17 @@ def _wallet_slug(currency: str) -> str:
 
 _PREFIX_PATTERN = re.compile(r"[^A-Z0-9_]")
 SERVICE_PREFIX_KEYS = tuple(default_service_transaction_prefixes().keys())
+TARIFF_TXN_TYPE_CHOICES = (
+    ("deposit", "Deposit"),
+    ("withdraw", "Withdraw"),
+    ("transfer", "Transfer"),
+    ("fx_exchange", "FX Exchange"),
+    (FLOW_B2B, "B2B"),
+    (FLOW_B2C, "B2C"),
+    (FLOW_C2B, "C2B"),
+    (FLOW_P2G, "P2G"),
+    (FLOW_G2P, "G2P"),
+)
 
 
 def _operation_settings() -> OperationSetting:
@@ -1613,6 +1625,118 @@ def _enforce_merchant_service_policy(
         current_daily_count=count,
         current_daily_amount=daily_amount,
         entity_label=f"Merchant {merchant.code}",
+    )
+
+
+def _customer_service_class(user: User) -> ServiceClassPolicy | None:
+    customer_cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
+    if customer_cif is None:
+        return None
+    return customer_cif.service_class
+
+
+def _fee_collector_wallet(currency: str) -> Wallet:
+    collector, created = User.objects.get_or_create(
+        username="platform_fee_collector",
+        defaults={
+            "email": "platform-fee-collector@local.wallet",
+            "wallet_type": WALLET_TYPE_BUSINESS,
+            "is_active": True,
+        },
+    )
+    if created:
+        collector.set_unusable_password()
+        collector.save(update_fields=["password"])
+    if collector.wallet_type != WALLET_TYPE_BUSINESS:
+        collector.wallet_type = WALLET_TYPE_BUSINESS
+        collector.save(update_fields=["wallet_type"])
+    return _wallet_for_currency(collector, currency)
+
+
+def _resolve_tariff_rule(
+    *,
+    transaction_type: str,
+    amount: Decimal,
+    currency: str,
+    payer_entity_type: str,
+    payee_entity_type: str,
+    payer_service_class: ServiceClassPolicy | None,
+    payee_service_class: ServiceClassPolicy | None,
+) -> TariffRule | None:
+    candidates = TariffRule.objects.filter(
+        is_active=True,
+        transaction_type=(transaction_type or "").strip().lower(),
+    ).order_by("priority", "id")
+    for rule in candidates:
+        if rule.currency and rule.currency.upper() != currency.upper():
+            continue
+        if rule.min_amount is not None and amount < rule.min_amount:
+            continue
+        if rule.max_amount is not None and amount > rule.max_amount:
+            continue
+        if (
+            rule.payer_entity_type != TariffRule.ENTITY_ANY
+            and rule.payer_entity_type != payer_entity_type
+        ):
+            continue
+        if (
+            rule.payee_entity_type != TariffRule.ENTITY_ANY
+            and rule.payee_entity_type != payee_entity_type
+        ):
+            continue
+        if rule.payer_service_class_id:
+            if payer_service_class is None or payer_service_class.id != rule.payer_service_class_id:
+                continue
+        if rule.payee_service_class_id:
+            if payee_service_class is None or payee_service_class.id != rule.payee_service_class_id:
+                continue
+        return rule
+    return None
+
+
+def _calculate_tariff_fee(rule: TariffRule, amount: Decimal) -> Decimal:
+    if rule.fee_mode == TariffRule.FEE_MODE_BPS:
+        fee = (amount * rule.fee_value / Decimal("10000")).quantize(Decimal("0.01"))
+    else:
+        fee = Decimal(rule.fee_value).quantize(Decimal("0.01"))
+    if rule.minimum_fee is not None and fee < rule.minimum_fee:
+        fee = rule.minimum_fee
+    if rule.maximum_fee is not None and rule.maximum_fee > Decimal("0") and fee > rule.maximum_fee:
+        fee = rule.maximum_fee
+    if fee < Decimal("0"):
+        return Decimal("0")
+    return fee.quantize(Decimal("0.01"))
+
+
+def _apply_tariff_fee(
+    *,
+    wallet_service,
+    rule: TariffRule,
+    fee: Decimal,
+    currency: str,
+    payer_wallet: Wallet | None,
+    payee_wallet: Wallet | None,
+    meta: dict,
+):
+    if fee <= Decimal("0"):
+        return
+    fee_meta = dict(meta)
+    fee_meta["tariff_rule_id"] = rule.id
+    fee_meta["tariff_charge_side"] = rule.charge_side
+    fee_collector_wallet = _fee_collector_wallet(currency)
+    if rule.charge_side == TariffRule.CHARGE_SIDE_PAYER:
+        if payer_wallet is None:
+            raise ValidationError("Tariff is configured to charge payer, but payer wallet is unavailable.")
+        _wallet_withdraw(wallet_service, payer_wallet, fee, meta=fee_meta | {"service_type": "tariff_fee"})
+    else:
+        if payee_wallet is None:
+            raise ValidationError("Tariff is configured to charge payee, but payee wallet is unavailable.")
+        _wallet_withdraw(wallet_service, payee_wallet, fee, meta=fee_meta | {"service_type": "tariff_fee"})
+    _wallet_deposit(
+        wallet_service,
+        fee_collector_wallet,
+        fee,
+        meta=fee_meta | {"service_type": "tariff_revenue"},
     )
 
 
@@ -3972,18 +4096,69 @@ def operations_center(request):
                         currency=currency,
                         flow_type=flow_type,
                     )
+                payer_entity_type = TariffRule.ENTITY_MERCHANT
+                payee_entity_type = TariffRule.ENTITY_CUSTOMER
+                payer_service_class = merchant.service_class
+                payee_service_class = _customer_service_class(flow_user) if flow_user is not None else None
+                if flow_type == FLOW_C2B:
+                    payer_entity_type = TariffRule.ENTITY_CUSTOMER
+                    payee_entity_type = TariffRule.ENTITY_MERCHANT
+                    payer_service_class = _customer_service_class(flow_user) if flow_user is not None else None
+                    payee_service_class = merchant.service_class
+                elif flow_type == FLOW_B2B:
+                    payer_entity_type = TariffRule.ENTITY_MERCHANT
+                    payee_entity_type = TariffRule.ENTITY_MERCHANT
+                    payer_service_class = merchant.service_class
+                    payee_service_class = (
+                        counterparty_merchant.service_class if counterparty_merchant is not None else None
+                    )
+                elif flow_type == FLOW_P2G:
+                    payer_entity_type = TariffRule.ENTITY_CUSTOMER
+                    payee_entity_type = TariffRule.ENTITY_MERCHANT
+                    payer_service_class = _customer_service_class(flow_user) if flow_user is not None else None
+                    payee_service_class = merchant.service_class
+                elif flow_type == FLOW_G2P:
+                    payer_entity_type = TariffRule.ENTITY_MERCHANT
+                    payee_entity_type = TariffRule.ENTITY_CUSTOMER
+                    payer_service_class = merchant.service_class
+                    payee_service_class = _customer_service_class(flow_user) if flow_user is not None else None
+                tariff_rule = _resolve_tariff_rule(
+                    transaction_type=flow_type,
+                    amount=amount,
+                    currency=currency,
+                    payer_entity_type=payer_entity_type,
+                    payee_entity_type=payee_entity_type,
+                    payer_service_class=payer_service_class,
+                    payee_service_class=payee_service_class,
+                )
+                tariff_fee = (
+                    _calculate_tariff_fee(tariff_rule, amount)
+                    if tariff_rule is not None
+                    else Decimal("0")
+                )
                 _enforce_merchant_risk_limits(merchant, amount, actor=request.user)
-                fee_amount = _merchant_fee_for_amount(merchant, flow_type, amount)
-                net_amount = (amount - fee_amount).quantize(Decimal("0.01"))
+                merchant_fee_amount = _merchant_fee_for_amount(merchant, flow_type, amount)
+                total_fee_amount = (merchant_fee_amount + tariff_fee).quantize(Decimal("0.01"))
+                net_amount = (amount - total_fee_amount).quantize(Decimal("0.01"))
                 from_user = None
                 to_user = None
 
                 merchant_wallet = _merchant_wallet_for_currency(merchant, currency)
                 wallet_service = get_wallet_service()
                 with transaction.atomic():
+                    payer_wallet = None
+                    payee_wallet = None
                     if flow_type == FLOW_B2C:
                         to_user = flow_user
                         user_wallet = _wallet_for_currency(to_user, currency)
+                        payer_wallet = merchant_wallet
+                        payee_wallet = user_wallet
+                        if (
+                            tariff_rule is not None
+                            and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER
+                            and payer_wallet.balance < amount + tariff_fee
+                        ):
+                            raise ValidationError("Payer does not have enough balance for amount plus tariff fee.")
                         _wallet_withdraw(wallet_service, 
                             merchant_wallet,
                             amount,
@@ -3997,6 +4172,14 @@ def operations_center(request):
                     elif flow_type == FLOW_C2B:
                         from_user = flow_user
                         user_wallet = _wallet_for_currency(from_user, currency)
+                        payer_wallet = user_wallet
+                        payee_wallet = merchant_wallet
+                        if (
+                            tariff_rule is not None
+                            and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER
+                            and payer_wallet.balance < amount + tariff_fee
+                        ):
+                            raise ValidationError("Payer does not have enough balance for amount plus tariff fee.")
                         _wallet_withdraw(wallet_service, 
                             user_wallet,
                             amount,
@@ -4014,6 +4197,14 @@ def operations_center(request):
                         if not other_capability.supports_b2b:
                             raise ValidationError("Counterparty merchant does not support B2B.")
                         cp_wallet = _merchant_wallet_for_currency(counterparty_merchant, currency)
+                        payer_wallet = merchant_wallet
+                        payee_wallet = cp_wallet
+                        if (
+                            tariff_rule is not None
+                            and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER
+                            and payer_wallet.balance < amount + tariff_fee
+                        ):
+                            raise ValidationError("Payer does not have enough balance for amount plus tariff fee.")
                         _wallet_withdraw(wallet_service, 
                             merchant_wallet,
                             amount,
@@ -4029,6 +4220,14 @@ def operations_center(request):
                             raise ValidationError("Selected merchant wallet type must be Government (G).")
                         from_user = flow_user
                         user_wallet = _wallet_for_currency(from_user, currency)
+                        payer_wallet = user_wallet
+                        payee_wallet = merchant_wallet
+                        if (
+                            tariff_rule is not None
+                            and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER
+                            and payer_wallet.balance < amount + tariff_fee
+                        ):
+                            raise ValidationError("Payer does not have enough balance for amount plus tariff fee.")
                         _wallet_withdraw(wallet_service, 
                             user_wallet,
                             amount,
@@ -4044,6 +4243,14 @@ def operations_center(request):
                             raise ValidationError("Selected merchant wallet type must be Government (G).")
                         to_user = flow_user
                         user_wallet = _wallet_for_currency(to_user, currency)
+                        payer_wallet = merchant_wallet
+                        payee_wallet = user_wallet
+                        if (
+                            tariff_rule is not None
+                            and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER
+                            and payer_wallet.balance < amount + tariff_fee
+                        ):
+                            raise ValidationError("Payer does not have enough balance for amount plus tariff fee.")
                         _wallet_withdraw(wallet_service, 
                             merchant_wallet,
                             amount,
@@ -4056,12 +4263,26 @@ def operations_center(request):
                         )
                     else:
                         raise ValidationError("Unsupported flow type.")
+                    if tariff_rule is not None and tariff_fee > Decimal("0"):
+                        _apply_tariff_fee(
+                            wallet_service=wallet_service,
+                            rule=tariff_rule,
+                            fee=tariff_fee,
+                            currency=currency,
+                            payer_wallet=payer_wallet,
+                            payee_wallet=payee_wallet,
+                            meta={
+                                "transaction_type": flow_type,
+                                "flow_type": flow_type,
+                                "merchant_code": merchant.code,
+                            },
+                        )
 
                     created_event = MerchantCashflowEvent.objects.create(
                         merchant=merchant,
                         flow_type=flow_type,
                         amount=amount,
-                        fee_amount=fee_amount,
+                        fee_amount=total_fee_amount,
                         net_amount=net_amount,
                         currency=currency,
                         from_user=from_user,
@@ -4107,7 +4328,9 @@ def operations_center(request):
                     metadata={
                         "flow_type": flow_type,
                         "amount": str(amount),
-                        "fee_amount": str(fee_amount),
+                        "merchant_fee_amount": str(merchant_fee_amount),
+                        "fee_amount": str(total_fee_amount),
+                        "tariff_fee": str(tariff_fee),
                         "net_amount": str(net_amount),
                         "currency": currency,
                         "reference": reference,
@@ -4120,7 +4343,9 @@ def operations_center(request):
                         "merchant_code": merchant.code,
                         "flow_type": flow_type,
                         "amount": str(amount),
-                        "fee_amount": str(fee_amount),
+                        "merchant_fee_amount": str(merchant_fee_amount),
+                        "fee_amount": str(total_fee_amount),
+                        "tariff_fee": str(tariff_fee),
                         "net_amount": str(net_amount),
                         "currency": currency,
                         "reference": reference,
@@ -4128,7 +4353,14 @@ def operations_center(request):
                 )
                 messages.success(
                     request,
-                    f"Cashflow {flow_type.upper()} posted for merchant {merchant.code}.",
+                    (
+                        f"Cashflow {flow_type.upper()} posted for merchant {merchant.code}."
+                        + (
+                            f" Tariff applied: {tariff_fee} {currency} ({tariff_rule.charge_side})."
+                            if tariff_rule is not None and tariff_fee > Decimal("0")
+                            else ""
+                        )
+                    ),
                 )
                 return redirect("operations_center")
         except Exception as exc:
@@ -5565,6 +5797,63 @@ def policy_hub(request):
                     f"Assigned policy for {merchant.code}: {policy.code if policy else 'Unassigned'}.",
                 )
                 return redirect("policy_hub")
+
+            if form_type == "tariff_upsert":
+                tariff_id = (request.POST.get("tariff_id") or "").strip()
+                tariff = TariffRule.objects.get(id=tariff_id) if tariff_id else TariffRule()
+                transaction_type = (request.POST.get("transaction_type") or "").strip().lower()
+                if transaction_type not in {value for value, _label in TARIFF_TXN_TYPE_CHOICES}:
+                    raise ValidationError("Invalid transaction type.")
+                tariff.transaction_type = transaction_type
+                tariff.name = (request.POST.get("name") or "").strip()
+                if not tariff.name:
+                    raise ValidationError("Tariff name is required.")
+                tariff.description = (request.POST.get("description") or "").strip()
+                tariff.is_active = request.POST.get("is_active") == "on"
+                tariff.priority = int(request.POST.get("priority") or 100)
+                if tariff.priority < 0:
+                    raise ValidationError("Priority must be 0 or greater.")
+                payer_entity_type = (request.POST.get("payer_entity_type") or TariffRule.ENTITY_ANY).strip().lower()
+                payee_entity_type = (request.POST.get("payee_entity_type") or TariffRule.ENTITY_ANY).strip().lower()
+                if payer_entity_type not in {choice[0] for choice in TariffRule.ENTITY_CHOICES}:
+                    raise ValidationError("Invalid payer entity type.")
+                if payee_entity_type not in {choice[0] for choice in TariffRule.ENTITY_CHOICES}:
+                    raise ValidationError("Invalid payee entity type.")
+                tariff.payer_entity_type = payer_entity_type
+                tariff.payee_entity_type = payee_entity_type
+                payer_service_class_id = (request.POST.get("payer_service_class_id") or "").strip()
+                payee_service_class_id = (request.POST.get("payee_service_class_id") or "").strip()
+                tariff.payer_service_class = (
+                    ServiceClassPolicy.objects.filter(id=payer_service_class_id).first()
+                    if payer_service_class_id
+                    else None
+                )
+                tariff.payee_service_class = (
+                    ServiceClassPolicy.objects.filter(id=payee_service_class_id).first()
+                    if payee_service_class_id
+                    else None
+                )
+                tariff.currency = (request.POST.get("currency") or "").strip().upper()
+                tariff.min_amount = _parse_optional_amount(request.POST.get("min_amount"), "minimum amount")
+                tariff.max_amount = _parse_optional_amount(request.POST.get("max_amount"), "maximum amount")
+                charge_side = (request.POST.get("charge_side") or TariffRule.CHARGE_SIDE_PAYER).strip().lower()
+                fee_mode = (request.POST.get("fee_mode") or TariffRule.FEE_MODE_FLAT).strip().lower()
+                if charge_side not in {choice[0] for choice in TariffRule.CHARGE_SIDE_CHOICES}:
+                    raise ValidationError("Invalid charge side.")
+                if fee_mode not in {choice[0] for choice in TariffRule.FEE_MODE_CHOICES}:
+                    raise ValidationError("Invalid fee mode.")
+                tariff.charge_side = charge_side
+                tariff.fee_mode = fee_mode
+                tariff.fee_value = _parse_optional_amount(request.POST.get("fee_value"), "fee value") or Decimal("0")
+                tariff.minimum_fee = _parse_optional_amount(request.POST.get("minimum_fee"), "minimum fee")
+                tariff.maximum_fee = _parse_optional_amount(request.POST.get("maximum_fee"), "maximum fee")
+                tariff.full_clean()
+                tariff.save()
+                messages.success(
+                    request,
+                    f"Tariff rule #{tariff.id} saved for {tariff.transaction_type}.",
+                )
+                return redirect("policy_hub")
         except Exception as exc:
             messages.error(request, f"Policy hub operation failed: {exc}")
 
@@ -5581,6 +5870,14 @@ def policy_hub(request):
             "all_policies": ServiceClassPolicy.objects.order_by("entity_type", "code"),
             "customer_policies": customer_policies,
             "merchant_policies": merchant_policies,
+            "tariff_rules": TariffRule.objects.select_related(
+                "payer_service_class",
+                "payee_service_class",
+            ).order_by("priority", "id"),
+            "tariff_txn_type_choices": TARIFF_TXN_TYPE_CHOICES,
+            "tariff_entity_choices": TariffRule.ENTITY_CHOICES,
+            "tariff_charge_side_choices": TariffRule.CHARGE_SIDE_CHOICES,
+            "tariff_fee_mode_choices": TariffRule.FEE_MODE_CHOICES,
             "customer_cifs": CustomerCIF.objects.select_related("user", "service_class").order_by("cif_no")[:300],
             "merchants": Merchant.objects.select_related("service_class").order_by("code")[:300],
         },
@@ -6035,9 +6332,35 @@ def wallet_fx_exchange(request):
                 amount=amount,
                 currency=from_currency,
             )
+            payer_service_class = _customer_service_class(request.user)
+            payee_service_class = payer_service_class
+            tariff_rule = _resolve_tariff_rule(
+                transaction_type="fx_exchange",
+                amount=amount,
+                currency=from_currency,
+                payer_entity_type=TariffRule.ENTITY_CUSTOMER,
+                payee_entity_type=TariffRule.ENTITY_CUSTOMER,
+                payer_service_class=payer_service_class,
+                payee_service_class=payee_service_class,
+            )
+            tariff_fee = (
+                _calculate_tariff_fee(tariff_rule, amount)
+                if tariff_rule is not None
+                else Decimal("0")
+            )
             fx = FxRate.latest_rate(from_currency, to_currency)
             if fx is None:
                 raise ValidationError(f"No active FX rate for {from_currency}/{to_currency}.")
+            source_wallet = _wallet_for_currency(request.user, from_currency)
+            target_wallet = _wallet_for_currency(request.user, to_currency)
+            if (
+                tariff_rule is not None
+                and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER
+                and source_wallet.balance < amount + tariff_fee
+            ):
+                raise ValidationError(
+                    f"Insufficient funds for FX amount plus tariff fee ({tariff_fee} {from_currency})."
+                )
 
             exchange_service = get_exchange_service()
             exchange_service.exchange(
@@ -6047,9 +6370,45 @@ def wallet_fx_exchange(request):
                 amount=amount,
                 rate=fx.rate,
             )
+            if tariff_rule is not None and tariff_fee > Decimal("0"):
+                wallet_service = get_wallet_service()
+                if tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYEE:
+                    payee_fee = (tariff_fee * fx.rate).quantize(Decimal("0.01"))
+                    _apply_tariff_fee(
+                        wallet_service=wallet_service,
+                        rule=tariff_rule,
+                        fee=payee_fee,
+                        currency=to_currency,
+                        payer_wallet=source_wallet,
+                        payee_wallet=target_wallet,
+                        meta={
+                            "transaction_type": "fx_exchange",
+                            "currency": to_currency,
+                        },
+                    )
+                else:
+                    _apply_tariff_fee(
+                        wallet_service=wallet_service,
+                        rule=tariff_rule,
+                        fee=tariff_fee,
+                        currency=from_currency,
+                        payer_wallet=source_wallet,
+                        payee_wallet=target_wallet,
+                        meta={
+                            "transaction_type": "fx_exchange",
+                            "currency": from_currency,
+                        },
+                    )
             messages.success(
                 request,
-                f"Converted {amount} {from_currency} to {to_currency} at rate {fx.rate}.",
+                (
+                    f"Converted {amount} {from_currency} to {to_currency} at rate {fx.rate}."
+                    + (
+                        f" Tariff applied: {tariff_fee} {from_currency} ({tariff_rule.charge_side})."
+                        if tariff_rule is not None and tariff_fee > Decimal("0")
+                        else ""
+                    )
+                ),
             )
             return redirect("dashboard")
         except Exception as exc:
@@ -6086,6 +6445,23 @@ def deposit(request):
                 amount=amount,
                 currency=selected_currency,
             )
+            payee_service_class = _customer_service_class(request.user)
+            tariff_rule = _resolve_tariff_rule(
+                transaction_type="deposit",
+                amount=amount,
+                currency=selected_currency,
+                payer_entity_type=TariffRule.ENTITY_ANY,
+                payee_entity_type=TariffRule.ENTITY_CUSTOMER,
+                payer_service_class=None,
+                payee_service_class=payee_service_class,
+            )
+            tariff_fee = (
+                _calculate_tariff_fee(tariff_rule, amount)
+                if tariff_rule is not None
+                else Decimal("0")
+            )
+            if tariff_rule is not None and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER:
+                raise ValidationError("Deposit tariff cannot charge payer because payer wallet is external/system.")
             if _should_use_maker_checker(request.user):
                 approval_request = _submit_approval_request(
                     maker=request.user,
@@ -6123,6 +6499,16 @@ def deposit(request):
                         "service_type": "deposit",
                     },
                 )
+                if tariff_rule is not None and tariff_fee > Decimal("0"):
+                    _apply_tariff_fee(
+                        wallet_service=wallet_service,
+                        rule=tariff_rule,
+                        fee=tariff_fee,
+                        currency=selected_currency,
+                        payer_wallet=None,
+                        payee_wallet=wallet,
+                        meta={"transaction_type": "deposit", "currency": selected_currency},
+                    )
             messages.success(request, f"Successfully deposited {amount} {selected_currency}.")
             _track(
                 request,
@@ -6157,8 +6543,30 @@ def withdraw(request):
                 amount=amount,
                 currency=selected_currency,
             )
+            payer_service_class = _customer_service_class(request.user)
+            tariff_rule = _resolve_tariff_rule(
+                transaction_type="withdraw",
+                amount=amount,
+                currency=selected_currency,
+                payer_entity_type=TariffRule.ENTITY_CUSTOMER,
+                payee_entity_type=TariffRule.ENTITY_ANY,
+                payer_service_class=payer_service_class,
+                payee_service_class=None,
+            )
+            tariff_fee = (
+                _calculate_tariff_fee(tariff_rule, amount)
+                if tariff_rule is not None
+                else Decimal("0")
+            )
+            if tariff_rule is not None and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYEE:
+                raise ValidationError("Withdrawal tariff cannot charge payee because payee wallet is external/system.")
             wallet = _wallet_for_currency(request.user, selected_currency)
-            if wallet.balance < amount:
+            total_required = amount + (
+                tariff_fee
+                if tariff_rule is not None and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER
+                else Decimal("0")
+            )
+            if wallet.balance < total_required:
                 messages.error(request, "Insufficient funds.")
                 return render(
                     request,
@@ -6202,6 +6610,16 @@ def withdraw(request):
                         "service_type": "withdraw",
                     },
                 )
+                if tariff_rule is not None and tariff_fee > Decimal("0"):
+                    _apply_tariff_fee(
+                        wallet_service=wallet_service,
+                        rule=tariff_rule,
+                        fee=tariff_fee,
+                        currency=selected_currency,
+                        payer_wallet=wallet,
+                        payee_wallet=None,
+                        meta={"transaction_type": "withdraw", "currency": selected_currency},
+                    )
             messages.success(request, f"Successfully withdrew {amount} {selected_currency}.")
             _track(
                 request,
@@ -6245,9 +6663,30 @@ def transfer(request):
                 amount=amount,
                 currency=selected_currency,
             )
+            recipient_service_class = _customer_service_class(recipient)
+            payer_service_class = _customer_service_class(request.user)
+            tariff_rule = _resolve_tariff_rule(
+                transaction_type="transfer",
+                amount=amount,
+                currency=selected_currency,
+                payer_entity_type=TariffRule.ENTITY_CUSTOMER,
+                payee_entity_type=TariffRule.ENTITY_CUSTOMER,
+                payer_service_class=payer_service_class,
+                payee_service_class=recipient_service_class,
+            )
+            tariff_fee = (
+                _calculate_tariff_fee(tariff_rule, amount)
+                if tariff_rule is not None
+                else Decimal("0")
+            )
             sender_wallet = _wallet_for_currency(request.user, selected_currency)
+            total_required = amount + (
+                tariff_fee
+                if tariff_rule is not None and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER
+                else Decimal("0")
+            )
 
-            if sender_wallet.balance < amount:
+            if sender_wallet.balance < total_required:
                 messages.error(request, "Insufficient funds.")
                 return render(
                     request,
@@ -6308,9 +6747,26 @@ def transfer(request):
                         "service_type": "transfer",
                     },
                 )
+                if tariff_rule is not None and tariff_fee > Decimal("0"):
+                    _apply_tariff_fee(
+                        wallet_service=wallet_service,
+                        rule=tariff_rule,
+                        fee=tariff_fee,
+                        currency=selected_currency,
+                        payer_wallet=sender_wallet,
+                        payee_wallet=recipient_wallet,
+                        meta={"transaction_type": "transfer", "currency": selected_currency},
+                    )
             messages.success(
                 request,
-                f"Successfully transferred {amount} {selected_currency} to {recipient.username}.",
+                (
+                    f"Successfully transferred {amount} {selected_currency} to {recipient.username}."
+                    + (
+                        f" Tariff applied: {tariff_fee} {selected_currency} ({tariff_rule.charge_side})."
+                        if tariff_rule is not None and tariff_fee > Decimal("0")
+                        else ""
+                    )
+                ),
             )
             _track(
                 request,

@@ -863,6 +863,127 @@ class ServiceClassPolicy(models.Model):
         return f"{self.entity_type}:{self.code} - {self.name}"
 
 
+class TariffRule(models.Model):
+    ENTITY_ANY = "any"
+    ENTITY_CUSTOMER = ServiceClassPolicy.ENTITY_CUSTOMER
+    ENTITY_MERCHANT = ServiceClassPolicy.ENTITY_MERCHANT
+    ENTITY_CHOICES = (
+        (ENTITY_ANY, "Any"),
+        (ENTITY_CUSTOMER, "Customer"),
+        (ENTITY_MERCHANT, "Merchant"),
+    )
+
+    CHARGE_SIDE_PAYER = "payer"
+    CHARGE_SIDE_PAYEE = "payee"
+    CHARGE_SIDE_CHOICES = (
+        (CHARGE_SIDE_PAYER, "Charge Payer"),
+        (CHARGE_SIDE_PAYEE, "Charge Payee"),
+    )
+
+    FEE_MODE_FLAT = "flat"
+    FEE_MODE_BPS = "bps"
+    FEE_MODE_CHOICES = (
+        (FEE_MODE_FLAT, "Flat Amount"),
+        (FEE_MODE_BPS, "Percent (BPS)"),
+    )
+
+    transaction_type = models.CharField(max_length=32, db_index=True)
+    name = models.CharField(max_length=96)
+    description = models.CharField(max_length=255, blank=True, default="")
+    is_active = models.BooleanField(default=True, db_index=True)
+    priority = models.PositiveIntegerField(
+        default=100,
+        help_text="Lower value = higher priority.",
+    )
+
+    payer_entity_type = models.CharField(
+        max_length=16,
+        choices=ENTITY_CHOICES,
+        default=ENTITY_ANY,
+    )
+    payee_entity_type = models.CharField(
+        max_length=16,
+        choices=ENTITY_CHOICES,
+        default=ENTITY_ANY,
+    )
+    payer_service_class = models.ForeignKey(
+        ServiceClassPolicy,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="payer_tariff_rules",
+    )
+    payee_service_class = models.ForeignKey(
+        ServiceClassPolicy,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="payee_tariff_rules",
+    )
+
+    currency = models.CharField(
+        max_length=12,
+        blank=True,
+        default="",
+        help_text="Leave empty to apply to any currency.",
+    )
+    min_amount = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+    max_amount = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+
+    charge_side = models.CharField(
+        max_length=8,
+        choices=CHARGE_SIDE_CHOICES,
+        default=CHARGE_SIDE_PAYER,
+    )
+    fee_mode = models.CharField(
+        max_length=8,
+        choices=FEE_MODE_CHOICES,
+        default=FEE_MODE_FLAT,
+    )
+    fee_value = models.DecimalField(max_digits=20, decimal_places=6, default=Decimal("0"))
+    minimum_fee = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+    maximum_fee = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("priority", "id")
+
+    def clean(self):
+        if self.fee_value < Decimal("0"):
+            raise ValidationError("Fee value cannot be negative.")
+        if self.min_amount is not None and self.min_amount <= Decimal("0"):
+            raise ValidationError("Minimum amount must be greater than 0.")
+        if self.max_amount is not None and self.max_amount <= Decimal("0"):
+            raise ValidationError("Maximum amount must be greater than 0.")
+        if (
+            self.min_amount is not None
+            and self.max_amount is not None
+            and self.max_amount < self.min_amount
+        ):
+            raise ValidationError("Maximum amount must be greater than minimum amount.")
+        if self.minimum_fee is not None and self.minimum_fee < Decimal("0"):
+            raise ValidationError("Minimum fee cannot be negative.")
+        if self.maximum_fee is not None and self.maximum_fee < Decimal("0"):
+            raise ValidationError("Maximum fee cannot be negative.")
+        if (
+            self.minimum_fee is not None
+            and self.maximum_fee is not None
+            and self.maximum_fee < self.minimum_fee
+        ):
+            raise ValidationError("Maximum fee must be greater than minimum fee.")
+        if self.payer_service_class and self.payer_service_class.entity_type != self.payer_entity_type:
+            raise ValidationError("Payer service class entity type does not match payer entity type.")
+        if self.payee_service_class and self.payee_service_class.entity_type != self.payee_entity_type:
+            raise ValidationError("Payee service class entity type does not match payee entity type.")
+        if self.fee_mode == self.FEE_MODE_BPS and self.fee_value > Decimal("10000"):
+            raise ValidationError("BPS fee cannot exceed 10000.")
+
+    def __str__(self):
+        return f"{self.transaction_type}:{self.name}"
+
+
 class Merchant(WalletMixin, models.Model):
     STATUS_ACTIVE = "active"
     STATUS_SUSPENDED = "suspended"

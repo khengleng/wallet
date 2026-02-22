@@ -254,6 +254,165 @@
 </div>
 
 <div class="card">
+  <h3>Tariff Rules</h3>
+  <p class="policy-muted">Configure how fees are charged by transaction type, payer/payee entity, and class of service. Fee can be charged to payer or payee.</p>
+  <form method="post" style="margin-bottom:1rem;">
+    {% csrf_token %}
+    <input type="hidden" name="form_type" value="tariff_upsert" />
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0.9rem;">
+      <div class="form-group">
+        <label>Existing Tariff (optional update)</label>
+        <select name="tariff_id">
+          <option value="">Create New</option>
+          {% for t in tariff_rules %}
+          <option value="{{ t.id }}">#{{ t.id }} - {{ t.transaction_type|upper }} - {{ t.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Tariff Name</label>
+        <input type="text" name="name" maxlength="96" required />
+      </div>
+      <div class="form-group">
+        <label>Transaction Type</label>
+        <select name="transaction_type" required>
+          {% for value, label in tariff_txn_type_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Priority</label>
+        <input type="number" name="priority" min="0" value="100" />
+      </div>
+      <div class="form-group">
+        <label>Currency (blank = any)</label>
+        <input type="text" name="currency" maxlength="12" placeholder="USD" />
+      </div>
+      <div class="form-group">
+        <label>Charge Side</label>
+        <select name="charge_side">
+          {% for value, label in tariff_charge_side_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Fee Mode</label>
+        <select name="fee_mode">
+          {% for value, label in tariff_fee_mode_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Fee Value</label>
+        <input type="number" name="fee_value" step="0.000001" min="0.000001" required />
+      </div>
+      <div class="form-group">
+        <label>Minimum Fee (optional)</label>
+        <input type="number" name="minimum_fee" step="0.01" min="0.01" />
+      </div>
+      <div class="form-group">
+        <label>Maximum Fee (optional)</label>
+        <input type="number" name="maximum_fee" step="0.01" min="0.01" />
+      </div>
+      <div class="form-group">
+        <label>Payer Entity</label>
+        <select name="payer_entity_type">
+          {% for value, label in tariff_entity_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Payee Entity</label>
+        <select name="payee_entity_type">
+          {% for value, label in tariff_entity_choices %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Payer Service Class (optional)</label>
+        <select name="payer_service_class_id">
+          <option value="">Any</option>
+          {% for p in all_policies %}
+          <option value="{{ p.id }}">{{ p.entity_type }} - {{ p.code }} - {{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Payee Service Class (optional)</label>
+        <select name="payee_service_class_id">
+          <option value="">Any</option>
+          {% for p in all_policies %}
+          <option value="{{ p.id }}">{{ p.entity_type }} - {{ p.code }} - {{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Minimum Amount (optional)</label>
+        <input type="number" name="min_amount" step="0.01" min="0.01" />
+      </div>
+      <div class="form-group">
+        <label>Maximum Amount (optional)</label>
+        <input type="number" name="max_amount" step="0.01" min="0.01" />
+      </div>
+      <div class="form-group" style="grid-column:1/-1;">
+        <label>Description</label>
+        <input type="text" name="description" maxlength="255" />
+      </div>
+    </div>
+    <div class="policy-flag-row">
+      <label><input type="checkbox" name="is_active" checked /> Active</label>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Tariff Rule</button>
+  </form>
+
+  <div class="policy-table-wrap">
+    <table class="policy-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Txn Type</th>
+          <th>Name</th>
+          <th>Side</th>
+          <th>Target</th>
+          <th>Fee</th>
+          <th>Band</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tariff_rules %}
+        <tr>
+          <td>{{ t.id }}</td>
+          <td><code>{{ t.transaction_type|upper }}</code></td>
+          <td>{{ t.name }}{% if t.description %}<div class="policy-muted">{{ t.description }}</div>{% endif %}</td>
+          <td>{{ t.charge_side }}</td>
+          <td class="policy-muted">
+            Payer: {{ t.payer_entity_type }}{% if t.payer_service_class %} / {{ t.payer_service_class.code }}{% endif %}<br>
+            Payee: {{ t.payee_entity_type }}{% if t.payee_service_class %} / {{ t.payee_service_class.code }}{% endif %}<br>
+            Currency: {{ t.currency|default:"ANY" }}
+          </td>
+          <td class="policy-muted">
+            Mode: {{ t.fee_mode }}<br>
+            Value: {{ t.fee_value }}<br>
+            Min/Max Fee: {{ t.minimum_fee|default:"-" }} / {{ t.maximum_fee|default:"-" }}
+          </td>
+          <td class="policy-muted">Amount: {{ t.min_amount|default:"-" }} - {{ t.max_amount|default:"-" }}<br>Priority: {{ t.priority }}</td>
+          <td>{% if t.is_active %}<span class="policy-kpi">Active</span>{% else %}<span class="badge-blocked">Inactive</span>{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" class="text-muted" style="text-align:center;">No tariff rules yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
   <h3>Customer Policy Catalog</h3>
   <div class="policy-table-wrap">
     <table class="policy-table">
