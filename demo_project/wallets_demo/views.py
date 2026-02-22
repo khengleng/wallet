@@ -21,6 +21,7 @@ from django.core.paginator import Paginator
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models, transaction
+from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Q
 from django.utils import timezone
 from django.http import HttpResponse
@@ -121,12 +122,9 @@ def _parse_amount(raw_value: str) -> Decimal:
 
 
 def _supported_currencies() -> list[str]:
-    try:
-        row = OperationSetting.get_solo()
-        if row.enabled_currencies:
-            return [c.upper() for c in row.enabled_currencies if c]
-    except Exception:
-        pass
+    row = _operation_settings()
+    if row.enabled_currencies:
+        return [c.upper() for c in row.enabled_currencies if c]
     return list(getattr(settings, "SUPPORTED_CURRENCIES", ["USD"]))
 
 
@@ -151,7 +149,7 @@ SERVICE_PREFIX_KEYS = tuple(default_service_transaction_prefixes().keys())
 def _operation_settings() -> OperationSetting:
     try:
         return OperationSetting.get_solo()
-    except Exception:
+    except (OperationalError, ProgrammingError):
         # Fallback for pre-migration/runtime bootstrap windows.
         return OperationSetting(
             organization_name="DJ Wallet",
@@ -3633,7 +3631,7 @@ def rbac_management(request):
 @login_required
 def operations_settings(request):
     if not user_has_any_role(request.user, ("super_admin",)):
-        raise PermissionDenied("Only super admin can manage operation settings.")
+        raise PermissionDenied("Only super admin can manage system settings.")
 
     settings_row = _operation_settings()
     prefix_fields = (
@@ -3678,8 +3676,7 @@ def operations_settings(request):
                 for c in request.POST.getlist("enabled_currencies")
                 if c.strip()
             ]
-            if selected_currencies:
-                settings_row.enabled_currencies = selected_currencies
+            settings_row.enabled_currencies = selected_currencies
             settings_row.updated_by = request.user
             settings_row.full_clean()
             settings_row.save()

@@ -102,8 +102,8 @@ class OperationSetting(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = "Operation setting"
-        verbose_name_plural = "Operation settings"
+        verbose_name = "System setting"
+        verbose_name_plural = "System settings"
 
     def save(self, *args, **kwargs):
         self.singleton_key = 1
@@ -115,7 +115,7 @@ class OperationSetting(models.Model):
         return obj
 
     def __str__(self):
-        return f"{self.organization_name} operation setup"
+        return f"{self.organization_name} system setting"
 
 
 class ApprovalRequest(models.Model):
