@@ -1540,6 +1540,84 @@ def _merchant_wallet_for_currency(merchant: Merchant, currency: str):
     return _ensure_wallet_business_id(wallet)
 
 
+def _open_alert_exists(*, alert_type: str, note: str) -> bool:
+    return TransactionMonitoringAlert.objects.filter(
+        alert_type=alert_type,
+        note=note[:255],
+        status__in=(
+            TransactionMonitoringAlert.STATUS_OPEN,
+            TransactionMonitoringAlert.STATUS_IN_REVIEW,
+        ),
+    ).exists()
+
+
+def _raise_privileged_accounting_alert_if_needed(
+    *,
+    actor: User,
+    request_type: str,
+    entry: JournalEntry,
+):
+    if request_type not in {JournalEntryApproval.TYPE_REVERSAL, JournalEntryApproval.TYPE_RECLASS}:
+        return
+    today = timezone.localdate()
+    start = timezone.make_aware(datetime.combine(today, dt_time.min))
+    end = timezone.make_aware(datetime.combine(today, dt_time.max))
+    threshold = int(getattr(settings, "ACCOUNTING_PRIV_ACTION_DAILY_THRESHOLD", 5))
+    count_today = JournalEntryApproval.objects.filter(
+        maker=actor,
+        request_type__in=(JournalEntryApproval.TYPE_REVERSAL, JournalEntryApproval.TYPE_RECLASS),
+        created_at__gte=start,
+        created_at__lte=end,
+    ).count()
+    if count_today > threshold:
+        note = (
+            f"Privileged accounting action burst by {actor.username}: "
+            f"{count_today} reversal/reclass requests today."
+        )
+        if not _open_alert_exists(alert_type="accounting_privileged_action_burst", note=note):
+            TransactionMonitoringAlert.objects.create(
+                alert_type="accounting_privileged_action_burst",
+                severity="high",
+                status=TransactionMonitoringAlert.STATUS_OPEN,
+                user=actor,
+                note=note[:255],
+                created_by=actor,
+            )
+
+    local_hour = timezone.localtime(timezone.now()).hour
+    business_start = int(getattr(settings, "ACCOUNTING_BUSINESS_HOUR_START", 8))
+    business_end = int(getattr(settings, "ACCOUNTING_BUSINESS_HOUR_END", 20))
+    if local_hour < business_start or local_hour >= business_end:
+        note = (
+            f"After-hours privileged accounting action by {actor.username}: "
+            f"{request_type} entry={entry.entry_no} at {local_hour:02d}:00."
+        )
+        if not _open_alert_exists(alert_type="accounting_after_hours_privileged_action", note=note):
+            TransactionMonitoringAlert.objects.create(
+                alert_type="accounting_after_hours_privileged_action",
+                severity="high",
+                status=TransactionMonitoringAlert.STATUS_OPEN,
+                user=actor,
+                note=note[:255],
+                created_by=actor,
+            )
+
+    if user_is_maker(actor) and user_is_checker(actor):
+        note = (
+            f"SoD risk: user {actor.username} has maker+checker roles "
+            f"and initiated {request_type} for entry={entry.entry_no}."
+        )
+        if not _open_alert_exists(alert_type="accounting_sod_risk", note=note):
+            TransactionMonitoringAlert.objects.create(
+                alert_type="accounting_sod_risk",
+                severity="high",
+                status=TransactionMonitoringAlert.STATUS_OPEN,
+                user=actor,
+                note=note[:255],
+                created_by=actor,
+            )
+
+
 @login_required
 def accounting_dashboard(request):
     if not user_has_any_role(request.user, ACCOUNTING_ROLES):
@@ -1834,6 +1912,11 @@ def accounting_dashboard(request):
                         maker=request.user,
                         reason=reason,
                     )
+                    _raise_privileged_accounting_alert_if_needed(
+                        actor=request.user,
+                        request_type=JournalEntryApproval.TYPE_REVERSAL,
+                        entry=entry,
+                    )
                 messages.success(
                     request,
                     f"Reversal draft {entry.entry_no} created and submitted (approval #{approval.id}).",
@@ -1898,6 +1981,11 @@ def accounting_dashboard(request):
                         source_entry=source_entry,
                         maker=request.user,
                         reason=reason,
+                    )
+                    _raise_privileged_accounting_alert_if_needed(
+                        actor=request.user,
+                        request_type=JournalEntryApproval.TYPE_RECLASS,
+                        entry=entry,
                     )
                 messages.success(
                     request,

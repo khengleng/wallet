@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from dj_wallet.models import Wallet
@@ -444,6 +444,47 @@ class AccountingOpsWorkbenchTests(TestCase):
         self.assertGreaterEqual(len(queue_page.object_list), 1)
         self.assertTrue(
             all(req.request_type == JournalEntryApproval.TYPE_REVERSAL for req in queue_page.object_list)
+        )
+
+    @override_settings(
+        ACCOUNTING_PRIV_ACTION_DAILY_THRESHOLD=1,
+        ACCOUNTING_BUSINESS_HOUR_START=0,
+        ACCOUNTING_BUSINESS_HOUR_END=24,
+    )
+    def test_privileged_action_burst_creates_monitoring_alert(self):
+        posted = self._create_draft_entry()
+        posted.post(self.checker)
+        prior_entry = JournalEntry.objects.create(
+            entry_no="JE-OPS-4",
+            created_by=self.finance,
+            description="Prior privileged",
+            currency="USD",
+        )
+        JournalLine.objects.create(entry=prior_entry, account=self.cash, debit="10.00", credit="0")
+        JournalLine.objects.create(entry=prior_entry, account=self.liability, debit="0", credit="10.00")
+        JournalEntryApproval.objects.create(
+            entry=prior_entry,
+            source_entry=posted,
+            request_type=JournalEntryApproval.TYPE_REVERSAL,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="seed prior privileged request",
+        )
+        self.client.login(username="finance_ops", password="pass12345")
+        response = self.client.post(
+            reverse("accounting_dashboard"),
+            {
+                "form_type": "journal_reversal_request",
+                "source_entry_id": posted.id,
+                "reason": "new privileged action",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(
+            TransactionMonitoringAlert.objects.filter(
+                alert_type="accounting_privileged_action_burst",
+                user=self.finance,
+            ).exists()
         )
 
 
