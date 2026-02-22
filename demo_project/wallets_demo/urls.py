@@ -13,6 +13,11 @@ urlpatterns = [
     ),
     path('api/mobile/statement/', views.mobile_statement, name='mobile_statement'),
     path('api/mobile/assistant/chat/', views.mobile_assistant_chat, name='mobile_assistant_chat'),
+    path(
+        'api/mobile/assistant/diagnostics/',
+        views.mobile_assistant_diagnostics,
+        name='mobile_assistant_diagnostics',
+    ),
     path('api/mobile/onboarding/self/', views.mobile_self_onboard, name='mobile_self_onboard'),
     path('metrics', views.metrics, name='metrics'),
     path('fx/exchange/', views.wallet_fx_exchange, name='wallet_fx_exchange'),

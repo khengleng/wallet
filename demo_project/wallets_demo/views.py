@@ -1484,6 +1484,81 @@ def _mobile_bff_base_url() -> str:
     return base or "http://mobile-bff-service.railway.internal"
 
 
+def _mobile_bff_probe(
+    *,
+    path: str,
+    access_token: str = "",
+    method: str = "GET",
+    payload: dict | None = None,
+    timeout: int = 8,
+) -> dict:
+    url = f"{_mobile_bff_base_url()}{path}"
+    headers = {"Content-Type": "application/json"}
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    body_bytes = None
+    if payload is not None:
+        body_bytes = json.dumps(payload).encode("utf-8")
+    req = Request(url, data=body_bytes, headers=headers, method=method)
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+            status_code = int(getattr(resp, "status", 200) or 200)
+        try:
+            body = json.loads(raw or "{}")
+        except Exception:
+            body = {"raw": raw}
+        return {"ok": True, "status": status_code, "body": body}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@login_required
+def mobile_assistant_diagnostics(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "GET":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    access_token = request.session.get("oidc_access_token", "").strip()
+    health_probe = _mobile_bff_probe(path="/healthz", timeout=4)
+    result = {
+        "timestamp": timezone.now().isoformat(),
+        "mode": "session",
+        "mobile_bff_base_url": _mobile_bff_base_url(),
+        "session_token_present": bool(access_token),
+        "mobile_bff_health": health_probe,
+    }
+
+    if not access_token:
+        result["assistant_status"] = {
+            "enabled": False,
+            "status": "missing_session_token",
+            "reason": "Sign in again through SSO to refresh session token.",
+        }
+        return JsonResponse({"ok": True, "data": result})
+
+    profile_probe = _mobile_bff_probe(path="/v1/profile", access_token=access_token, timeout=6)
+    ai_probe = _mobile_bff_probe(path="/v1/personalization/ai", access_token=access_token, timeout=10)
+    result["mobile_bff_profile"] = profile_probe
+    result["mobile_bff_ai"] = ai_probe
+    if ai_probe.get("ok"):
+        ai_body = ai_probe.get("body", {})
+        ai_obj = ((ai_body.get("data") or {}).get("ai") or {}) if isinstance(ai_body, dict) else {}
+        result["assistant_status"] = {
+            "enabled": bool(ai_obj.get("enabled")),
+            "reason": ai_obj.get("reason", ""),
+            "source": "mobile_bff",
+        }
+    else:
+        result["assistant_status"] = {
+            "enabled": False,
+            "status": "upstream_error",
+            "reason": ai_probe.get("error", "Unknown mobile-bff error."),
+        }
+    return JsonResponse({"ok": True, "data": result})
+
+
 @transaction.atomic
 def mobile_assistant_chat(request):
     user = _mobile_current_user(request)

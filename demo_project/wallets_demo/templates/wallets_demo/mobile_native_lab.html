@@ -265,6 +265,12 @@
         <button id="btn-assistant-clear" class="btn btn-outline" type="button">Clear Chat</button>
       </div>
     </div>
+    <div class="card">
+      <h3>Assistant Diagnostics</h3>
+      <p class="text-muted">Check token/session state, channel connectivity, and AI readiness.</p>
+      <button id="btn-run-diagnostics" class="btn btn-primary" type="button">Run Diagnostics</button>
+      <div id="diagnostics-output" class="mono" style="margin-top:0.7rem;">Waiting for diagnostic run...</div>
+    </div>
   </section>
 </div>
 
@@ -276,6 +282,7 @@
 
     const apiOutput = document.getElementById("api-output");
     const homeOutput = document.getElementById("home-output");
+    const diagnosticsOutput = document.getElementById("diagnostics-output");
 
     const authModeEl = document.getElementById("auth-mode");
     const tokenPanelEl = document.getElementById("token-mode-panel");
@@ -307,6 +314,10 @@
 
     function setOutput(obj) {
       apiOutput.textContent = JSON.stringify(obj, null, 2);
+    }
+
+    function setDiagnostics(obj) {
+      diagnosticsOutput.textContent = JSON.stringify(obj, null, 2);
     }
 
     function parseMaybeJson(raw) {
@@ -558,12 +569,66 @@
       }
     }
 
+    async function probe(url, options) {
+      try {
+        const body = await callJson(url, options);
+        return { ok: true, status: 200, body: body };
+      } catch (err) {
+        const normalized = normalizeError(err);
+        return {
+          ok: false,
+          status: normalized.status || 0,
+          error: normalized
+        };
+      }
+    }
+
+    async function runDiagnostics() {
+      if (inTokenMode()) {
+        const headers = authHeaders();
+        if (!headers) {
+          const missing = {
+            ok: false,
+            mode: "token",
+            error: "Token mode selected but no token provided."
+          };
+          setDiagnostics(missing);
+          setOutput(missing);
+          return;
+        }
+        const profileProbe = await probe(gatewayBase + "/profile", { method: "GET", headers: headers });
+        const aiProbe = await probe(gatewayBase + "/personalization/ai", { method: "GET", headers: headers });
+        const aiBody = ((aiProbe.body || {}).data || {}).ai || {};
+        const diag = {
+          ok: true,
+          mode: "token",
+          token_present: true,
+          gateway_profile: profileProbe,
+          gateway_ai: aiProbe,
+          assistant_status: {
+            enabled: !!aiBody.enabled,
+            reason: aiBody.reason || "",
+            source: "gateway/mobile-bff"
+          },
+          timestamp: new Date().toISOString()
+        };
+        setDiagnostics(diag);
+        setOutput(diag);
+        return;
+      }
+
+      const diag = await probe("/api/mobile/assistant/diagnostics/", { method: "GET" });
+      setDiagnostics(diag);
+      setOutput(diag);
+    }
+
     document.getElementById("btn-load-home").addEventListener("click", loadHome);
     document.getElementById("btn-save-profile").addEventListener("click", saveProfile);
     document.getElementById("btn-save-signals").addEventListener("click", saveSignals);
     document.getElementById("btn-run-sandbox").addEventListener("click", runSandbox);
     document.getElementById("btn-chat-send").addEventListener("click", sendChat);
     document.getElementById("btn-assistant-send").addEventListener("click", sendChat);
+    document.getElementById("btn-run-diagnostics").addEventListener("click", runDiagnostics);
     document.getElementById("btn-assistant-clear").addEventListener("click", function() {
       const log = document.getElementById("chat-log");
       log.innerHTML = '<div class="chat-msg bot">Assistant ready. Ask anything about wallet usage.</div>';
@@ -619,6 +684,7 @@
     }
 
     loadHome();
+    runDiagnostics();
   })();
 </script>
 {% endblock %}
