@@ -5,7 +5,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{{ org_name }}{% endblock %}</title>
+    <title>{% block title %}{{ org_name|default:"DJ Wallet" }}{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -455,7 +455,7 @@
                 <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"></path>
                 <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"></path>
             </svg>
-            {{ org_name }}
+            {{ org_name|default:"DJ Wallet" }}
         </a>
         <div class="nav-links">
             {% if user.is_authenticated %}
