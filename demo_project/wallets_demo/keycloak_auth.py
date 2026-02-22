@@ -15,6 +15,23 @@ def _normalize_role_name(value: str) -> str:
     return value.strip().strip("/").lower().replace(" ", "_").replace("-", "_")
 
 
+def _role_canonical(value: str) -> str:
+    # Canonical form allows matching "superadmin" == "super_admin".
+    return _normalize_role_name(value).replace("_", "")
+
+
+def _add_group_role_candidates(candidates: set[str], group_value: str) -> None:
+    normalized = _normalize_role_name(group_value)
+    if normalized:
+        candidates.add(normalized)
+    if "/" not in group_value:
+        return
+    for segment in group_value.split("/"):
+        segment_normalized = _normalize_role_name(segment)
+        if segment_normalized:
+            candidates.add(segment_normalized)
+
+
 def decode_access_token_claims(access_token: str) -> dict[str, Any]:
     parts = access_token.split(".")
     if len(parts) < 2:
@@ -36,7 +53,7 @@ def extract_keycloak_role_candidates(claims: dict[str, Any]) -> set[str]:
 
     for role in claims.get("groups", []) or []:
         if isinstance(role, str):
-            candidates.add(_normalize_role_name(role))
+            _add_group_role_candidates(candidates, role)
 
     realm_access = claims.get("realm_access", {}) or {}
     for role in realm_access.get("roles", []) or []:
@@ -110,9 +127,14 @@ def merge_keycloak_claims(*claim_sets: dict[str, Any]) -> dict[str, Any]:
 def map_keycloak_claims_to_rbac_roles(claims: dict[str, Any]) -> list[str]:
     mapping = getattr(settings, "KEYCLOAK_ROLE_GROUP_MAP", {})
     candidates = extract_keycloak_role_candidates(claims)
+    candidate_canonical = {_role_canonical(role) for role in candidates}
     mapped: list[str] = []
     for keycloak_role, app_role in mapping.items():
-        if keycloak_role in candidates and app_role not in mapped:
+        normalized_keycloak_role = _normalize_role_name(keycloak_role)
+        if (
+            normalized_keycloak_role in candidates
+            or _role_canonical(normalized_keycloak_role) in candidate_canonical
+        ) and app_role not in mapped:
             mapped.append(app_role)
     return mapped
 
