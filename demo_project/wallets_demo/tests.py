@@ -1,9 +1,12 @@
 from decimal import Decimal
+import io
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import Client, TestCase
 from django.urls import reverse
+from django.utils import timezone
 from dj_wallet.models import Wallet
 
 from .models import (
@@ -34,6 +37,7 @@ from .models import (
     OperationCase,
     ReconciliationBreak,
     ReconciliationRun,
+    SettlementException,
     SettlementPayout,
     TransactionMonitoringAlert,
     TreasuryAccount,
@@ -1217,4 +1221,158 @@ class OperationalHardeningTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertTrue(
             AccessReviewRecord.objects.filter(user=checker_user, issue_type="segregation_of_duty").exists()
+        )
+
+
+class OpsWorkflowEscalationCommandTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.actor = User.objects.create_user(username="ops_actor", password="pass12345")
+        assign_roles(self.actor, ["admin"])
+        self.finance = User.objects.create_user(username="ops_finance", password="pass12345")
+        assign_roles(self.finance, ["finance"])
+        self.checker = User.objects.create_user(username="ops_checker", password="pass12345")
+        assign_roles(self.checker, ["admin"])
+        self.customer = User.objects.create_user(username="ops_cmd_customer", password="pass12345")
+        self.merchant = Merchant.objects.create(
+            code="MESC001",
+            name="Escalation Merchant",
+            created_by=self.actor,
+            updated_by=self.actor,
+            owner=self.actor,
+        )
+        self.cash = ChartOfAccount.objects.create(
+            code="9010",
+            name="Esc Cash",
+            account_type=ChartOfAccount.TYPE_ASSET,
+            currency="USD",
+        )
+        self.liability = ChartOfAccount.objects.create(
+            code="9020",
+            name="Esc Liability",
+            account_type=ChartOfAccount.TYPE_LIABILITY,
+            currency="USD",
+        )
+
+    def _create_stale_journal_approval(self):
+        entry = JournalEntry.objects.create(
+            entry_no="JE-ESC-1",
+            created_by=self.finance,
+            currency="USD",
+        )
+        JournalLine.objects.create(entry=entry, account=self.cash, debit="50.00", credit="0")
+        JournalLine.objects.create(entry=entry, account=self.liability, debit="0", credit="50.00")
+        approval = JournalEntryApproval.objects.create(
+            entry=entry,
+            request_type=JournalEntryApproval.TYPE_POST,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="stale approval",
+        )
+        JournalEntryApproval.objects.filter(id=approval.id).update(
+            created_at=timezone.now() - timezone.timedelta(hours=24)
+        )
+        return approval
+
+    def _create_stale_settlement_exception(self):
+        exception = SettlementException.objects.create(
+            reason_code="bank_timeout",
+            severity="high",
+            status=SettlementException.STATUS_OPEN,
+            detail="stale settlement exception",
+            created_by=self.actor,
+        )
+        SettlementException.objects.filter(id=exception.id).update(
+            created_at=timezone.now() - timezone.timedelta(hours=30)
+        )
+        return exception
+
+    def _create_stale_reconciliation_break(self):
+        run = ReconciliationRun.objects.create(
+            source="internal_vs_settlement",
+            run_no="RECON-ESC-1",
+            currency="USD",
+            period_start=timezone.localdate(),
+            period_end=timezone.localdate(),
+            created_by=self.actor,
+            status=ReconciliationRun.STATUS_COMPLETED,
+        )
+        recon_break = ReconciliationBreak.objects.create(
+            run=run,
+            merchant=self.merchant,
+            break_category=ReconciliationBreak.CATEGORY_AMOUNT,
+            match_status=ReconciliationBreak.MATCH_UNMATCHED,
+            expected_amount=Decimal("100.00"),
+            actual_amount=Decimal("95.00"),
+            delta_amount=Decimal("5.00"),
+            status=ReconciliationBreak.STATUS_OPEN,
+            created_by=self.actor,
+        )
+        ReconciliationBreak.objects.filter(id=recon_break.id).update(
+            created_at=timezone.now() - timezone.timedelta(hours=36)
+        )
+        return recon_break
+
+    def test_escalate_ops_work_queue_creates_alerts(self):
+        self._create_stale_journal_approval()
+        self._create_stale_settlement_exception()
+        self._create_stale_reconciliation_break()
+
+        out = io.StringIO()
+        call_command(
+            "escalate_ops_work_queue",
+            actor_username=self.actor.username,
+            stdout=out,
+        )
+        output = out.getvalue()
+        self.assertIn("journal=1", output)
+        self.assertIn("settlement_exceptions=1", output)
+        self.assertIn("reconciliation_breaks=1", output)
+        self.assertEqual(
+            TransactionMonitoringAlert.objects.filter(alert_type="journal_approval_sla").count(),
+            1,
+        )
+        self.assertEqual(
+            TransactionMonitoringAlert.objects.filter(alert_type="settlement_exception_sla").count(),
+            1,
+        )
+        self.assertEqual(
+            TransactionMonitoringAlert.objects.filter(alert_type="reconciliation_break_sla").count(),
+            1,
+        )
+
+    def test_escalate_ops_work_queue_dry_run_no_alerts(self):
+        self._create_stale_journal_approval()
+        self._create_stale_settlement_exception()
+        self._create_stale_reconciliation_break()
+
+        out = io.StringIO()
+        call_command(
+            "escalate_ops_work_queue",
+            actor_username=self.actor.username,
+            dry_run=True,
+            stdout=out,
+        )
+        output = out.getvalue()
+        self.assertIn("dry_run=True", output)
+        self.assertEqual(TransactionMonitoringAlert.objects.count(), 0)
+
+    def test_escalate_ops_work_queue_is_idempotent_for_open_alerts(self):
+        self._create_stale_journal_approval()
+        self._create_stale_settlement_exception()
+        self._create_stale_reconciliation_break()
+
+        call_command("escalate_ops_work_queue", actor_username=self.actor.username, stdout=io.StringIO())
+        call_command("escalate_ops_work_queue", actor_username=self.actor.username, stdout=io.StringIO())
+        self.assertEqual(
+            TransactionMonitoringAlert.objects.filter(alert_type="journal_approval_sla").count(),
+            1,
+        )
+        self.assertEqual(
+            TransactionMonitoringAlert.objects.filter(alert_type="settlement_exception_sla").count(),
+            1,
+        )
+        self.assertEqual(
+            TransactionMonitoringAlert.objects.filter(alert_type="reconciliation_break_sla").count(),
+            1,
         )
