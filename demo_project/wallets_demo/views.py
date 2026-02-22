@@ -3946,109 +3946,123 @@ def operations_center(request):
         except Exception as exc:
             messages.error(request, f"Operation failed: {exc}")
 
-    merchants = list(Merchant.objects.select_related("owner").order_by("code")[:200])
-    for merchant in merchants:
-        MerchantLoyaltyProgram.objects.get_or_create(merchant=merchant)
-        MerchantWalletCapability.objects.get_or_create(merchant=merchant)
-        MerchantRiskProfile.objects.get_or_create(
-            merchant=merchant,
-            defaults={"updated_by": merchant.updated_by},
+    try:
+        merchants = list(Merchant.objects.select_related("owner").order_by("code")[:200])
+        for merchant in merchants:
+            try:
+                MerchantLoyaltyProgram.objects.get_or_create(merchant=merchant)
+                MerchantWalletCapability.objects.get_or_create(merchant=merchant)
+                MerchantRiskProfile.objects.get_or_create(
+                    merchant=merchant,
+                    defaults={"updated_by": merchant.updated_by},
+                )
+            except Exception:
+                logger.exception(
+                    "Operations center merchant bootstrap failed for merchant_id=%s",
+                    merchant.id,
+                )
+        cases = OperationCase.objects.select_related("customer", "merchant", "assigned_to").order_by("-created_at")[:100]
+        case_ids = [item.id for item in cases]
+        case_notes = OperationCaseNote.objects.select_related("created_by", "case").filter(
+            case_id__in=case_ids
+        ).order_by("-created_at")[:300]
+        loyalty_events = MerchantLoyaltyEvent.objects.select_related("merchant", "customer").order_by("-created_at")[:100]
+        cashflow_events = (
+            MerchantCashflowEvent.objects.select_related(
+                "merchant", "from_user", "to_user", "counterparty_merchant"
+            )
+            .order_by("-created_at")[:100]
         )
-    cases = OperationCase.objects.select_related("customer", "merchant", "assigned_to").order_by("-created_at")[:100]
-    case_ids = [item.id for item in cases]
-    case_notes = OperationCaseNote.objects.select_related("created_by", "case").filter(
-        case_id__in=case_ids
-    ).order_by("-created_at")[:300]
-    loyalty_events = MerchantLoyaltyEvent.objects.select_related("merchant", "customer").order_by("-created_at")[:100]
-    cashflow_events = (
-        MerchantCashflowEvent.objects.select_related(
-            "merchant", "from_user", "to_user", "counterparty_merchant"
+        kyb_requests = MerchantKYBRequest.objects.select_related(
+            "merchant", "maker", "checker"
+        ).order_by("-created_at")[:100]
+        fee_rules = MerchantFeeRule.objects.select_related("merchant").order_by("merchant__code", "flow_type")
+        risk_profiles = MerchantRiskProfile.objects.select_related("merchant").order_by("merchant__code")
+        api_credentials = MerchantApiCredential.objects.select_related("merchant").order_by("merchant__code")
+        settlements = MerchantSettlementRecord.objects.select_related(
+            "merchant", "created_by", "approved_by"
+        ).order_by("-created_at")[:100]
+        refund_requests = DisputeRefundRequest.objects.select_related(
+            "case", "merchant", "customer", "maker", "checker"
+        ).order_by("-created_at")[:100]
+        payouts = SettlementPayout.objects.select_related(
+            "settlement", "settlement__merchant", "initiated_by", "approved_by"
+        ).order_by("-created_at")[:100]
+        reconciliation_runs = ReconciliationRun.objects.select_related(
+            "created_by"
+        ).order_by("-created_at")[:100]
+        reconciliation_breaks = ReconciliationBreak.objects.select_related(
+            "run", "merchant", "assigned_to", "resolved_by"
+        ).order_by("-created_at")[:100]
+        chargebacks = ChargebackCase.objects.select_related(
+            "case", "merchant", "customer", "assigned_to"
+        ).order_by("-created_at")[:100]
+        chargeback_evidences = ChargebackEvidence.objects.select_related(
+            "chargeback", "uploaded_by"
+        ).order_by("-created_at")[:100]
+        accounting_periods = AccountingPeriodClose.objects.select_related(
+            "created_by", "closed_by"
+        ).order_by("-period_start")[:60]
+        backdate_approvals = JournalBackdateApproval.objects.select_related(
+            "entry", "maker", "checker"
+        ).order_by("-created_at")[:100]
+        sanction_screenings = SanctionScreeningRecord.objects.select_related(
+            "user", "screened_by"
+        ).order_by("-created_at")[:100]
+        monitoring_alerts = TransactionMonitoringAlert.objects.select_related(
+            "user", "merchant", "case", "assigned_to"
+        ).order_by("-created_at")[:100]
+        webhook_events = MerchantWebhookEvent.objects.select_related(
+            "credential", "credential__merchant"
+        ).order_by("-created_at")[:100]
+        access_reviews = AccessReviewRecord.objects.select_related(
+            "user", "reviewer"
+        ).order_by("-created_at")[:100]
+        return render(
+            request,
+            "wallets_demo/operations_center.html",
+            {
+                "merchants": merchants,
+                "cases": cases,
+                "case_notes_feed": case_notes,
+                "loyalty_events": loyalty_events,
+                "cashflow_events": cashflow_events,
+                "kyb_requests": kyb_requests,
+                "fee_rules": fee_rules,
+                "risk_profiles": risk_profiles,
+                "api_credentials": api_credentials,
+                "settlements": settlements,
+                "refund_requests": refund_requests,
+                "payouts": payouts,
+                "reconciliation_runs": reconciliation_runs,
+                "reconciliation_breaks": reconciliation_breaks,
+                "chargebacks": chargebacks,
+                "chargeback_evidences": chargeback_evidences,
+                "accounting_periods": accounting_periods,
+                "backdate_approvals": backdate_approvals,
+                "sanction_screenings": sanction_screenings,
+                "monitoring_alerts": monitoring_alerts,
+                "webhook_events": webhook_events,
+                "access_reviews": access_reviews,
+                "journal_entries": JournalEntry.objects.order_by("-created_at")[:200],
+                "users": User.objects.order_by("username")[:300],
+                "operation_settings": _operation_settings(),
+                "supported_currencies": _supported_currencies(),
+                "flow_choices": FLOW_CHOICES,
+                "case_type_choices": OperationCase.TYPE_CHOICES,
+                "case_priority_choices": OperationCase.PRIORITY_CHOICES,
+                "case_status_choices": OperationCase.STATUS_CHOICES,
+                "event_type_choices": MerchantLoyaltyEvent.TYPE_CHOICES,
+                "now": timezone.now(),
+            },
         )
-        .order_by("-created_at")[:100]
-    )
-    kyb_requests = MerchantKYBRequest.objects.select_related(
-        "merchant", "maker", "checker"
-    ).order_by("-created_at")[:100]
-    fee_rules = MerchantFeeRule.objects.select_related("merchant").order_by("merchant__code", "flow_type")
-    risk_profiles = MerchantRiskProfile.objects.select_related("merchant").order_by("merchant__code")
-    api_credentials = MerchantApiCredential.objects.select_related("merchant").order_by("merchant__code")
-    settlements = MerchantSettlementRecord.objects.select_related(
-        "merchant", "created_by", "approved_by"
-    ).order_by("-created_at")[:100]
-    refund_requests = DisputeRefundRequest.objects.select_related(
-        "case", "merchant", "customer", "maker", "checker"
-    ).order_by("-created_at")[:100]
-    payouts = SettlementPayout.objects.select_related(
-        "settlement", "settlement__merchant", "initiated_by", "approved_by"
-    ).order_by("-created_at")[:100]
-    reconciliation_runs = ReconciliationRun.objects.select_related(
-        "created_by"
-    ).order_by("-created_at")[:100]
-    reconciliation_breaks = ReconciliationBreak.objects.select_related(
-        "run", "merchant", "assigned_to", "resolved_by"
-    ).order_by("-created_at")[:100]
-    chargebacks = ChargebackCase.objects.select_related(
-        "case", "merchant", "customer", "assigned_to"
-    ).order_by("-created_at")[:100]
-    chargeback_evidences = ChargebackEvidence.objects.select_related(
-        "chargeback", "uploaded_by"
-    ).order_by("-created_at")[:100]
-    accounting_periods = AccountingPeriodClose.objects.select_related(
-        "created_by", "closed_by"
-    ).order_by("-period_start")[:60]
-    backdate_approvals = JournalBackdateApproval.objects.select_related(
-        "entry", "maker", "checker"
-    ).order_by("-created_at")[:100]
-    sanction_screenings = SanctionScreeningRecord.objects.select_related(
-        "user", "screened_by"
-    ).order_by("-created_at")[:100]
-    monitoring_alerts = TransactionMonitoringAlert.objects.select_related(
-        "user", "merchant", "case", "assigned_to"
-    ).order_by("-created_at")[:100]
-    webhook_events = MerchantWebhookEvent.objects.select_related(
-        "credential", "credential__merchant"
-    ).order_by("-created_at")[:100]
-    access_reviews = AccessReviewRecord.objects.select_related(
-        "user", "reviewer"
-    ).order_by("-created_at")[:100]
-    return render(
-        request,
-        "wallets_demo/operations_center.html",
-        {
-            "merchants": merchants,
-            "cases": cases,
-            "case_notes_feed": case_notes,
-            "loyalty_events": loyalty_events,
-            "cashflow_events": cashflow_events,
-            "kyb_requests": kyb_requests,
-            "fee_rules": fee_rules,
-            "risk_profiles": risk_profiles,
-            "api_credentials": api_credentials,
-            "settlements": settlements,
-            "refund_requests": refund_requests,
-            "payouts": payouts,
-            "reconciliation_runs": reconciliation_runs,
-            "reconciliation_breaks": reconciliation_breaks,
-            "chargebacks": chargebacks,
-            "chargeback_evidences": chargeback_evidences,
-            "accounting_periods": accounting_periods,
-            "backdate_approvals": backdate_approvals,
-            "sanction_screenings": sanction_screenings,
-            "monitoring_alerts": monitoring_alerts,
-            "webhook_events": webhook_events,
-            "access_reviews": access_reviews,
-            "journal_entries": JournalEntry.objects.order_by("-created_at")[:200],
-            "users": User.objects.order_by("username")[:300],
-            "operation_settings": _operation_settings(),
-            "supported_currencies": _supported_currencies(),
-            "flow_choices": FLOW_CHOICES,
-            "case_type_choices": OperationCase.TYPE_CHOICES,
-            "case_priority_choices": OperationCase.PRIORITY_CHOICES,
-            "case_status_choices": OperationCase.STATUS_CHOICES,
-            "event_type_choices": MerchantLoyaltyEvent.TYPE_CHOICES,
-            "now": timezone.now(),
-        },
-    )
+    except Exception:
+        logger.exception("Operations center render failed for user_id=%s", request.user.id)
+        messages.error(
+            request,
+            "Operations page encountered an error. Please retry in a few seconds.",
+        )
+        return redirect("backoffice")
 
 
 @login_required
