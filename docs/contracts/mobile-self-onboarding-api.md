@@ -87,7 +87,9 @@ This document defines the mobile-app-facing onboarding endpoints currently avail
 - Creates CIF if missing (one CIF per user).
 - Assigns default service class (config `MOBILE_SELF_ONBOARD_DEFAULT_SERVICE_CLASS`, fallback `Z`, then highest code active policy).
 - Sets `wallet_type` to customer (`C`).
+- Starts CIF in `pending_kyc`.
 - Provisions base wallet currency plus any supported currencies requested.
+- Freezes wallets while CIF is not active.
 - Writes audit event `mobile.self_onboard`.
 
 ### Success response

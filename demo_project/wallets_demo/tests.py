@@ -18,6 +18,7 @@ from .models import (
     ChargebackCase,
     ChargebackEvidence,
     CustomerCIF,
+    CustomerClassUpgradeRequest,
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
@@ -806,15 +807,102 @@ class MobileSelfOnboardingApiTests(TestCase):
         cif = CustomerCIF.objects.get(user=self.user)
         self.assertEqual(cif.legal_name, "Mobile User")
         self.assertEqual(cif.service_class_id, self.default_policy.id)
-        self.assertEqual(cif.status, CustomerCIF.STATUS_ACTIVE)
+        self.assertEqual(cif.status, CustomerCIF.STATUS_PENDING_KYC)
+        self.assertTrue(self.user.get_wallet("default").is_frozen)
 
         bootstrap = self.client.get(reverse("mobile_bootstrap"))
         self.assertEqual(bootstrap.status_code, 200)
         bootstrap_payload = bootstrap.json()
         self.assertTrue(bootstrap_payload["data"]["onboarding"]["is_completed"])
+        self.assertEqual(bootstrap_payload["data"]["onboarding"]["status"], CustomerCIF.STATUS_PENDING_KYC)
         wallet_currencies = {w["currency"] for w in bootstrap_payload["data"]["wallets"]}
         self.assertIn("USD", wallet_currencies)
         self.assertIn("EUR", wallet_currencies)
+
+
+class PolicyHubUpgradeWorkflowTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.maker = User.objects.create_user(username="policy_maker", password="pass12345")
+        self.checker = User.objects.create_user(username="policy_checker", password="pass12345")
+        self.customer = User.objects.create_user(
+            username="policy_customer",
+            email="policy_customer@example.com",
+            password="pass12345",
+        )
+        assign_roles(self.maker, ["operation"])
+        assign_roles(self.checker, ["risk"])
+
+        self.policy_z = ServiceClassPolicy.objects.create(
+            entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+            code="Z",
+            name="Starter",
+            is_active=True,
+            allow_deposit=True,
+            allow_withdraw=False,
+            allow_transfer=False,
+            allow_fx=False,
+            daily_txn_count_limit=10,
+            daily_amount_limit=Decimal("1000"),
+            monthly_txn_count_limit=100,
+            monthly_amount_limit=Decimal("10000"),
+        )
+        self.policy_a = ServiceClassPolicy.objects.create(
+            entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+            code="A",
+            name="Premium",
+            is_active=True,
+            allow_deposit=True,
+            allow_withdraw=True,
+            allow_transfer=True,
+            allow_fx=True,
+        )
+        self.cif = CustomerCIF.objects.create(
+            cif_no="CIF-POLICY-1",
+            user=self.customer,
+            legal_name="Policy Customer",
+            mobile_no="+85510001000",
+            email=self.customer.email,
+            service_class=self.policy_z,
+            status=CustomerCIF.STATUS_PENDING_KYC,
+            created_by=self.maker,
+        )
+        self.customer.freeze_wallet("default")
+
+    def test_policy_upgrade_request_and_checker_approval_activates_cif(self):
+        self.client.login(username="policy_maker", password="pass12345")
+        response = self.client.post(
+            reverse("policy_hub"),
+            {
+                "form_type": "policy_upgrade_customer_request",
+                "cif_id": self.cif.id,
+                "target_policy_id": self.policy_a.id,
+                "maker_note": "KYC docs completed",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        req = CustomerClassUpgradeRequest.objects.get()
+        self.assertEqual(req.status, CustomerClassUpgradeRequest.STATUS_PENDING)
+
+        self.client.login(username="policy_checker", password="pass12345")
+        response = self.client.post(
+            reverse("policy_hub"),
+            {
+                "form_type": "policy_upgrade_customer_decision",
+                "request_id": req.id,
+                "decision": "approve",
+                "checker_note": "Approved after verification",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        req.refresh_from_db()
+        self.cif.refresh_from_db()
+        self.customer.refresh_from_db()
+        self.assertEqual(req.status, CustomerClassUpgradeRequest.STATUS_APPROVED)
+        self.assertEqual(self.cif.service_class_id, self.policy_a.id)
+        self.assertEqual(self.cif.status, CustomerCIF.STATUS_ACTIVE)
+        self.assertFalse(self.customer.get_wallet("default").is_frozen)
 
 
 class MerchantEnterpriseOperationsTests(TestCase):

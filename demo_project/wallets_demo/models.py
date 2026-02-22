@@ -817,6 +817,10 @@ class ServiceClassPolicy(models.Model):
     daily_amount_limit = models.DecimalField(
         max_digits=20, decimal_places=2, null=True, blank=True
     )
+    monthly_txn_count_limit = models.PositiveIntegerField(null=True, blank=True)
+    monthly_amount_limit = models.DecimalField(
+        max_digits=20, decimal_places=2, null=True, blank=True
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -839,8 +843,12 @@ class ServiceClassPolicy(models.Model):
             raise ValidationError("Single transaction limit must be greater than 0.")
         if self.daily_amount_limit is not None and self.daily_amount_limit <= Decimal("0"):
             raise ValidationError("Daily amount limit must be greater than 0.")
+        if self.monthly_amount_limit is not None and self.monthly_amount_limit <= Decimal("0"):
+            raise ValidationError("Monthly amount limit must be greater than 0.")
         if self.daily_txn_count_limit is not None and self.daily_txn_count_limit <= 0:
             raise ValidationError("Daily transaction count limit must be greater than 0.")
+        if self.monthly_txn_count_limit is not None and self.monthly_txn_count_limit <= 0:
+            raise ValidationError("Monthly transaction count limit must be greater than 0.")
 
     def allows_wallet_action(self, action: str) -> bool:
         return {
@@ -2374,10 +2382,12 @@ class OperationCaseNote(models.Model):
 
 
 class CustomerCIF(models.Model):
+    STATUS_PENDING_KYC = "pending_kyc"
     STATUS_ACTIVE = "active"
     STATUS_BLOCKED = "blocked"
     STATUS_CLOSED = "closed"
     STATUS_CHOICES = (
+        (STATUS_PENDING_KYC, "Pending KYC"),
         (STATUS_ACTIVE, "Active"),
         (STATUS_BLOCKED, "Blocked"),
         (STATUS_CLOSED, "Closed"),
@@ -2450,3 +2460,70 @@ class AnalyticsEvent(models.Model):
 
     def __str__(self):
         return f"{self.source}:{self.event_name}"
+
+
+class CustomerClassUpgradeRequest(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    )
+
+    cif = models.ForeignKey(
+        CustomerCIF,
+        on_delete=models.PROTECT,
+        related_name="class_upgrade_requests",
+    )
+    from_service_class = models.ForeignKey(
+        ServiceClassPolicy,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="class_upgrade_from_requests",
+        limit_choices_to={"entity_type": ServiceClassPolicy.ENTITY_CUSTOMER},
+    )
+    to_service_class = models.ForeignKey(
+        ServiceClassPolicy,
+        on_delete=models.PROTECT,
+        related_name="class_upgrade_to_requests",
+        limit_choices_to={"entity_type": ServiceClassPolicy.ENTITY_CUSTOMER},
+    )
+    maker = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="made_class_upgrade_requests",
+    )
+    checker = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="checked_class_upgrade_requests",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    maker_note = models.TextField(blank=True, default="")
+    checker_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def clean(self):
+        if self.to_service_class.entity_type != ServiceClassPolicy.ENTITY_CUSTOMER:
+            raise ValidationError("Target policy must be customer type.")
+        if self.from_service_class and self.from_service_class.entity_type != ServiceClassPolicy.ENTITY_CUSTOMER:
+            raise ValidationError("Source policy must be customer type.")
+        if self.from_service_class_id and self.to_service_class_id and self.from_service_class_id == self.to_service_class_id:
+            raise ValidationError("Target policy must be different from current policy.")
+
+    def __str__(self):
+        return f"CIF {self.cif.cif_no}: {self.from_service_class_id} -> {self.to_service_class_id} ({self.status})"

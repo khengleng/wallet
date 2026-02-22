@@ -71,6 +71,7 @@ from .models import (
     ChargebackCase,
     ChargebackEvidence,
     CustomerCIF,
+    CustomerClassUpgradeRequest,
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
@@ -881,10 +882,36 @@ def _default_mobile_customer_service_class() -> ServiceClassPolicy | None:
         ).first()
         if explicit is not None:
             return explicit
-    return ServiceClassPolicy.objects.filter(
+    fallback = ServiceClassPolicy.objects.filter(
         entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
         is_active=True,
     ).order_by("-code", "id").first()
+    if fallback is not None:
+        return fallback
+    policy, _created = ServiceClassPolicy.objects.get_or_create(
+        entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+        code="Z",
+        defaults={
+            "name": "Class Z - Starter",
+            "description": "Default low-limit profile for self onboarding.",
+            "is_active": True,
+            "allow_deposit": True,
+            "allow_withdraw": False,
+            "allow_transfer": False,
+            "allow_fx": False,
+            "allow_b2b": False,
+            "allow_b2c": True,
+            "allow_c2b": True,
+            "allow_p2g": False,
+            "allow_g2p": False,
+            "single_txn_limit": Decimal("200.00"),
+            "daily_txn_count_limit": 10,
+            "daily_amount_limit": Decimal("1000.00"),
+            "monthly_txn_count_limit": 100,
+            "monthly_amount_limit": Decimal("10000.00"),
+        },
+    )
+    return policy
 
 
 def _mobile_wallet_currencies(payload: dict) -> list[str]:
@@ -1003,7 +1030,7 @@ def mobile_self_onboard(request):
             "mobile_no": mobile_no,
             "email": onboarding_email,
             "service_class": _default_mobile_customer_service_class(),
-            "status": CustomerCIF.STATUS_ACTIVE,
+            "status": CustomerCIF.STATUS_PENDING_KYC,
             "created_by": user,
         },
     )
@@ -1034,6 +1061,8 @@ def mobile_self_onboard(request):
     for currency in _mobile_wallet_currencies(payload):
         wallet = _wallet_for_currency(user, currency)
         _ensure_wallet_business_id(wallet)
+        if customer_cif.status != CustomerCIF.STATUS_ACTIVE and not wallet.is_frozen:
+            user.freeze_wallet(wallet.slug)
         wallets.append(_serialize_wallet_for_mobile(wallet))
 
     _audit(
@@ -1820,6 +1849,8 @@ def _enforce_service_class_policy(
     flow_type: str = "",
     current_daily_count: int = 0,
     current_daily_amount: Decimal = Decimal("0"),
+    current_monthly_count: int = 0,
+    current_monthly_amount: Decimal = Decimal("0"),
 ):
     if not policy.is_active:
         raise ValidationError(f"{entity_label} service class {policy.code} is inactive.")
@@ -1849,6 +1880,20 @@ def _enforce_service_class_policy(
         raise ValidationError(
             f"{entity_label} exceeds daily amount limit ({policy.daily_amount_limit})."
         )
+    if (
+        policy.monthly_txn_count_limit is not None
+        and current_monthly_count + 1 > policy.monthly_txn_count_limit
+    ):
+        raise ValidationError(
+            f"{entity_label} exceeds monthly transaction count limit ({policy.monthly_txn_count_limit})."
+        )
+    if (
+        policy.monthly_amount_limit is not None
+        and current_monthly_amount + amount > policy.monthly_amount_limit
+    ):
+        raise ValidationError(
+            f"{entity_label} exceeds monthly amount limit ({policy.monthly_amount_limit})."
+        )
 
 
 def _daily_user_activity(user: User, currency: str) -> tuple[int, Decimal]:
@@ -1862,6 +1907,28 @@ def _daily_user_activity(user: User, currency: str) -> tuple[int, Decimal]:
         wallet__slug=_wallet_slug(currency),
         created_at__gte=day_start,
         created_at__lte=day_end,
+    )
+    total = Decimal("0")
+    for value in qs.values_list("amount", flat=True):
+        try:
+            total += abs(Decimal(str(value)))
+        except Exception:
+            continue
+    return qs.count(), total
+
+
+def _monthly_user_activity(user: User, currency: str) -> tuple[int, Decimal]:
+    user_ct = ContentType.objects.get_for_model(User)
+    today = timezone.localdate()
+    month_start = timezone.make_aware(datetime.combine(today.replace(day=1), dt_time.min))
+    next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
+    month_end = timezone.make_aware(datetime.combine(next_month - timedelta(days=1), dt_time.max))
+    qs = Transaction.objects.filter(
+        wallet__holder_type=user_ct,
+        wallet__holder_id=user.id,
+        wallet__slug=_wallet_slug(currency),
+        created_at__gte=month_start,
+        created_at__lte=month_end,
     )
     total = Decimal("0")
     for value in qs.values_list("amount", flat=True):
@@ -1886,6 +1953,21 @@ def _daily_merchant_activity(merchant: Merchant, currency: str) -> tuple[int, De
     return qs.count(), total
 
 
+def _monthly_merchant_activity(merchant: Merchant, currency: str) -> tuple[int, Decimal]:
+    today = timezone.localdate()
+    month_start = timezone.make_aware(datetime.combine(today.replace(day=1), dt_time.min))
+    next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
+    month_end = timezone.make_aware(datetime.combine(next_month - timedelta(days=1), dt_time.max))
+    qs = MerchantCashflowEvent.objects.filter(
+        merchant=merchant,
+        currency=currency,
+        created_at__gte=month_start,
+        created_at__lte=month_end,
+    )
+    total = qs.aggregate(total=models.Sum("amount")).get("total") or Decimal("0")
+    return qs.count(), total
+
+
 def _enforce_customer_service_policy(
     user: User,
     *,
@@ -1897,7 +1979,12 @@ def _enforce_customer_service_policy(
     customer_cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
     if customer_cif is None or customer_cif.service_class is None:
         return
+    if customer_cif.status != CustomerCIF.STATUS_ACTIVE:
+        raise ValidationError(
+            f"Customer {customer_cif.cif_no} is {customer_cif.status}. Wallet operations require active KYC."
+        )
     count, daily_amount = _daily_user_activity(user, currency)
+    monthly_count, monthly_amount = _monthly_user_activity(user, currency)
     _enforce_service_class_policy(
         customer_cif.service_class,
         action=action,
@@ -1905,6 +1992,8 @@ def _enforce_customer_service_policy(
         flow_type=flow_type,
         current_daily_count=count,
         current_daily_amount=daily_amount,
+        current_monthly_count=monthly_count,
+        current_monthly_amount=monthly_amount,
         entity_label=f"Customer {customer_cif.cif_no}",
     )
 
@@ -1920,6 +2009,7 @@ def _enforce_merchant_service_policy(
     if merchant.service_class is None:
         return
     count, daily_amount = _daily_merchant_activity(merchant, currency)
+    monthly_count, monthly_amount = _monthly_merchant_activity(merchant, currency)
     _enforce_service_class_policy(
         merchant.service_class,
         action=action,
@@ -1927,6 +2017,8 @@ def _enforce_merchant_service_policy(
         flow_type=flow_type,
         current_daily_count=count,
         current_daily_amount=daily_amount,
+        current_monthly_count=monthly_count,
+        current_monthly_amount=monthly_amount,
         entity_label=f"Merchant {merchant.code}",
     )
 
@@ -5568,6 +5660,7 @@ def wallet_management(request):
                 if not legal_name:
                     raise ValidationError("Legal name is required.")
                 if status not in {
+                    CustomerCIF.STATUS_PENDING_KYC,
                     CustomerCIF.STATUS_ACTIVE,
                     CustomerCIF.STATUS_BLOCKED,
                     CustomerCIF.STATUS_CLOSED,
@@ -5710,6 +5803,7 @@ def wallet_management(request):
             | Q(mobile_no__icontains=cif_query)
         )
     if cif_status in {
+        CustomerCIF.STATUS_PENDING_KYC,
         CustomerCIF.STATUS_ACTIVE,
         CustomerCIF.STATUS_BLOCKED,
         CustomerCIF.STATUS_CLOSED,
@@ -6068,6 +6162,14 @@ def policy_hub(request):
                     request.POST.get("daily_amount_limit"),
                     "daily amount limit",
                 )
+                policy.monthly_txn_count_limit = _parse_optional_positive_int(
+                    request.POST.get("monthly_txn_count_limit"),
+                    "monthly transaction count limit",
+                )
+                policy.monthly_amount_limit = _parse_optional_amount(
+                    request.POST.get("monthly_amount_limit"),
+                    "monthly amount limit",
+                )
                 policy.full_clean()
                 policy.save()
                 messages.success(request, f"Policy {policy.entity_type}:{policy.code} saved.")
@@ -6087,6 +6189,96 @@ def policy_hub(request):
                 messages.success(
                     request,
                     f"Assigned policy for {cif.cif_no}: {policy.code if policy else 'Unassigned'}.",
+                )
+                return redirect("policy_hub")
+
+            if form_type == "policy_upgrade_customer_request":
+                cif = CustomerCIF.objects.get(id=request.POST.get("cif_id"))
+                policy_id = (request.POST.get("target_policy_id") or "").strip()
+                if not policy_id:
+                    raise ValidationError("Target policy is required.")
+                to_policy = ServiceClassPolicy.objects.get(
+                    id=policy_id,
+                    entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+                    is_active=True,
+                )
+                if cif.service_class_id == to_policy.id:
+                    raise ValidationError("Target policy is already assigned.")
+                if CustomerClassUpgradeRequest.objects.filter(
+                    cif=cif,
+                    status=CustomerClassUpgradeRequest.STATUS_PENDING,
+                ).exists():
+                    raise ValidationError("A pending class-upgrade request already exists for this CIF.")
+                req = CustomerClassUpgradeRequest.objects.create(
+                    cif=cif,
+                    from_service_class=cif.service_class,
+                    to_service_class=to_policy,
+                    maker=request.user,
+                    maker_note=(request.POST.get("maker_note") or "").strip(),
+                )
+                _audit(
+                    request,
+                    "policy.customer_upgrade.requested",
+                    target_type="CustomerClassUpgradeRequest",
+                    target_id=str(req.id),
+                    metadata={
+                        "cif_no": cif.cif_no,
+                        "from_policy": req.from_service_class.code if req.from_service_class else "",
+                        "to_policy": req.to_service_class.code,
+                    },
+                )
+                messages.success(
+                    request,
+                    f"Customer policy upgrade request #{req.id} submitted for checker approval.",
+                )
+                return redirect("policy_hub")
+
+            if form_type == "policy_upgrade_customer_decision":
+                if not user_has_any_role(request.user, ACCOUNTING_CHECKER_ROLES):
+                    raise PermissionDenied("Only checker roles can approve/reject upgrade requests.")
+                req = CustomerClassUpgradeRequest.objects.select_related(
+                    "cif",
+                    "to_service_class",
+                    "maker",
+                ).get(id=request.POST.get("request_id"))
+                if req.status != CustomerClassUpgradeRequest.STATUS_PENDING:
+                    raise ValidationError("Only pending requests can be decided.")
+                if req.maker_id == request.user.id:
+                    raise ValidationError("Maker and checker must be different users.")
+                decision = (request.POST.get("decision") or "").strip().lower()
+                checker_note = (request.POST.get("checker_note") or "").strip()
+                if decision not in {"approve", "reject"}:
+                    raise ValidationError("Invalid decision.")
+                req.checker = request.user
+                req.checker_note = checker_note
+                req.decided_at = timezone.now()
+                if decision == "approve":
+                    req.status = CustomerClassUpgradeRequest.STATUS_APPROVED
+                    cif = req.cif
+                    cif.service_class = req.to_service_class
+                    if cif.status == CustomerCIF.STATUS_PENDING_KYC:
+                        cif.status = CustomerCIF.STATUS_ACTIVE
+                    cif.save(update_fields=["service_class", "status", "updated_at"])
+                    for wallet in Wallet.objects.filter(
+                        holder_type=ContentType.objects.get_for_model(User),
+                        holder_id=cif.user_id,
+                    ):
+                        if wallet.is_frozen:
+                            cif.user.unfreeze_wallet(wallet.slug)
+                    messages.success(
+                        request,
+                        f"Request #{req.id} approved. CIF {cif.cif_no} is now {cif.status} with class {req.to_service_class.code}.",
+                    )
+                else:
+                    req.status = CustomerClassUpgradeRequest.STATUS_REJECTED
+                    messages.success(request, f"Request #{req.id} rejected.")
+                req.save(update_fields=["status", "checker", "checker_note", "decided_at"])
+                _audit(
+                    request,
+                    "policy.customer_upgrade.decided",
+                    target_type="CustomerClassUpgradeRequest",
+                    target_id=str(req.id),
+                    metadata={"decision": req.status, "checker": request.user.username},
                 )
                 return redirect("policy_hub")
 
@@ -6189,6 +6381,14 @@ def policy_hub(request):
             "tariff_fee_mode_choices": TariffRule.FEE_MODE_CHOICES,
             "customer_cifs": CustomerCIF.objects.select_related("user", "service_class").order_by("cif_no")[:300],
             "merchants": Merchant.objects.select_related("service_class").order_by("code")[:300],
+            "customer_upgrade_requests": CustomerClassUpgradeRequest.objects.select_related(
+                "cif",
+                "from_service_class",
+                "to_service_class",
+                "maker",
+                "checker",
+            ).order_by("-created_at")[:200],
+            "can_decide_customer_upgrade": user_has_any_role(request.user, ACCOUNTING_CHECKER_ROLES),
         },
     )
 

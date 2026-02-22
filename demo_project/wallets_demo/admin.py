@@ -11,6 +11,7 @@ from .models import (
     ChargebackCase,
     ChargebackEvidence,
     CustomerCIF,
+    CustomerClassUpgradeRequest,
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
@@ -544,6 +545,23 @@ class CustomerCIFAdmin(admin.ModelAdmin):
         if obj:
             return ("cif_no",)
         return ()
+
+
+@admin.register(CustomerClassUpgradeRequest)
+class CustomerClassUpgradeRequestAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "cif",
+        "from_service_class",
+        "to_service_class",
+        "status",
+        "maker",
+        "checker",
+        "created_at",
+        "decided_at",
+    )
+    list_filter = ("status", "created_at", "decided_at")
+    search_fields = ("cif__cif_no", "maker__username", "checker__username")
 
 
 @admin.register(AnalyticsEvent)

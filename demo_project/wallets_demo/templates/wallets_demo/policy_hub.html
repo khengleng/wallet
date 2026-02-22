@@ -140,6 +140,14 @@
           <label>Daily Amount Limit</label>
           <input type="number" name="daily_amount_limit" min="0.01" step="0.01" />
         </div>
+        <div class="form-group">
+          <label>Monthly Txn Count Limit</label>
+          <input type="number" name="monthly_txn_count_limit" min="1" step="1" />
+        </div>
+        <div class="form-group">
+          <label>Monthly Amount Limit</label>
+          <input type="number" name="monthly_amount_limit" min="0.01" step="0.01" />
+        </div>
       </div>
 
       <button type="submit" class="btn btn-primary">Save Policy</button>
@@ -147,28 +155,31 @@
   </div>
 
   <div class="card" style="margin-bottom:0;">
-    <h3>Assign Policy to Customer CIF</h3>
+    <h3>Customer Policy Upgrade (Maker-Checker)</h3>
     <form method="post" style="margin-bottom:1rem;">
       {% csrf_token %}
-      <input type="hidden" name="form_type" value="policy_assign_customer" />
+      <input type="hidden" name="form_type" value="policy_upgrade_customer_request" />
       <div class="form-group">
         <label>Customer CIF</label>
         <select name="cif_id" required>
           {% for cif in customer_cifs %}
-          <option value="{{ cif.id }}">{{ cif.cif_no }} - {{ cif.user.username }} ({{ cif.legal_name }})</option>
+          <option value="{{ cif.id }}">{{ cif.cif_no }} - {{ cif.user.username }} ({{ cif.legal_name }}) [{% if cif.service_class %}{{ cif.service_class.code }}{% else %}UNASSIGNED{% endif %}]</option>
           {% endfor %}
         </select>
       </div>
       <div class="form-group">
-        <label>Policy</label>
-        <select name="policy_id">
-          <option value="">Unassign</option>
+        <label>Target Policy</label>
+        <select name="target_policy_id" required>
           {% for p in customer_policies %}
           <option value="{{ p.id }}">{{ p.code }} - {{ p.name }}</option>
           {% endfor %}
         </select>
       </div>
-      <button type="submit" class="btn btn-primary">Apply Customer Policy</button>
+      <div class="form-group">
+        <label>Maker Note</label>
+        <input type="text" name="maker_note" maxlength="255" placeholder="Reason for class upgrade" />
+      </div>
+      <button type="submit" class="btn btn-primary">Submit Upgrade Request</button>
     </form>
 
     <h3 style="margin-top:1.25rem;">Assign Policy to Merchant</h3>
@@ -198,6 +209,55 @@
 </div>
 
 <div class="card">
+  <h3>Pending Customer Class Upgrade Requests</h3>
+  <div class="policy-table-wrap">
+    <table class="policy-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>CIF</th>
+          <th>From</th>
+          <th>To</th>
+          <th>Status</th>
+          <th>Maker</th>
+          <th>Checker</th>
+          <th>Decision</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in customer_upgrade_requests %}
+        <tr>
+          <td>#{{ req.id }}</td>
+          <td><code>{{ req.cif.cif_no }}</code></td>
+          <td>{% if req.from_service_class %}{{ req.from_service_class.code }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
+          <td>{{ req.to_service_class.code }}</td>
+          <td>{{ req.status }}</td>
+          <td>{{ req.maker.username }}</td>
+          <td>{% if req.checker %}{{ req.checker.username }}{% else %}<span class="text-muted">-</span>{% endif %}</td>
+          <td>
+            {% if req.status == 'pending' and can_decide_customer_upgrade %}
+            <form method="post" style="display:flex;gap:0.35rem;align-items:center;">
+              {% csrf_token %}
+              <input type="hidden" name="form_type" value="policy_upgrade_customer_decision" />
+              <input type="hidden" name="request_id" value="{{ req.id }}" />
+              <input type="text" name="checker_note" maxlength="255" placeholder="Checker note" />
+              <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve</button>
+              <button class="btn btn-outline" type="submit" name="decision" value="reject">Reject</button>
+            </form>
+            {% else %}
+            <span class="text-muted">No action</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="8" class="text-muted" style="text-align:center;">No upgrade requests.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
   <h3>Current Assignments</h3>
   <div class="policy-grid">
     <div class="policy-card">
@@ -208,6 +268,7 @@
             <tr>
               <th>CIF</th>
               <th>User</th>
+              <th>Status</th>
               <th>Policy</th>
             </tr>
           </thead>
@@ -216,10 +277,11 @@
             <tr>
               <td><code>{{ cif.cif_no }}</code></td>
               <td>{{ cif.user.username }}</td>
+              <td>{{ cif.status }}</td>
               <td>{% if cif.service_class %}<span class="policy-code">{{ cif.service_class.code }}</span> - {{ cif.service_class.name }}{% else %}<span class="text-muted">Unassigned</span>{% endif %}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="3" class="text-muted" style="text-align:center;">No CIF records.</td></tr>
+            <tr><td colspan="4" class="text-muted" style="text-align:center;">No CIF records.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -450,7 +512,9 @@
           <td class="policy-muted">
             Single: {{ p.single_txn_limit|default:"-" }}<br>
             Daily Count: {{ p.daily_txn_count_limit|default:"-" }}<br>
-            Daily Amount: {{ p.daily_amount_limit|default:"-" }}
+            Daily Amount: {{ p.daily_amount_limit|default:"-" }}<br>
+            Monthly Count: {{ p.monthly_txn_count_limit|default:"-" }}<br>
+            Monthly Amount: {{ p.monthly_amount_limit|default:"-" }}
           </td>
         </tr>
         {% empty %}
@@ -499,7 +563,9 @@
           <td class="policy-muted">
             Single: {{ p.single_txn_limit|default:"-" }}<br>
             Daily Count: {{ p.daily_txn_count_limit|default:"-" }}<br>
-            Daily Amount: {{ p.daily_amount_limit|default:"-" }}
+            Daily Amount: {{ p.daily_amount_limit|default:"-" }}<br>
+            Monthly Count: {{ p.monthly_txn_count_limit|default:"-" }}<br>
+            Monthly Amount: {{ p.monthly_amount_limit|default:"-" }}
           </td>
         </tr>
         {% empty %}
