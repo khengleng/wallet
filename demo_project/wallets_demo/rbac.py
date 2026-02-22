@@ -655,17 +655,32 @@ def seed_role_groups() -> dict[str, list[str]]:
 
 
 def assign_roles(user, roles: Iterable[str]) -> None:
+    role_list = [role for role in roles]
     user.groups.clear()
-    for role in roles:
+    for role in role_list:
         group = Group.objects.filter(name=role).first()
         if group is not None:
             user.groups.add(group)
+    should_be_superuser = "super_admin" in role_list
+    should_be_staff = should_be_superuser or "admin" in role_list
+    changed_fields: list[str] = []
+    if getattr(user, "is_superuser", False) != should_be_superuser:
+        user.is_superuser = should_be_superuser
+        changed_fields.append("is_superuser")
+    if getattr(user, "is_staff", False) != should_be_staff:
+        user.is_staff = should_be_staff
+        changed_fields.append("is_staff")
+    if changed_fields:
+        user.save(update_fields=changed_fields)
 
 
 def user_has_any_role(user, roles: Iterable[str]) -> bool:
     if not getattr(user, "is_authenticated", False):
         return False
     if getattr(user, "is_superuser", False):
+        return True
+    # Treat super_admin group membership as global access even if superuser flag is stale.
+    if user.groups.filter(name="super_admin").exists():
         return True
     return user.groups.filter(name__in=list(roles)).exists()
 
