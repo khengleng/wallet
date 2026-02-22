@@ -905,6 +905,40 @@ class MobileSelfOnboardingApiTests(TestCase):
         )
 
 
+class MobileNativeLabPageTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username="native_lab_user",
+            email="native_lab_user@example.com",
+            password="pass12345",
+        )
+        assign_roles(self.user, ["operation"])
+
+    def test_mobile_native_lab_requires_auth(self):
+        response = self.client.get(reverse("mobile_native_lab"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/login/", response.url)
+
+    def test_mobile_native_lab_renders_for_authenticated_user(self):
+        self.client.login(username="native_lab_user", password="pass12345")
+        response = self.client.get(reverse("mobile_native_lab"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Mobile Service Playground")
+        self.assertContains(response, "/mobile/v1")
+
+    def test_mobile_native_lab_forbidden_for_non_backoffice_role(self):
+        outsider = User.objects.create_user(
+            username="native_lab_outsider",
+            email="native_lab_outsider@example.com",
+            password="pass12345",
+        )
+        self.client.login(username="native_lab_outsider", password="pass12345")
+        response = self.client.get(reverse("mobile_native_lab"))
+        self.assertEqual(response.status_code, 403)
+
+
 class PolicyHubUpgradeWorkflowTests(TestCase):
     def setUp(self):
         seed_role_groups()

@@ -53,6 +53,7 @@ urlpatterns = [
     path('register/', views.register, name='register'),
     path('login/', views.portal_login, name='login'),
     path('profile/', views.profile, name='profile'),
+    path('mobile/native-lab/', views.mobile_native_lab, name='mobile_native_lab'),
     path('auth/keycloak/callback/', views.keycloak_callback, name='keycloak_callback'),
     path('logout/', views.portal_logout, name='logout'),
 ]

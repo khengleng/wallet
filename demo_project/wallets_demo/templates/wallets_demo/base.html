@@ -514,6 +514,10 @@
                     href="{% url 'wallet_fx_exchange' %}">FX Exchange</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'profile' %} active{% endif %}"
                     href="{% url 'profile' %}">My Profile</a>
+                {% if user|can_view_menu:"backoffice" %}
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'mobile_native_lab' %} active{% endif %}"
+                    href="{% url 'mobile_native_lab' %}">Mobile Service Playground</a>
+                {% endif %}
 
                 <div class="sidebar-section-title">Merchant</div>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'merchant_portal' %} active{% endif %}"

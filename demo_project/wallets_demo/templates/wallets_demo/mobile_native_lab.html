@@ -1,0 +1,454 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}Mobile Service Playground - {{ org_name }}{% endblock %}
+
+{% block extra_style %}
+<style>
+  .lab-grid {
+    display: grid;
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .phone-shell {
+    background: #101827;
+    border-radius: 2rem;
+    padding: 0.8rem;
+    box-shadow: 0 14px 32px rgba(2, 8, 23, 0.35);
+    max-height: 78vh;
+    position: sticky;
+    top: 96px;
+  }
+
+  .phone-screen {
+    background: linear-gradient(160deg, #f9fbff 0%, #eef5ff 100%);
+    border-radius: 1.4rem;
+    min-height: 70vh;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid #d9e4f5;
+  }
+
+  .phone-header {
+    padding: 0.9rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #dbe3ee;
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(8px);
+  }
+
+  .chat-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .chat-msg {
+    padding: 0.55rem 0.7rem;
+    border-radius: 0.8rem;
+    max-width: 82%;
+    border: 1px solid #dbe3ee;
+    font-size: 0.9rem;
+    white-space: pre-wrap;
+  }
+
+  .chat-msg.user {
+    align-self: flex-end;
+    background: #0f4c81;
+    color: #fff;
+    border-color: #0f4c81;
+  }
+
+  .chat-msg.bot {
+    align-self: flex-start;
+    background: #fff;
+  }
+
+  .phone-input {
+    border-top: 1px solid #dbe3ee;
+    padding: 0.7rem;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.5rem;
+    background: #fff;
+  }
+
+  .bottom-tabs {
+    border-top: 1px solid #dbe3ee;
+    background: #fff;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.25rem;
+    padding: 0.45rem;
+  }
+
+  .tab-btn {
+    border: none;
+    padding: 0.5rem 0.4rem;
+    background: transparent;
+    border-radius: 0.6rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: #334155;
+    cursor: pointer;
+  }
+
+  .tab-btn.active {
+    background: #e9f2fc;
+    color: #0f4c81;
+  }
+
+  .panel {
+    display: none;
+  }
+
+  .panel.active {
+    display: block;
+  }
+
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    background: #f8fafc;
+    border: 1px solid #dbe3ee;
+    border-radius: 0.65rem;
+    padding: 0.7rem;
+    max-height: 310px;
+    overflow: auto;
+  }
+
+  @media (max-width: 1080px) {
+    .lab-grid { grid-template-columns: 1fr; }
+    .phone-shell { position: static; max-height: none; }
+    .phone-screen { max-height: none; min-height: 62vh; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Mobile Service Playground</h2>
+  <p class="text-muted">Business operator playground to test new mobile channel services before native app implementation.</p>
+  {% if not has_oidc_token %}
+  <div class="alert alert-warning">
+    Keycloak access token is not present in this web session. Assistant and gateway calls may fail until you sign in through SSO again.
+  </div>
+  {% endif %}
+</div>
+
+<div class="lab-grid">
+  <section class="phone-shell">
+    <div class="phone-screen">
+      <div class="phone-header">
+        <div>
+          <strong>Mobile Playground</strong>
+          <div class="text-muted" style="font-size:0.75rem;">Business operator sandbox</div>
+        </div>
+        <span class="badge badge-info">Lab</span>
+      </div>
+
+      <div id="screen-home" class="panel active" style="padding:0.9rem; overflow:auto;">
+        <h3 style="margin-bottom:0.6rem;">Home Personalization</h3>
+        <button id="btn-load-home" class="btn btn-primary" style="width:100%;">Load Personalization</button>
+        <div id="home-output" class="mono" style="margin-top:0.7rem;">{}</div>
+      </div>
+
+      <div id="screen-profile" class="panel" style="padding:0.9rem; overflow:auto;">
+        <h3 style="margin-bottom:0.6rem;">Profile</h3>
+        <div class="form-group"><label>First Name</label><input id="pf-first" type="text" /></div>
+        <div class="form-group"><label>Last Name</label><input id="pf-last" type="text" /></div>
+        <div class="form-group"><label>Legal Name</label><input id="pf-legal" type="text" /></div>
+        <div class="form-group"><label>Mobile No</label><input id="pf-mobile" type="text" /></div>
+        <div class="form-group"><label>Profile Picture URL</label><input id="pf-avatar" type="url" /></div>
+        <button id="btn-save-profile" class="btn btn-primary" style="width:100%;">Save Profile</button>
+      </div>
+
+      <div id="screen-chat" class="panel active-chat" style="display:none;">
+        <div id="chat-log" class="chat-log">
+          <div class="chat-msg bot">Assistant ready. Ask anything about wallet usage.</div>
+        </div>
+        <div class="phone-input">
+          <input id="chat-input" type="text" placeholder="Ask wallet assistant..." />
+          <button id="btn-chat-send" class="btn btn-primary">Send</button>
+        </div>
+      </div>
+
+      <div id="screen-signals" class="panel" style="padding:0.9rem; overflow:auto;">
+        <h3 style="margin-bottom:0.6rem;">Behavior Signals</h3>
+        <div class="form-group">
+          <label>Data Points (JSON)</label>
+          <textarea id="signals-json" rows="6">{"last_screen":"home","preferred_entry_point":"scan_pay","avg_session_seconds":420}</textarea>
+        </div>
+        <button id="btn-save-signals" class="btn btn-primary" style="width:100%;">Save Signals</button>
+      </div>
+
+      <div id="screen-playground" class="panel" style="padding:0.9rem; overflow:auto;">
+        <h3 style="margin-bottom:0.6rem;">Service Sandbox</h3>
+        <div class="form-group">
+          <label>Preset Service Test</label>
+          <select id="preset-select">
+            <option value="">Select preset</option>
+            {% for endpoint in playground_endpoints %}
+            <option value="{{ endpoint.path }}" data-method="{{ endpoint.method }}">{{ endpoint.name }} - {{ endpoint.path }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Method</label>
+          <select id="sandbox-method">
+            <option value="GET">GET</option>
+            <option value="POST">POST</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Path</label>
+          <input id="sandbox-path" type="text" value="/api/mobile/bootstrap/" />
+        </div>
+        <div class="form-group">
+          <label>Payload JSON</label>
+          <textarea id="sandbox-body" rows="6">{}</textarea>
+        </div>
+        <button id="btn-run-sandbox" class="btn btn-primary" style="width:100%;">Run Service Test</button>
+      </div>
+
+      <div class="bottom-tabs">
+        <button class="tab-btn active" data-screen="home">Home</button>
+        <button class="tab-btn" data-screen="profile">Profile</button>
+        <button class="tab-btn" data-screen="chat">Assistant</button>
+        <button class="tab-btn" data-screen="signals">Signals</button>
+        <button class="tab-btn" data-screen="playground">Sandbox</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h3>API Output</h3>
+      <p class="text-muted">Live responses from mobile APIs.</p>
+      <div id="api-output" class="mono">Waiting for action...</div>
+    </div>
+  </section>
+</div>
+
+<script>
+  (function() {
+    const csrfToken = "{{ csrf_token }}";
+    const accessToken = "{{ oidc_access_token|escapejs }}";
+    const gatewayBase = "{{ mobile_gateway_base|escapejs }}";
+
+    const apiOutput = document.getElementById("api-output");
+    const homeOutput = document.getElementById("home-output");
+
+    function setOutput(obj) {
+      apiOutput.textContent = JSON.stringify(obj, null, 2);
+    }
+
+    async function callJson(url, options) {
+      const res = await fetch(url, options);
+      let body = {};
+      try { body = await res.json(); } catch (_) {}
+      if (!res.ok) {
+        throw { status: res.status, body: body };
+      }
+      return body;
+    }
+
+    async function loadHome() {
+      try {
+        const personalization = await callJson("/api/mobile/personalization/", { method: "GET" });
+        homeOutput.textContent = JSON.stringify(personalization, null, 2);
+        setOutput(personalization);
+      } catch (err) {
+        setOutput({ error: err });
+      }
+    }
+
+    async function loadProfile() {
+      try {
+        const p = await callJson("/api/mobile/profile/", { method: "GET" });
+        const user = (p.data || {}).user || {};
+        const cif = (p.data || {}).cif || {};
+        document.getElementById("pf-first").value = user.first_name || "";
+        document.getElementById("pf-last").value = user.last_name || "";
+        document.getElementById("pf-legal").value = cif.legal_name || "";
+        document.getElementById("pf-mobile").value = cif.mobile_no || "";
+        document.getElementById("pf-avatar").value = user.profile_picture_url || "";
+        setOutput(p);
+      } catch (err) {
+        setOutput({ error: err });
+      }
+    }
+
+    async function saveProfile() {
+      const payload = {
+        first_name: document.getElementById("pf-first").value.trim(),
+        last_name: document.getElementById("pf-last").value.trim(),
+        legal_name: document.getElementById("pf-legal").value.trim(),
+        mobile_no: document.getElementById("pf-mobile").value.trim(),
+        profile_picture_url: document.getElementById("pf-avatar").value.trim(),
+      };
+      try {
+        const p = await callJson("/api/mobile/profile/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrfToken
+          },
+          body: JSON.stringify(payload)
+        });
+        setOutput(p);
+      } catch (err) {
+        setOutput({ error: err });
+      }
+    }
+
+    async function saveSignals() {
+      let dataPoints = {};
+      try {
+        dataPoints = JSON.parse(document.getElementById("signals-json").value);
+      } catch (_) {
+        setOutput({ error: "Invalid JSON in signals" });
+        return;
+      }
+      try {
+        const p = await callJson("/api/mobile/personalization/signals/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrfToken
+          },
+          body: JSON.stringify({ data_points: dataPoints })
+        });
+        setOutput(p);
+      } catch (err) {
+        setOutput({ error: err });
+      }
+    }
+
+    async function runSandbox() {
+      const method = document.getElementById("sandbox-method").value;
+      const path = document.getElementById("sandbox-path").value.trim();
+      if (!path.startsWith("/")) {
+        setOutput({ error: "Path must start with /" });
+        return;
+      }
+      let bodyObj = {};
+      const rawBody = document.getElementById("sandbox-body").value.trim();
+      if (method !== "GET" && rawBody) {
+        try {
+          bodyObj = JSON.parse(rawBody);
+        } catch (_) {
+          setOutput({ error: "Invalid JSON body" });
+          return;
+        }
+      }
+
+      const headers = { "Content-Type": "application/json" };
+      if (path.startsWith("/mobile/")) {
+        if (!accessToken) {
+          setOutput({ error: "OIDC access token missing for gateway endpoint" });
+          return;
+        }
+        headers["Authorization"] = "Bearer " + accessToken;
+      } else {
+        headers["X-CSRFToken"] = csrfToken;
+      }
+
+      try {
+        const response = await callJson(path, {
+          method: method,
+          headers: headers,
+          body: method === "GET" ? undefined : JSON.stringify(bodyObj),
+        });
+        setOutput(response);
+      } catch (err) {
+        setOutput({ error: err });
+      }
+    }
+
+    function appendChat(role, text) {
+      const log = document.getElementById("chat-log");
+      const el = document.createElement("div");
+      el.className = "chat-msg " + (role === "user" ? "user" : "bot");
+      el.textContent = text;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    async function sendChat() {
+      const input = document.getElementById("chat-input");
+      const message = input.value.trim();
+      if (!message) return;
+      input.value = "";
+      appendChat("user", message);
+
+      if (!accessToken) {
+        appendChat("bot", "No OIDC token in session. Re-login with SSO first.");
+        return;
+      }
+
+      try {
+        const body = await callJson(gatewayBase + "/assistant/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + accessToken
+          },
+          body: JSON.stringify({ message: message, context: { channel: "native_lab_web" } })
+        });
+        const reply = ((((body || {}).data || {}).assistant || {}).reply) || "No reply";
+        appendChat("bot", reply);
+        setOutput(body);
+      } catch (err) {
+        appendChat("bot", "Assistant call failed.");
+        setOutput({ error: err });
+      }
+    }
+
+    document.getElementById("btn-load-home").addEventListener("click", loadHome);
+    document.getElementById("btn-save-profile").addEventListener("click", saveProfile);
+    document.getElementById("btn-save-signals").addEventListener("click", saveSignals);
+    document.getElementById("btn-run-sandbox").addEventListener("click", runSandbox);
+    document.getElementById("btn-chat-send").addEventListener("click", sendChat);
+    document.getElementById("chat-input").addEventListener("keydown", function(e) {
+      if (e.key === "Enter") sendChat();
+    });
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const target = btn.getAttribute("data-screen");
+        document.querySelectorAll(".panel").forEach((panel) => panel.classList.remove("active"));
+        document.getElementById("screen-" + target).classList.add("active");
+        if (target === "profile") loadProfile();
+        if (target === "home") loadHome();
+      });
+    });
+
+    document.getElementById("preset-select").addEventListener("change", function() {
+      const option = this.options[this.selectedIndex];
+      if (!option || !option.value) return;
+      document.getElementById("sandbox-path").value = option.value;
+      document.getElementById("sandbox-method").value = option.getAttribute("data-method") || "GET";
+      if (option.value === "/mobile/v1/assistant/chat") {
+        document.getElementById("sandbox-body").value =
+          JSON.stringify({ message: "Summarize my wallet insights.", context: { channel: "playground" } }, null, 2);
+      } else {
+        document.getElementById("sandbox-body").value = "{}";
+      }
+    });
+
+    loadHome();
+  })();
+</script>
+{% endblock %}

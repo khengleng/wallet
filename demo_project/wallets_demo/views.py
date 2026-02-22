@@ -859,6 +859,53 @@ def profile(request):
     )
 
 
+@login_required
+def mobile_native_lab(request):
+    if not user_has_any_role(request.user, BACKOFFICE_ROLES):
+        raise PermissionDenied(
+            "Mobile Service Playground is available for back-office roles."
+        )
+    return render(
+        request,
+        "wallets_demo/mobile_native_lab.html",
+        {
+            "has_oidc_token": bool(request.session.get("oidc_access_token", "")),
+            "oidc_access_token": request.session.get("oidc_access_token", ""),
+            "mobile_gateway_base": "/mobile/v1",
+            "playground_endpoints": [
+                {
+                    "name": "Bootstrap",
+                    "method": "GET",
+                    "path": "/api/mobile/bootstrap/",
+                    "description": "Check onboarding and wallet snapshot.",
+                },
+                {
+                    "name": "Personalization",
+                    "method": "GET",
+                    "path": "/api/mobile/personalization/",
+                    "description": "Fetch native module personalization payload.",
+                },
+                {
+                    "name": "AI Personalization",
+                    "method": "GET",
+                    "path": "/mobile/v1/personalization/ai",
+                    "description": "Validate OpenAI-augmented recommendations.",
+                },
+                {
+                    "name": "Assistant Chat",
+                    "method": "POST",
+                    "path": "/mobile/v1/assistant/chat",
+                    "description": "Validate ChatGPT-like assistant behavior.",
+                    "sample_body": {
+                        "message": "What should I do to increase transfer limit?",
+                        "context": {"screen": "home", "channel": "playground"},
+                    },
+                },
+            ],
+        },
+    )
+
+
 def _mobile_json_error(message: str, *, status: int = 400, code: str = "bad_request") -> JsonResponse:
     return JsonResponse({"ok": False, "error": {"code": code, "message": message}}, status=status)
 
