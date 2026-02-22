@@ -24,6 +24,9 @@ This runbook defines the release gate for business operations services.
    - `wallets_demo.tests.MerchantEnterpriseOperationsTests`
    - `wallets_demo.tests.MerchantOpsWorkflowTests`
    - `wallets_demo.tests.OperationalHardeningTests`
+   - `wallets_demo.tests.AccountingOpsWorkbenchTests`
+   - `wallets_demo.tests.OpsWorkQueueAccountingTests`
+   - `wallets_demo.tests.OpsWorkflowEscalationCommandTests`
 
 ## Scheduled Business Automation Jobs
 
@@ -38,6 +41,19 @@ This runbook defines the release gate for business operations services.
    - `python manage.py manage_accounting_period --actor-username <finance_user> --period-start YYYY-MM-DD --period-end YYYY-MM-DD --currency USD --action close`
    - Re-open:
    - `python manage.py manage_accounting_period --actor-username <finance_user> --period-start YYYY-MM-DD --period-end YYYY-MM-DD --currency USD --action open`
+4. Ops queue SLA escalation (journal approvals, settlement exceptions, reconciliation breaks)
+   - `python manage.py escalate_ops_work_queue --actor-username <ops_user>`
+   - Dry run:
+   - `python manage.py escalate_ops_work_queue --actor-username <ops_user> --dry-run`
+
+## UAT Focus (Accounting Ops)
+
+1. Maker submits draft journal to checker queue; maker cannot self-approve.
+2. Checker reject path requires checker note.
+3. Reversal and reclass requests create pending approval records.
+4. Reclass amount cannot exceed source-account exposure on source entry.
+5. Ops Work Queue filter `journal_posting` shows pending journal approval items.
+6. CSV export endpoints for trial balance, journal register, and approval queue return valid files.
 
 ## Rollback Triggers
 
