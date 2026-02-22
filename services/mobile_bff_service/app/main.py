@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections import defaultdict, deque
+from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
 from urllib.parse import urlparse
@@ -11,7 +12,13 @@ import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 
 from .config import settings
-from .schemas import MobileSelfOnboardRequest
+from .schemas import (
+    MobileOidcTokenExchangeRequest,
+    MobilePasswordResetRequest,
+    MobileSelfOnboardRequest,
+    MobileSessionRegisterRequest,
+    MobileSessionRevokeRequest,
+)
 
 app = FastAPI(
     title="Mobile BFF Service",
@@ -158,6 +165,55 @@ async def _proxy_web(
     return body
 
 
+async def _proxy_identity(
+    method: str,
+    path: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    endpoint = f"{settings.identity_service_base_url}{path}"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Service-Api-Key": settings.identity_service_api_key,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=settings.identity_service_timeout_seconds) as client:
+            response = await client.request(
+                method=method,
+                url=endpoint,
+                headers=headers,
+                json=payload,
+                params=params,
+            )
+    except httpx.HTTPError as exc:
+        _inc_counter("upstream_errors_total")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Identity service unavailable ({_identity_host()})",
+        ) from exc
+    try:
+        body = response.json()
+    except ValueError:
+        body = {"detail": "Invalid identity response"}
+    if response.status_code >= 400:
+        raise HTTPException(status_code=response.status_code, detail=body)
+    return body
+
+
+def _subject_from_auth(auth_ctx: dict[str, Any]) -> str:
+    if auth_ctx.get("service"):
+        raise HTTPException(status_code=403, detail="Service token cannot perform this operation")
+    subject = str(auth_ctx.get("sub") or "").strip()
+    if not subject:
+        raise HTTPException(status_code=401, detail="Invalid token subject")
+    return subject
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
 def _require_metrics_token(
     x_metrics_token: str | None = Header(default=None, alias="X-Metrics-Token"),
     authorization: str | None = Header(default=None, alias="Authorization"),
@@ -219,6 +275,47 @@ async def mobile_bootstrap(
     return await _proxy_web("GET", "/api/mobile/bootstrap/", token=auth_ctx["token"])
 
 
+@app.post("/v1/auth/oidc/token")
+async def mobile_oidc_token_exchange(
+    payload: MobileOidcTokenExchangeRequest,
+    request: Request,
+):
+    _inc_counter("requests_total")
+    ip = _client_ip(request)
+    if not _check_rate_limit(f"oidc-ip:{ip}", settings.mobile_rate_limit_per_ip):
+        _inc_counter("rate_limited_total")
+        raise HTTPException(status_code=429, detail="Rate limit exceeded for IP")
+    return await _proxy_identity(
+        "POST",
+        "/v1/oidc/token",
+        payload={
+            "code": payload.code,
+            "redirect_uri": payload.redirect_uri,
+            "code_verifier": payload.code_verifier,
+        },
+    )
+
+
+@app.post("/v1/auth/recovery/password-reset-url")
+async def mobile_password_reset_url(
+    payload: MobilePasswordResetRequest,
+    request: Request,
+):
+    _inc_counter("requests_total")
+    ip = _client_ip(request)
+    if not _check_rate_limit(f"recovery-ip:{ip}", settings.mobile_rate_limit_per_ip):
+        _inc_counter("rate_limited_total")
+        raise HTTPException(status_code=429, detail="Rate limit exceeded for IP")
+    return await _proxy_identity(
+        "POST",
+        "/v1/recovery/password-reset-url",
+        payload={
+            "email": payload.email,
+            "redirect_uri": payload.redirect_uri,
+        },
+    )
+
+
 @app.post("/v1/onboarding/self")
 async def mobile_self_onboard(
     payload: MobileSelfOnboardRequest,
@@ -272,3 +369,66 @@ async def mobile_balance(
         for wallet in wallets
     ]
     return {"ok": True, "data": {"balances": balances}}
+
+
+@app.post("/v1/sessions/register")
+async def mobile_register_session(
+    payload: MobileSessionRegisterRequest,
+    request: Request,
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    subject = _subject_from_auth(auth_ctx)
+    claims = await _introspect_token(auth_ctx["token"])
+    username = str(claims.get("preferred_username") or claims.get("email") or "")
+    token_exp = int(claims.get("exp") or int(time.time()) + 3600)
+    expires_at_dt = payload.expires_at
+    if expires_at_dt is None:
+        expires_at_dt = datetime.fromtimestamp(token_exp, tz=UTC)
+    else:
+        expires_at_dt = expires_at_dt.astimezone(UTC)
+
+    return await _proxy_identity(
+        "POST",
+        "/v1/sessions/register",
+        payload={
+            "subject": subject,
+            "username": username,
+            "session_id": payload.session_id,
+            "device_id": payload.device_id,
+            "ip_address": _client_ip(request),
+            "user_agent": request.headers.get("user-agent", "")[:2048],
+            "expires_at": expires_at_dt.isoformat(),
+        },
+    )
+
+
+@app.get("/v1/sessions/active")
+async def mobile_active_sessions(
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    subject = _subject_from_auth(auth_ctx)
+    return await _proxy_identity(
+        "GET",
+        "/v1/sessions/active",
+        params={"subject": subject},
+    )
+
+
+@app.post("/v1/sessions/revoke")
+async def mobile_revoke_sessions(
+    payload: MobileSessionRevokeRequest,
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    subject = _subject_from_auth(auth_ctx)
+    return await _proxy_identity(
+        "POST",
+        "/v1/sessions/revoke",
+        payload={
+            "subject": subject,
+            "session_id": payload.session_id,
+            "device_id": payload.device_id,
+        },
+    )

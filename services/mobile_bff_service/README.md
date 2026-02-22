@@ -8,10 +8,15 @@ Dedicated backend-for-frontend service for the mobile app channel.
 - Apply channel-specific auth/rate controls and response shaping.
 
 ## Endpoints
+- `POST /v1/auth/oidc/token` -> PKCE code exchange via identity-service
+- `POST /v1/auth/recovery/password-reset-url` -> password reset kickoff URL
 - `GET /v1/bootstrap` -> mobile bootstrap data (user, CIF, wallets)
 - `POST /v1/onboarding/self` -> self onboarding (CIF-first)
 - `GET /v1/wallets/balance` -> wallet balances summary
 - `GET /v1/wallets/statement` -> wallet transaction statement
+- `POST /v1/sessions/register` -> register current device session
+- `GET /v1/sessions/active` -> list active sessions for current user
+- `POST /v1/sessions/revoke` -> revoke session(s) for current user
 
 ## Upstream Dependencies
 - `identity-service` for access token introspection.

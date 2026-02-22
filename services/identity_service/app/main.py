@@ -201,6 +201,8 @@ def oidc_token_exchange(
         "client_secret": settings.keycloak_client_secret,
         "redirect_uri": payload.redirect_uri,
     }
+    if payload.code_verifier:
+        data["code_verifier"] = payload.code_verifier
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     endpoint = f"{_realm_base()}/protocol/openid-connect/token"
     try:

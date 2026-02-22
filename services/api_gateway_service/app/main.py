@@ -745,6 +745,36 @@ async def mobile_bootstrap_gateway(
     )
 
 
+@app.post("/mobile/v1/auth/oidc/token")
+async def mobile_oidc_token_gateway(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_oidc_token_exchange", client_ip=request.client.host if request.client else "unknown")
+    return await _proxy_mobile_bff(
+        request,
+        method="POST",
+        path="/v1/auth/oidc/token",
+        payload=payload,
+    )
+
+
+@app.post("/mobile/v1/auth/recovery/password-reset-url")
+async def mobile_password_reset_gateway(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_password_reset", client_ip=request.client.host if request.client else "unknown")
+    return await _proxy_mobile_bff(
+        request,
+        method="POST",
+        path="/v1/auth/recovery/password-reset-url",
+        payload=payload,
+    )
+
+
 @app.post("/mobile/v1/onboarding/self")
 async def mobile_self_onboard_gateway(
     request: Request,
@@ -795,4 +825,50 @@ async def mobile_statement_gateway(
         method="GET",
         path="/v1/wallets/statement",
         params=params,
+    )
+
+
+@app.post("/mobile/v1/sessions/register")
+async def mobile_register_session_gateway(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_register_session", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="POST",
+        path="/v1/sessions/register",
+        payload=payload,
+    )
+
+
+@app.get("/mobile/v1/sessions/active")
+async def mobile_active_sessions_gateway(
+    request: Request,
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_active_sessions", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="GET",
+        path="/v1/sessions/active",
+    )
+
+
+@app.post("/mobile/v1/sessions/revoke")
+async def mobile_revoke_sessions_gateway(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_revoke_sessions", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="POST",
+        path="/v1/sessions/revoke",
+        payload=payload,
     )

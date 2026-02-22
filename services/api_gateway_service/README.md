@@ -69,10 +69,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8082
 ```
 
 ## Mobile Channel Routes
+- `POST /mobile/v1/auth/oidc/token`
+- `POST /mobile/v1/auth/recovery/password-reset-url`
 - `GET /mobile/v1/bootstrap`
 - `POST /mobile/v1/onboarding/self`
 - `GET /mobile/v1/wallets/balance`
 - `GET /mobile/v1/wallets/statement`
+- `POST /mobile/v1/sessions/register`
+- `GET /mobile/v1/sessions/active`
+- `POST /mobile/v1/sessions/revoke`
 
 ## Metrics
 - `wallet_gateway_waf_blocked_total` increments when requests are blocked by WAF deny rules.

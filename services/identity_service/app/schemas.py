@@ -19,6 +19,7 @@ class OidcAuthUrlRequest(BaseModel):
 class OidcCodeExchangeRequest(BaseModel):
     code: str = Field(min_length=1)
     redirect_uri: str = Field(min_length=1)
+    code_verifier: str | None = Field(default=None, min_length=8, max_length=256)
 
 
 class OidcUserInfoRequest(BaseModel):
