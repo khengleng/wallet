@@ -904,6 +904,17 @@ class MobileSelfOnboardingApiTests(TestCase):
             "scan_pay",
         )
 
+    def test_mobile_assistant_chat_requires_message(self):
+        self.client.login(username="mobile_user", password="pass12345")
+        response = self.client.post(
+            reverse("mobile_assistant_chat"),
+            data="{}",
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["error"]["code"], "message_required")
+
 
 class MobileNativeLabPageTests(TestCase):
     def setUp(self):

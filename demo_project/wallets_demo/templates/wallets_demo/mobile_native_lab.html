@@ -391,17 +391,12 @@
       input.value = "";
       appendChat("user", message);
 
-      if (!accessToken) {
-        appendChat("bot", "No OIDC token in session. Re-login with SSO first.");
-        return;
-      }
-
       try {
-        const body = await callJson(gatewayBase + "/assistant/chat", {
+        const body = await callJson("/api/mobile/assistant/chat/", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "Authorization": "Bearer " + accessToken
+            "X-CSRFToken": csrfToken
           },
           body: JSON.stringify({ message: message, context: { channel: "native_lab_web" } })
         });

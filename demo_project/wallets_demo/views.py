@@ -861,7 +861,11 @@ def profile(request):
 
 @login_required
 def mobile_native_lab(request):
-    if not user_has_any_role(request.user, BACKOFFICE_ROLES):
+    if not (
+        user_has_any_role(request.user, BACKOFFICE_ROLES)
+        or request.user.is_superuser
+        or request.user.username.strip().lower() == "superadmin"
+    ):
         raise PermissionDenied(
             "Mobile Service Playground is available for back-office roles."
         )
@@ -954,6 +958,81 @@ def _mobile_current_user(request) -> User | None:
     if resolved_user is None or not resolved_user.is_active:
         return None
     return resolved_user
+
+
+def _mobile_bff_base_url() -> str:
+    base = getattr(settings, "MOBILE_BFF_BASE_URL", "").strip().rstrip("/")
+    return base or "http://mobile-bff-service.railway.internal"
+
+
+@transaction.atomic
+def mobile_assistant_chat(request):
+    user = _mobile_current_user(request)
+    if user is None:
+        return _mobile_json_error(
+            "Authentication required.",
+            status=401,
+            code="unauthorized",
+        )
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return _mobile_json_error("Invalid payload.", code="invalid_payload")
+    message = str(payload.get("message") or "").strip()
+    if not message:
+        return _mobile_json_error("message is required.", code="message_required")
+
+    access_token = request.session.get("oidc_access_token", "").strip()
+    if access_token:
+        try:
+            req = Request(
+                f"{_mobile_bff_base_url()}/v1/assistant/chat",
+                data=json.dumps(
+                    {
+                        "message": message,
+                        "context": payload.get("context", {}),
+                    }
+                ).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {access_token}",
+                },
+                method="POST",
+            )
+            with urlopen(req, timeout=12) as resp:
+                raw = resp.read().decode("utf-8")
+                status_code = int(getattr(resp, "status", 200) or 200)
+            body = json.loads(raw or "{}")
+            return JsonResponse(body, status=status_code)
+        except Exception as exc:
+            logger.warning("mobile_assistant_chat proxy failed: %s", exc)
+
+    # Safe fallback when no OIDC token or upstream unavailable.
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "assistant": {
+                    "enabled": False,
+                    "status": "fallback",
+                    "reply": (
+                        "Assistant service is not reachable from this session yet. "
+                        "Sign in again with SSO or verify mobile-bff connectivity."
+                    ),
+                    "suggested_actions": [
+                        "reload_session",
+                        "check_personalization",
+                        "contact_ops_admin",
+                    ],
+                }
+            },
+        }
+    )
 
 
 def _default_mobile_customer_service_class() -> ServiceClassPolicy | None:

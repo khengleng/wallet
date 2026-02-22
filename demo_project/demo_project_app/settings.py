@@ -250,6 +250,10 @@ IDENTITY_SERVICE_API_KEY = _env("IDENTITY_SERVICE_API_KEY", "").strip()
 IDENTITY_SERVICE_TIMEOUT_SECONDS = float(
     os.getenv("IDENTITY_SERVICE_TIMEOUT_SECONDS", "5.0")
 )
+MOBILE_BFF_BASE_URL = _env(
+    "MOBILE_BFF_BASE_URL",
+    "http://mobile-bff-service.railway.internal",
+).strip().rstrip("/")
 
 
 def _parse_keycloak_role_group_map() -> dict[str, str]:
