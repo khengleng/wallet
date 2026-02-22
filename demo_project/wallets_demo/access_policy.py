@@ -19,7 +19,7 @@ DEFAULT_MENU_ROLE_RULES: dict[str, tuple[str, ...]] = {
     "operations_center": ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "sales"),
     "case_management": ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "sales"),
     "ops_work_queue": ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "treasury"),
-    "treasury_dashboard": ("admin", "super_admin", "finance", "treasury", "customer_service", "risk", "operation", "sales"),
+    "treasury_dashboard": ("admin", "super_admin", "finance", "treasury", "risk", "operation"),
     "accounting_dashboard": ("finance", "treasury", "admin", "super_admin"),
     "settlement_operations": ("super_admin", "admin", "operation", "finance", "treasury", "risk"),
     "reconciliation_workbench": ("super_admin", "admin", "operation", "finance", "risk", "treasury"),
@@ -44,7 +44,7 @@ DEFAULT_SENSITIVE_DOMAIN_RULES: dict[str, tuple[str, ...]] = {
     "settlement_amount": DEFAULT_SENSITIVE_ROLES,
     "accounting_amount": DEFAULT_SENSITIVE_ROLES,
     "treasury_amount": DEFAULT_SENSITIVE_ROLES,
-    "customer_pii": ("super_admin", "admin", "customer_service", "risk", "operation"),
+    "customer_pii": ("super_admin", "admin", "risk", "operation"),
 }
 
 
