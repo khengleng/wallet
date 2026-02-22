@@ -1875,14 +1875,12 @@ def mobile_profile(request):
     customer_cif.mobile_no = mobile_no
     customer_cif.save(update_fields=["legal_name", "mobile_no", "updated_at"])
 
-    log_audit_event(
-        actor=user,
-        event_type="mobile.profile.update",
+    _audit(
+        request,
+        "mobile.profile.update",
         target_type="CustomerCIF",
         target_id=str(customer_cif.id),
-        context={
-            "cif_no": customer_cif.cif_no,
-        },
+        metadata={"cif_no": customer_cif.cif_no},
     )
 
     return JsonResponse({"ok": True, "data": _serialize_mobile_profile(user, customer_cif)})
@@ -1966,20 +1964,27 @@ def mobile_personalization(request):
     if request.method != "GET":
         return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
 
-    customer_cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
-    user_ct = ContentType.objects.get_for_model(User)
-    wallets = list(Wallet.objects.filter(holder_type=user_ct, holder_id=user.id))
-
-    return JsonResponse(
-        {
-            "ok": True,
-            "data": _build_mobile_personalization_payload(
-                user=user,
-                customer_cif=customer_cif,
-                wallets=wallets,
-            ),
-        }
-    )
+    try:
+        customer_cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
+        user_ct = ContentType.objects.get_for_model(User)
+        wallets = list(Wallet.objects.filter(holder_type=user_ct, holder_id=user.id))
+        return JsonResponse(
+            {
+                "ok": True,
+                "data": _build_mobile_personalization_payload(
+                    user=user,
+                    customer_cif=customer_cif,
+                    wallets=wallets,
+                ),
+            }
+        )
+    except Exception as exc:
+        logger.exception("mobile_personalization failed: %s", exc)
+        return _mobile_json_error(
+            "Unable to load personalization.",
+            status=500,
+            code="personalization_failed",
+        )
 
 
 @transaction.atomic
@@ -2019,12 +2024,12 @@ def mobile_personalization_signals(request):
     user.mobile_preferences = prefs
     user.save(update_fields=["mobile_preferences"])
 
-    log_audit_event(
-        actor=user,
-        event_type="mobile.personalization.signals.update",
+    _audit(
+        request,
+        "mobile.personalization.signals.update",
         target_type="User",
         target_id=str(user.id),
-        context={"keys": sorted(list(merged_points.keys()))[:30]},
+        metadata={"keys": sorted(list(merged_points.keys()))[:30]},
     )
 
     return JsonResponse(

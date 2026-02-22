@@ -309,12 +309,39 @@
       apiOutput.textContent = JSON.stringify(obj, null, 2);
     }
 
+    function parseMaybeJson(raw) {
+      if (!raw) return {};
+      try {
+        return JSON.parse(raw);
+      } catch (_) {
+        return { raw: raw };
+      }
+    }
+
+    function normalizeError(err) {
+      if (!err) return { message: "Unknown error" };
+      if (err.status) return err;
+      if (err.message) return { message: err.message };
+      return { message: String(err) };
+    }
+
     async function callJson(url, options) {
-      const res = await fetch(url, options);
-      let body = {};
-      try { body = await res.json(); } catch (_) {}
+      let res;
+      try {
+        res = await fetch(url, options);
+      } catch (err) {
+        throw { status: 0, message: "Network error", details: String(err), url: url };
+      }
+
+      const raw = await res.text();
+      const body = parseMaybeJson(raw);
       if (!res.ok) {
-        throw { status: res.status, body: body };
+        throw {
+          status: res.status,
+          status_text: res.statusText,
+          url: url,
+          body: body
+        };
       }
       return body;
     }
@@ -335,7 +362,7 @@
         homeOutput.textContent = JSON.stringify(personalization, null, 2);
         setOutput(personalization);
       } catch (err) {
-        setOutput({ error: err });
+        setOutput({ error: normalizeError(err) });
       }
     }
 
@@ -361,7 +388,7 @@
         document.getElementById("pf-avatar").value = user.profile_picture_url || "";
         setOutput(p);
       } catch (err) {
-        setOutput({ error: err });
+        setOutput({ error: normalizeError(err) });
       }
     }
 
@@ -398,7 +425,7 @@
         }
         setOutput(p);
       } catch (err) {
-        setOutput({ error: err });
+        setOutput({ error: normalizeError(err) });
       }
     }
 
@@ -435,7 +462,7 @@
         }
         setOutput(p);
       } catch (err) {
-        setOutput({ error: err });
+        setOutput({ error: normalizeError(err) });
       }
     }
 
@@ -459,11 +486,12 @@
 
       const headers = { "Content-Type": "application/json" };
       if (path.startsWith("/mobile/")) {
-        if (!accessToken) {
-          setOutput({ error: "OIDC access token missing for gateway endpoint" });
+        const token = getActiveToken();
+        if (!token) {
+          setOutput({ error: "Access token missing for gateway endpoint" });
           return;
         }
-        headers["Authorization"] = "Bearer " + accessToken;
+        headers["Authorization"] = "Bearer " + token;
       } else {
         headers["X-CSRFToken"] = csrfToken;
       }
@@ -476,7 +504,7 @@
         });
         setOutput(response);
       } catch (err) {
-        setOutput({ error: err });
+        setOutput({ error: normalizeError(err) });
       }
     }
 
@@ -526,7 +554,7 @@
         setOutput(body);
       } catch (err) {
         appendChat("bot", "Assistant call failed.");
-        setOutput({ error: err });
+        setOutput({ error: normalizeError(err) });
       }
     }
 
