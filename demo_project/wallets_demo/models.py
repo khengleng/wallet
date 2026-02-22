@@ -54,6 +54,18 @@ def default_service_transaction_prefixes() -> dict:
     }
 
 
+def default_nav_visibility_rules() -> dict:
+    return {}
+
+
+def default_sensitive_data_roles() -> list[str]:
+    return []
+
+
+def default_sensitive_visibility_rules() -> dict:
+    return {}
+
+
 WALLET_TYPE_PERSONAL = "P"
 WALLET_TYPE_BUSINESS = "B"
 WALLET_TYPE_CUSTOMER = "C"
@@ -103,6 +115,31 @@ class OperationSetting(models.Model):
         default=list,
         blank=True,
         help_text="List of active currency codes on this platform. Leave empty to use SUPPORTED_CURRENCIES setting.",
+    )
+    nav_visibility_rules = models.JSONField(
+        default=default_nav_visibility_rules,
+        blank=True,
+        help_text=(
+            "Optional menu visibility overrides. "
+            "Format: {\"menu_key\": [\"role1\", \"role2\"]}. "
+            "Leave empty to use secure defaults."
+        ),
+    )
+    sensitive_data_roles = models.JSONField(
+        default=default_sensitive_data_roles,
+        blank=True,
+        help_text=(
+            "Roles allowed to view sensitive amounts/balances. "
+            "Leave empty to use secure defaults."
+        ),
+    )
+    sensitive_visibility_rules = models.JSONField(
+        default=default_sensitive_visibility_rules,
+        blank=True,
+        help_text=(
+            "Optional sensitive-data visibility overrides by domain. "
+            "Format: {\"domain_key\": [\"role1\", \"role2\"]}."
+        ),
     )
     updated_by = models.ForeignKey(
         User,

@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load rbac_tags %}
 {% block title %}Reconciliation Workbench - {{ org_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -55,7 +56,7 @@
                         <td>{{ run.internal_count }} / {{ run.internal_amount }}</td>
                         <td>{{ run.external_count }} / {{ run.external_amount }}</td>
                         <td>{{ run.delta_count }}</td>
-                        <td>{{ run.delta_amount }}</td>
+                        <td>{% sensitive_value run.delta_amount "settlement_amount" %}</td>
                         <td>{{ run.status }}</td>
                     </tr>
                     {% empty %}
@@ -92,7 +93,7 @@
                         <td>{{ br.run.run_no }}</td>
                         <td>{{ br.break_category }}</td>
                         <td>{{ br.issue_type }}</td>
-                        <td>{{ br.delta_amount }}</td>
+                        <td>{% sensitive_value br.delta_amount "settlement_amount" %}</td>
                         <td>{% if br.match_status == 'matched' %}<span class="badge-active">Matched</span>{% else %}<span class="badge-pending">Unmatched</span>{% endif %}</td>
                         <td>{{ br.resolution_status }}</td>
                         <td>{% if br.assigned_to %}{{ br.assigned_to.username }}{% else %}-{% endif %}</td>

@@ -39,6 +39,11 @@ from dj_wallet.utils import get_exchange_service, get_wallet_service
 
 from .fx_sync import sync_external_fx_rates
 from .analytics import track_event
+from .access_policy import (
+    DEFAULT_MENU_ROLE_RULES,
+    DEFAULT_SENSITIVE_DOMAIN_RULES,
+    DEFAULT_SENSITIVE_ROLES,
+)
 from .release_readiness import release_readiness_snapshot
 from .identity_client import (
     oidc_auth_url as identity_oidc_auth_url,
@@ -186,6 +191,8 @@ def _operation_settings() -> OperationSetting:
             recon_no_prefix="RECON",
             chargeback_no_prefix="CB",
             access_review_no_prefix="AR",
+            nav_visibility_rules={},
+            sensitive_data_roles=[],
         )
 
 
@@ -5085,6 +5092,29 @@ def operations_settings(request):
         key: _clean_prefix(current_service_prefixes.get(key, ""), default_value)
         for key, default_value in default_service_prefixes.items()
     }
+    current_nav_rules = (
+        settings_row.nav_visibility_rules
+        if isinstance(settings_row.nav_visibility_rules, dict)
+        else {}
+    )
+    merged_nav_rules = {
+        key: list(current_nav_rules.get(key) or list(default_roles))
+        for key, default_roles in DEFAULT_MENU_ROLE_RULES.items()
+    }
+    current_sensitive_roles = (
+        settings_row.sensitive_data_roles
+        if isinstance(settings_row.sensitive_data_roles, list)
+        else []
+    ) or list(DEFAULT_SENSITIVE_ROLES)
+    current_sensitive_domain_rules = (
+        settings_row.sensitive_visibility_rules
+        if isinstance(settings_row.sensitive_visibility_rules, dict)
+        else {}
+    )
+    merged_sensitive_domain_rules = {
+        key: list(current_sensitive_domain_rules.get(key) or list(default_roles))
+        for key, default_roles in DEFAULT_SENSITIVE_DOMAIN_RULES.items()
+    }
 
     if request.method == "POST":
         try:
@@ -5105,6 +5135,27 @@ def operations_settings(request):
                 if c.strip()
             ]
             settings_row.enabled_currencies = selected_currencies
+            settings_row.nav_visibility_rules = {
+                key: [
+                    role.strip()
+                    for role in (request.POST.get(f"menu_roles_{key}") or "").split(",")
+                    if role.strip()
+                ]
+                for key in DEFAULT_MENU_ROLE_RULES.keys()
+            }
+            settings_row.sensitive_data_roles = [
+                role.strip()
+                for role in (request.POST.get("sensitive_data_roles") or "").split(",")
+                if role.strip()
+            ]
+            settings_row.sensitive_visibility_rules = {
+                key: [
+                    role.strip()
+                    for role in (request.POST.get(f"sensitive_roles_{key}") or "").split(",")
+                    if role.strip()
+                ]
+                for key in DEFAULT_SENSITIVE_DOMAIN_RULES.keys()
+            }
             settings_row.updated_by = request.user
             settings_row.full_clean()
             settings_row.save()
@@ -5168,6 +5219,12 @@ def operations_settings(request):
             "preview_service_txn": preview_service_txn,
             "all_currencies": all_currencies,
             "active_currencies": active_currencies,
+            "menu_rules": merged_nav_rules,
+            "default_menu_rules": DEFAULT_MENU_ROLE_RULES,
+            "sensitive_data_roles": current_sensitive_roles,
+            "default_sensitive_roles": DEFAULT_SENSITIVE_ROLES,
+            "sensitive_domain_rules": merged_sensitive_domain_rules,
+            "default_sensitive_domain_rules": DEFAULT_SENSITIVE_DOMAIN_RULES,
         },
     )
 

@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load rbac_tags %}
 {% block title %}Case {{ case_obj.case_no }} - {{ org_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -88,12 +89,12 @@
 <div class="tab-pane" id="case-linked">
     <div class="card">
         <h3>Dispute Refunds</h3>
-        <div style="overflow-x:auto;"><table><thead><tr><th>ID</th><th>Amount</th><th>Status</th><th>Maker</th><th>Checker</th><th>SLA Due</th></tr></thead><tbody>{% for rr in refunds %}<tr><td>#{{ rr.id }}</td><td>{{ rr.amount }} {{ rr.currency }}</td><td>{{ rr.status }}</td><td>{{ rr.maker.username }}</td><td>{% if rr.checker %}{{ rr.checker.username }}{% else %}-{% endif %}</td><td>{% if rr.sla_due_at %}{{ rr.sla_due_at|date:"d M H:i" }}{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="text-muted" style="text-align:center;">No refunds linked.</td></tr>{% endfor %}</tbody></table></div>
+        <div style="overflow-x:auto;"><table><thead><tr><th>ID</th><th>Amount</th><th>Status</th><th>Maker</th><th>Checker</th><th>SLA Due</th></tr></thead><tbody>{% for rr in refunds %}<tr><td>#{{ rr.id }}</td><td>{% sensitive_value rr.amount "transaction_amount" %} {{ rr.currency }}</td><td>{{ rr.status }}</td><td>{{ rr.maker.username }}</td><td>{% if rr.checker %}{{ rr.checker.username }}{% else %}-{% endif %}</td><td>{% if rr.sla_due_at %}{{ rr.sla_due_at|date:"d M H:i" }}{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="text-muted" style="text-align:center;">No refunds linked.</td></tr>{% endfor %}</tbody></table></div>
     </div>
 
     <div class="card">
         <h3>Chargebacks</h3>
-        <div style="overflow-x:auto;"><table><thead><tr><th>No</th><th>Amount</th><th>Status</th><th>Reason</th><th>Assigned</th></tr></thead><tbody>{% for cb in chargebacks %}<tr><td>{{ cb.chargeback_no }}</td><td>{{ cb.amount }} {{ cb.currency }}</td><td>{{ cb.status }}</td><td>{{ cb.reason_code|default:"-" }}</td><td>{% if cb.assigned_to %}{{ cb.assigned_to.username }}{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="text-muted" style="text-align:center;">No chargebacks linked.</td></tr>{% endfor %}</tbody></table></div>
+        <div style="overflow-x:auto;"><table><thead><tr><th>No</th><th>Amount</th><th>Status</th><th>Reason</th><th>Assigned</th></tr></thead><tbody>{% for cb in chargebacks %}<tr><td>{{ cb.chargeback_no }}</td><td>{% sensitive_value cb.amount "transaction_amount" %} {{ cb.currency }}</td><td>{{ cb.status }}</td><td>{{ cb.reason_code|default:"-" }}</td><td>{% if cb.assigned_to %}{{ cb.assigned_to.username }}{% else %}-{% endif %}</td></tr>{% empty %}<tr><td colspan="5" class="text-muted" style="text-align:center;">No chargebacks linked.</td></tr>{% endfor %}</tbody></table></div>
     </div>
 
     <div class="card">
@@ -103,7 +104,7 @@
 
     <div class="card">
         <h3>Related Cashflow Activity</h3>
-        <div style="overflow-x:auto;"><table><thead><tr><th>Time</th><th>Merchant</th><th>Flow</th><th>Amount</th><th>Ref</th></tr></thead><tbody>{% for evt in linked_cashflows %}<tr><td style="font-size:0.78rem;">{{ evt.created_at|date:"d M H:i" }}</td><td>{{ evt.merchant.code }}</td><td>{{ evt.flow_type|upper }}</td><td>{{ evt.amount }} {{ evt.currency }}</td><td>{{ evt.reference|default:"-" }}</td></tr>{% empty %}<tr><td colspan="5" class="text-muted" style="text-align:center;">No linked cashflow records.</td></tr>{% endfor %}</tbody></table></div>
+        <div style="overflow-x:auto;"><table><thead><tr><th>Time</th><th>Merchant</th><th>Flow</th><th>Amount</th><th>Ref</th></tr></thead><tbody>{% for evt in linked_cashflows %}<tr><td style="font-size:0.78rem;">{{ evt.created_at|date:"d M H:i" }}</td><td>{{ evt.merchant.code }}</td><td>{{ evt.flow_type|upper }}</td><td>{% sensitive_value evt.amount "transaction_amount" %} {{ evt.currency }}</td><td>{{ evt.reference|default:"-" }}</td></tr>{% empty %}<tr><td colspan="5" class="text-muted" style="text-align:center;">No linked cashflow records.</td></tr>{% endfor %}</tbody></table></div>
     </div>
 </div>
 

@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load rbac_tags %}
 
 {% block title %}Customer & Wallet Admin - {{ org_name }}{% endblock %}
 
@@ -91,7 +92,7 @@
                     <select name="cif_status">
                         <option value="">All</option>
                         {% for value, label in cif_status_choices %}
-                        <option value="{{ value }}" {% if selected_cif_status==value %} selected{% endif %}>{{ label }}
+                        <option value="{{ value }}" {% if selected_cif_status == value %} selected{% endif %}>{{ label }}
                         </option>
                         {% endfor %}
                     </select>
@@ -121,8 +122,20 @@
                     <td><code>{{ cif.cif_no }}</code></td>
                     <td>{{ cif.legal_name }}</td>
                     <td>{{ cif.user.username }}</td>
-                    <td>{{ cif.mobile_no|default:"-" }}</td>
-                    <td>{{ cif.email|default:"-" }}</td>
+                    <td>
+                        {% if user|can_view_sensitive_domain:"customer_pii" %}
+                        {{ cif.mobile_no|default:"-" }}
+                        {% else %}
+                        ****
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user|can_view_sensitive_domain:"customer_pii" %}
+                        {{ cif.email|default:"-" }}
+                        {% else %}
+                        ****
+                        {% endif %}
+                    </td>
                     <td>
                         {% if cif.status == "active" %}<span class="badge-active">Active</span>
                         {% elif cif.status == "blocked" %}<span class="badge-blocked">Blocked</span>
@@ -339,7 +352,7 @@
                         <td>{% if holder %}{{ holder.get_wallet_type_display|default:holder.wallet_type }}{% else %}—{% endif %}</td>
                         <td>{{ wallet.slug }}</td>
                         <td>{{ wallet.meta.currency|default:"USD" }}</td>
-                        <td style="font-weight:600;">{{ wallet.balance }}</td>
+                        <td style="font-weight:600;">{% sensitive_value wallet.balance "wallet_balance" %}</td>
                     </tr>
                     {% empty %}
                     <tr>
@@ -379,7 +392,7 @@
                         <td>{% if holder %}{{ holder.wallet_type }}{% else %}—{% endif %}</td>
                         <td>{{ wallet.slug }}</td>
                         <td>{{ wallet.meta.currency|default:"USD" }}</td>
-                        <td style="font-weight:600;">{{ wallet.balance }}</td>
+                        <td style="font-weight:600;">{% sensitive_value wallet.balance "wallet_balance" %}</td>
                     </tr>
                     {% empty %}
                     <tr>

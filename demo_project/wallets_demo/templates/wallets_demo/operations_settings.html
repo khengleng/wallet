@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load rbac_tags %}
 
 {% block title %}System Setting - DJ Wallet{% endblock %}
 
@@ -64,6 +65,35 @@
             </label>
             {% endfor %}
         </div>
+
+        <h3 style="margin-top:1.5rem;">Menu Visibility Rules (Configurable)</h3>
+        <p class="text-muted">Comma-separated roles per menu key. Example: <code>super_admin,admin,operation</code>.
+        </p>
+        {% for menu_key, roles in menu_rules.items %}
+        <div class="form-group">
+            <label>{{ menu_key }}</label>
+            <input type="text" name="menu_roles_{{ menu_key }}" value="{{ roles|join:', ' }}" />
+            <small class="text-muted">Default: {{ default_menu_rules|get_item:menu_key|join:", " }}</small>
+        </div>
+        {% endfor %}
+
+        <h3 style="margin-top:1.5rem;">Sensitive Data Visibility</h3>
+        <p class="text-muted">Only these roles can view sensitive amounts/balances. Others will see masked values.</p>
+        <div class="form-group">
+            <label>Sensitive Data Roles</label>
+            <input type="text" name="sensitive_data_roles" value="{{ sensitive_data_roles|join:', ' }}" />
+            <small class="text-muted">Default: {{ default_sensitive_roles|join:", " }}</small>
+        </div>
+
+        <h4 style="margin-top:1rem;">Sensitive Visibility by Domain</h4>
+        <p class="text-muted">Granular restriction per sensitive domain (comma-separated roles).</p>
+        {% for domain_key, roles in sensitive_domain_rules.items %}
+        <div class="form-group">
+            <label>{{ domain_key }}</label>
+            <input type="text" name="sensitive_roles_{{ domain_key }}" value="{{ roles|join:', ' }}" />
+            <small class="text-muted">Default: {{ default_sensitive_domain_rules|get_item:domain_key|join:", " }}</small>
+        </div>
+        {% endfor %}
 
         <button type="submit" class="btn btn-primary">Save System Setting</button>
     </form>

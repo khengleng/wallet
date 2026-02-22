@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load rbac_tags %}
 {% block title %}Ops Work Queue - {{ org_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -41,7 +42,7 @@
                     <td>{{ item.queue_type }}</td>
                     <td>{{ item.ref }}</td>
                     <td>{{ item.subject }}</td>
-                    <td>{% if item.amount %}{{ item.amount }} {{ item.currency }}{% else %}-{% endif %}</td>
+                    <td>{% if item.amount %}{% sensitive_value item.amount "transaction_amount" %} {{ item.currency }}{% else %}-{% endif %}</td>
                     <td>{{ item.maker }}</td>
                     <td>{% if item.required_role %}<span class="badge-pending">{{ item.required_role }}</span>{% else %}-{% endif %}</td>
                     <td>

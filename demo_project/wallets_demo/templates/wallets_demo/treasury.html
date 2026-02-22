@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load rbac_tags %}
 {% block title %}Treasury Console - {{ org_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -122,7 +123,7 @@
                     <tr>
                         <td>{{ account.name }}</td>
                         <td>{{ account.currency }}</td>
-                        <td style="font-weight:600;">${{ account.balance }}</td>
+                        <td style="font-weight:600;">{% sensitive_value account.balance "treasury_amount" %}</td>
                         <td>
                             {% if account.is_active %}<span class="badge-active">Active</span>
                             {% else %}<span class="badge-closed">Inactive</span>{% endif %}
@@ -157,7 +158,7 @@
                     <tr>
                         <td>{{ account.name }}</td>
                         <td>{{ account.currency }}</td>
-                        <td>{{ account.balance }}</td>
+                        <td>{% sensitive_value account.balance "treasury_amount" %}</td>
                         <td>{% if account.is_active %}<span class="badge-active">Active</span>{% else %}<span class="badge-closed">Inactive</span>{% endif %}</td>
                         <td>
                             <form method="post" style="display:flex;gap:0.4rem;">
@@ -245,7 +246,7 @@
                         <td>#{{ req.id }}</td>
                         <td>{{ req.from_account.name }}</td>
                         <td>{{ req.to_account.name }}</td>
-                        <td style="font-weight:600;">${{ req.amount }}</td>
+                        <td style="font-weight:600;">{% sensitive_value req.amount "treasury_amount" %}</td>
                         <td>{% if req.required_checker_role %}{{ req.required_checker_role }}{% else %}-{% endif %}</td>
                         <td>
                             {% if req.status == "approved" %}<span class="badge-active">{{ req.status }}</span>
@@ -292,7 +293,7 @@
                         <td>{{ req.maker.username }}</td>
                         <td>{{ req.from_account.name }}</td>
                         <td>{{ req.to_account.name }}</td>
-                        <td style="font-weight:600;">${{ req.amount }}</td>
+                        <td style="font-weight:600;">{% sensitive_value req.amount "treasury_amount" %}</td>
                         <td>{% if req.required_checker_role %}{{ req.required_checker_role }}{% else %}-{% endif %}</td>
                         <td>{{ req.reason }}</td>
                         <td>

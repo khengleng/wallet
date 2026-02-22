@@ -25,7 +25,7 @@
                 <label for="sync_base_currency">Base Currency</label>
                 <select id="sync_base_currency" name="sync_base_currency" required>
                     {% for c in supported_currencies %}
-                    <option value="{{ c }}" {% if c==base_currency %}selected{% endif %}>{{ c }}</option>
+                    <option value="{{ c }}" {% if c == base_currency %}selected{% endif %}>{{ c }}</option>
                     {% endfor %}
                 </select>
             </div>

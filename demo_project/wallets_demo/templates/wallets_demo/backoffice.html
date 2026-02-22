@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load rbac_tags %}
 {% block title %}Back Office - {{ org_name }}{% endblock %}
 {% block extra_style %}
 <style>
@@ -128,9 +129,15 @@
             <h4>Operations</h4>
             <p>Day-to-day customer, merchant, and queue handling.</p>
             <div class="bo-actions">
+                {% if user|can_view_menu:"operations_center" %}
                 <a class="btn btn-outline" href="{% url 'operations_center' %}">Merchant &amp; Case Ops</a>
+                {% endif %}
+                {% if user|can_view_menu:"wallet_management" %}
                 <a class="btn btn-outline" href="{% url 'wallet_management' %}">Customer &amp; Wallet Admin</a>
+                {% endif %}
+                {% if user|can_view_menu:"ops_work_queue" %}
                 <a class="btn btn-outline" href="{% url 'ops_work_queue' %}">Ops Work Queue</a>
+                {% endif %}
             </div>
         </div>
 
@@ -138,11 +145,19 @@
             <h4>Treasury &amp; Finance</h4>
             <p>Company funds, settlement, reconciliation, and ledger controls.</p>
             <div class="bo-actions">
+                {% if user|can_view_menu:"treasury_dashboard" %}
                 <a class="btn btn-outline" href="{% url 'treasury_dashboard' %}">Treasury Console</a>
+                {% endif %}
+                {% if user|can_view_menu:"settlement_operations" %}
                 <a class="btn btn-outline" href="{% url 'settlement_operations' %}">Settlement Ops</a>
+                {% endif %}
+                {% if user|can_view_menu:"reconciliation_workbench" %}
                 <a class="btn btn-outline" href="{% url 'reconciliation_workbench' %}">Reconciliation</a>
-                {% if can_access_accounting %}
+                {% endif %}
+                {% if user|can_view_menu:"accounting_dashboard" %}
                 <a class="btn btn-outline" href="{% url 'accounting_dashboard' %}">Accounting Console</a>
+                {% endif %}
+                {% if user|can_view_menu:"fx_management" %}
                 <a class="btn btn-outline" href="{% url 'fx_management' %}">FX Management</a>
                 {% endif %}
             </div>
@@ -152,9 +167,13 @@
             <h4>Governance &amp; Access</h4>
             <p>Role access, maker-checker controls, and operational documents.</p>
             <div class="bo-actions">
-                {% if can_manage_rbac %}<a class="btn btn-outline" href="{% url 'rbac_management' %}">RBAC Roles</a>{% endif %}
+                {% if user|can_view_menu:"rbac_management" %}<a class="btn btn-outline" href="{% url 'rbac_management' %}">RBAC Roles</a>{% endif %}
+                {% if user|can_view_menu:"approval_matrix" %}
                 <a class="btn btn-outline" href="{% url 'approval_matrix' %}">Approval Matrix</a>
+                {% endif %}
+                {% if user|can_view_menu:"documents_center" %}
                 <a class="btn btn-outline" href="{% url 'documents_center' %}">Documents Center</a>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -189,7 +208,7 @@
                     <tr>
                         <td>#{{ req.id }}</td>
                         <td>{{ req.action }}</td>
-                        <td>${{ req.amount }}</td>
+                        <td>{% sensitive_value req.amount "transaction_amount" %}</td>
                         <td>{{ req.status }}</td>
                         <td>{{ req.source_user.username }}</td>
                         <td>{% if req.recipient_user %}{{ req.recipient_user.username }}{% else %}-{% endif %}</td>
@@ -231,7 +250,7 @@
                         <td>#{{ req.id }}</td>
                         <td>{{ req.maker.username }}</td>
                         <td>{{ req.action }}</td>
-                        <td>${{ req.amount }}</td>
+                        <td>{% sensitive_value req.amount "transaction_amount" %}</td>
                         <td>{{ req.source_user.username }}</td>
                         <td>{% if req.recipient_user %}{{ req.recipient_user.username }}{% else %}-{% endif %}</td>
                         <td><span class="badge-pending">{{ req.status }}</span></td>
@@ -281,7 +300,7 @@
                         <td>#{{ tx.id }}</td>
                         <td>{{ tx.wallet.id }}</td>
                         <td>{{ tx.type }}</td>
-                        <td>${{ tx.amount }}</td>
+                        <td>{% sensitive_value tx.amount "transaction_amount" %}</td>
                         <td>{{ tx.status }}</td>
                         <td style="font-size:0.8rem; color:var(--text-muted);">{{ tx.created_at|date:"d M Y H:i" }}</td>
                     </tr>

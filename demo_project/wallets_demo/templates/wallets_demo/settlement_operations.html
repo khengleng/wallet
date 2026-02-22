@@ -1,4 +1,5 @@
 {% extends 'wallets_demo/base.html' %}
+{% load rbac_tags %}
 {% block title %}Settlement Ops - {{ org_name }}{% endblock %}
 {% block content %}
 <div class="card">
@@ -53,7 +54,7 @@
                         <td>{{ batch.currency }}</td>
                         <td>{{ batch.settlement_count }}</td>
                         <td>{{ batch.payout_count }}</td>
-                        <td>{{ batch.total_amount }} {{ batch.currency }}</td>
+                        <td>{% sensitive_value batch.total_amount "settlement_amount" %} {{ batch.currency }}</td>
                         <td>{{ batch.status }}</td>
                         <td>{% if batch.file %}<a href="{{ batch.file.url }}" target="_blank" rel="noopener">CSV</a>{% else %}-{% endif %}</td>
                         <td>
@@ -99,7 +100,7 @@
                         <td>{{ p.payout_reference }}</td>
                         <td>{{ p.settlement.settlement_no }}</td>
                         <td>{{ p.settlement.merchant.code }}</td>
-                        <td>{{ p.amount }} {{ p.currency }}</td>
+                        <td>{% sensitive_value p.amount "settlement_amount" %} {{ p.currency }}</td>
                         <td>{{ p.status }}</td>
                         <td>{{ p.destination_account|default:"-" }}</td>
                     </tr>
