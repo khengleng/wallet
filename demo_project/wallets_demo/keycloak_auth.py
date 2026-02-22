@@ -61,6 +61,17 @@ def map_keycloak_claims_to_rbac_roles(claims: dict[str, Any]) -> list[str]:
 
 def sync_user_roles_from_keycloak_claims(user, claims: dict[str, Any]) -> list[str]:
     mapped_roles = map_keycloak_claims_to_rbac_roles(claims)
+    bootstrap_emails = {
+        str(email).strip().lower()
+        for email in getattr(settings, "KEYCLOAK_BOOTSTRAP_SUPERADMIN_EMAILS", ())
+        if str(email).strip()
+    }
+    effective_email = (
+        (getattr(user, "email", "") or claims.get("email") or "").strip().lower()
+    )
+    if effective_email in bootstrap_emails and "super_admin" not in mapped_roles:
+        mapped_roles = ["super_admin", *mapped_roles]
+
     # Preserve existing privileges when IdP token does not include role claims.
     # This avoids accidental role stripping for admin users on incomplete claims.
     if not mapped_roles:

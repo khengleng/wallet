@@ -266,6 +266,24 @@ def _parse_keycloak_role_group_map() -> dict[str, str]:
 
 
 KEYCLOAK_ROLE_GROUP_MAP = _parse_keycloak_role_group_map()
+
+
+def _parse_env_csv(name: str, default: str = "") -> tuple[str, ...]:
+    raw_value = os.getenv(name, default)
+    values: list[str] = []
+    for part in raw_value.split(","):
+        value = part.strip().lower()
+        if value and value not in values:
+            values.append(value)
+    return tuple(values)
+
+
+# Emergency bootstrap for known platform owners when Keycloak role claims are missing/misconfigured.
+KEYCLOAK_BOOTSTRAP_SUPERADMIN_EMAILS = _parse_env_csv(
+    "KEYCLOAK_BOOTSTRAP_SUPERADMIN_EMAILS",
+    "",
+)
+
 AUDIT_EXPORT_HMAC_SECRET = _env("AUDIT_EXPORT_HMAC_SECRET", SECRET_KEY or "").strip()
 AUDIT_EXPORT_MAX_DAYS = int(os.getenv("AUDIT_EXPORT_MAX_DAYS", "90"))
 CLEVERTAP_ENABLED = os.getenv("CLEVERTAP_ENABLED", "false").lower() == "true"
