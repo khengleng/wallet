@@ -30,6 +30,10 @@ def decode_access_token_claims(access_token: str) -> dict[str, Any]:
 
 def extract_keycloak_role_candidates(claims: dict[str, Any]) -> set[str]:
     candidates: set[str] = set()
+    for role in claims.get("roles", []) or []:
+        if isinstance(role, str):
+            candidates.add(_normalize_role_name(role))
+
     for role in claims.get("groups", []) or []:
         if isinstance(role, str):
             candidates.add(_normalize_role_name(role))
@@ -47,6 +51,60 @@ def extract_keycloak_role_candidates(claims: dict[str, Any]) -> set[str]:
             if isinstance(role, str):
                 candidates.add(_normalize_role_name(role))
     return candidates
+
+
+def merge_keycloak_claims(*claim_sets: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {
+        "roles": [],
+        "groups": [],
+        "realm_access": {"roles": []},
+        "resource_access": {},
+    }
+    seen_roles: set[str] = set()
+    seen_groups: set[str] = set()
+    seen_realm_roles: set[str] = set()
+    seen_resource_roles: dict[str, set[str]] = {}
+
+    for claims in claim_sets:
+        if not isinstance(claims, dict):
+            continue
+
+        for key in ("email", "preferred_username", "name", "given_name", "family_name"):
+            value = claims.get(key)
+            if value and not merged.get(key):
+                merged[key] = value
+
+        for role in claims.get("roles", []) or []:
+            if isinstance(role, str) and role not in seen_roles:
+                merged["roles"].append(role)
+                seen_roles.add(role)
+
+        for group in claims.get("groups", []) or []:
+            if isinstance(group, str) and group not in seen_groups:
+                merged["groups"].append(group)
+                seen_groups.add(group)
+
+        realm_access = claims.get("realm_access", {}) or {}
+        for role in realm_access.get("roles", []) or []:
+            if isinstance(role, str) and role not in seen_realm_roles:
+                merged["realm_access"]["roles"].append(role)
+                seen_realm_roles.add(role)
+
+        resource_access = claims.get("resource_access", {}) or {}
+        for client_name, client_payload in resource_access.items():
+            if not isinstance(client_payload, dict):
+                continue
+            target = merged["resource_access"].setdefault(client_name, {"roles": []})
+            if not isinstance(target, dict):
+                continue
+            target_roles = target.setdefault("roles", [])
+            seen_for_client = seen_resource_roles.setdefault(client_name, set())
+            for role in client_payload.get("roles", []) or []:
+                if isinstance(role, str) and role not in seen_for_client:
+                    target_roles.append(role)
+                    seen_for_client.add(role)
+
+    return merged
 
 
 def map_keycloak_claims_to_rbac_roles(claims: dict[str, Any]) -> list[str]:

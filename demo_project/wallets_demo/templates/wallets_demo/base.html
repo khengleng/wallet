@@ -484,6 +484,7 @@
         <div class="nav-links">
             {% if user.is_authenticated %}
             <span class="font-bold">{{ user.username }}</span>
+            <a href="{% url 'profile' %}" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; margin-left: 0.8rem;">Profile</a>
             <form action="{% url 'logout' %}" method="post" style="display: inline; margin-left: 1rem;">
                 {% csrf_token %}
                 <button type="submit" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Sign
@@ -511,6 +512,8 @@
                     href="{% url 'withdraw' %}">Withdraw</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'wallet_fx_exchange' %} active{% endif %}"
                     href="{% url 'wallet_fx_exchange' %}">FX Exchange</a>
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'profile' %} active{% endif %}"
+                    href="{% url 'profile' %}">My Profile</a>
 
                 <div class="sidebar-section-title">Merchant</div>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'merchant_portal' %} active{% endif %}"

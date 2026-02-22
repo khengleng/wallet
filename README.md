@@ -253,6 +253,12 @@ Production defaults enforce:
 - explicit `SECRET_KEY`
 - explicit `DATABASE_URL` (PostgreSQL) for production
 - explicit `ALLOWED_HOSTS` (wildcard not allowed)
+- explicit `CSRF_TRUSTED_ORIGINS` for production
+
+Security runbooks:
+- Keycloak hardening: `docs/security/keycloak-hardening.md`
+- MFA readiness: `docs/security/mfa-readiness.md`
+- Vault secret rotation: `docs/security/vault-secrets-rotation.md`
 
 ---
 

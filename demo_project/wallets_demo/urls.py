@@ -42,6 +42,7 @@ urlpatterns = [
     path('transfer/', views.transfer, name='transfer'),
     path('register/', views.register, name='register'),
     path('login/', views.portal_login, name='login'),
+    path('profile/', views.profile, name='profile'),
     path('auth/keycloak/callback/', views.keycloak_callback, name='keycloak_callback'),
     path('logout/', views.portal_logout, name='logout'),
 ]

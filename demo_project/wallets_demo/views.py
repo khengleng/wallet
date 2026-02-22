@@ -16,7 +16,9 @@ from django.conf import settings
 from django.http import HttpResponse
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout as auth_logout
+from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
@@ -54,6 +56,7 @@ from .identity_client import (
 )
 from .keycloak_auth import (
     decode_access_token_claims,
+    merge_keycloak_claims,
     next_introspection_deadline,
     sync_user_roles_from_keycloak_claims,
 )
@@ -715,7 +718,9 @@ def keycloak_callback(request):
         claims = _keycloak_userinfo(access_token)
         user = _find_or_create_user_from_claims(claims)
         access_claims = decode_access_token_claims(access_token)
-        sync_user_roles_from_keycloak_claims(user, access_claims)
+        id_claims = decode_access_token_claims(token_payload.get("id_token", ""))
+        merged_claims = merge_keycloak_claims(access_claims, id_claims, claims)
+        sync_user_roles_from_keycloak_claims(user, merged_claims)
     except Exception as exc:
         logger.exception("Keycloak callback failed: %s", str(exc))
         _track(
@@ -784,6 +789,62 @@ def portal_logout(request):
             logout_url = f"{_keycloak_realm_base_url()}/protocol/openid-connect/logout?{query}"
         return redirect(logout_url)
     return redirect("login")
+
+
+@login_required
+def profile(request):
+    is_keycloak = _use_keycloak_oidc()
+    can_edit_profile = not is_keycloak
+    can_change_password = not is_keycloak
+    password_form = PasswordChangeForm(request.user)
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "").strip().lower()
+        try:
+            if form_type == "profile_update":
+                if not can_edit_profile:
+                    raise PermissionDenied(
+                        "Profile updates are managed by your identity provider."
+                    )
+                first_name = (request.POST.get("first_name") or "").strip()
+                last_name = (request.POST.get("last_name") or "").strip()
+                email = (request.POST.get("email") or "").strip()
+
+                request.user.first_name = first_name
+                request.user.last_name = last_name
+                request.user.email = email
+                request.user.full_clean()
+                request.user.save(update_fields=["first_name", "last_name", "email"])
+                messages.success(request, "Profile updated successfully.")
+                return redirect("profile")
+
+            if form_type == "password_change":
+                if not can_change_password:
+                    raise PermissionDenied(
+                        "Password is managed by your identity provider."
+                    )
+                password_form = PasswordChangeForm(request.user, request.POST)
+                if password_form.is_valid():
+                    user = password_form.save()
+                    update_session_auth_hash(request, user)
+                    messages.success(request, "Password updated successfully.")
+                    return redirect("profile")
+                messages.error(request, "Please fix the password form errors.")
+        except PermissionDenied as exc:
+            messages.error(request, str(exc))
+        except Exception as exc:
+            messages.error(request, f"Unable to update profile: {exc}")
+
+    return render(
+        request,
+        "wallets_demo/profile.html",
+        {
+            "can_edit_profile": can_edit_profile,
+            "can_change_password": can_change_password,
+            "password_form": password_form,
+            "auth_mode": "keycloak_oidc" if is_keycloak else "local",
+        },
+    )
 
 
 def metrics(request):
