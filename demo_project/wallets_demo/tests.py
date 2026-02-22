@@ -299,6 +299,52 @@ class AccountingOpsWorkbenchTests(TestCase):
         self.assertEqual(approval.status, JournalEntryApproval.STATUS_PENDING)
 
 
+class OpsWorkQueueAccountingTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.finance = User.objects.create_user(username="queue_finance", password="pass12345")
+        self.admin = User.objects.create_user(username="queue_admin", password="pass12345")
+        assign_roles(self.finance, ["finance"])
+        assign_roles(self.admin, ["admin"])
+        self.asset = ChartOfAccount.objects.create(
+            code="1012",
+            name="Queue Asset",
+            account_type=ChartOfAccount.TYPE_ASSET,
+            currency="USD",
+        )
+        self.liability = ChartOfAccount.objects.create(
+            code="2012",
+            name="Queue Liability",
+            account_type=ChartOfAccount.TYPE_LIABILITY,
+            currency="USD",
+        )
+
+    def test_ops_queue_includes_journal_posting_items(self):
+        entry = JournalEntry.objects.create(
+            entry_no="JE-QUEUE-1",
+            created_by=self.finance,
+            description="Queue test",
+            currency="USD",
+        )
+        JournalLine.objects.create(entry=entry, account=self.asset, debit="77.00", credit="0")
+        JournalLine.objects.create(entry=entry, account=self.liability, debit="0", credit="77.00")
+        JournalEntryApproval.objects.create(
+            entry=entry,
+            request_type=JournalEntryApproval.TYPE_POST,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="awaiting checker",
+        )
+
+        self.client.login(username="queue_admin", password="pass12345")
+        response = self.client.get(reverse("ops_work_queue"), {"type": "journal_posting"})
+        self.assertEqual(response.status_code, 200)
+        queue_items = response.context["queue_items"]
+        self.assertTrue(any(item["queue_type"] == "journal_posting" for item in queue_items))
+        self.assertContains(response, "JE-QUEUE-1")
+
+
 class FxWorkflowTests(TestCase):
     def setUp(self):
         seed_role_groups()
