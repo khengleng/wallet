@@ -15,6 +15,7 @@ urlpatterns = [
     path('backoffice/settlements/', views.settlement_operations, name='settlement_operations'),
     path('backoffice/reconciliation/', views.reconciliation_workbench, name='reconciliation_workbench'),
     path('backoffice/settings/', views.operations_settings, name='operations_settings'),
+    path('backoffice/policy-hub/', views.policy_hub, name='policy_hub'),
     path('backoffice/operations/', views.operations_center, name='operations_center'),
     path('backoffice/cases/<int:case_id>/', views.case_detail, name='case_detail'),
     path('merchant/portal/', views.merchant_portal, name='merchant_portal'),

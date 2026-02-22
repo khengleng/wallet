@@ -66,6 +66,15 @@
                     <input type="email" name="email" />
                 </div>
                 <div class="form-group">
+                    <label>Service Class Policy</label>
+                    <select name="service_class_id">
+                        <option value="">-- no policy --</option>
+                        {% for p in customer_service_class_policies %}
+                        <option value="{{ p.id }}">{{ p.code }} - {{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>Status</label>
                     <select name="status">
                         {% for value, label in cif_status_choices %}
@@ -110,6 +119,7 @@
                     <th>CIF No</th>
                     <th>Legal Name</th>
                     <th>Username</th>
+                    <th>Class</th>
                     <th>Mobile</th>
                     <th>Email</th>
                     <th>Status</th>
@@ -122,6 +132,7 @@
                     <td><code>{{ cif.cif_no }}</code></td>
                     <td>{{ cif.legal_name }}</td>
                     <td>{{ cif.user.username }}</td>
+                    <td>{% if cif.service_class %}<code>{{ cif.service_class.code }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td>
                     <td>
                         {% if user|can_view_sensitive_domain:"customer_pii" %}
                         {{ cif.mobile_no|default:"-" }}

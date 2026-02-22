@@ -550,11 +550,15 @@
                 {% endif %}
                 {% endif %}
 
-                {% if user|can_view_menu:"approval_matrix" or user|can_view_menu:"documents_center" or user|can_view_menu:"rbac_management" or user|can_view_menu:"operations_settings" %}
+                {% if user|can_view_menu:"approval_matrix" or user|can_view_menu:"documents_center" or user|can_view_menu:"rbac_management" or user|can_view_menu:"operations_settings" or user|can_view_menu:"policy_hub" %}
                 <div class="sidebar-section-title">Governance</div>
                 {% if user|can_view_menu:"approval_matrix" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'approval_matrix' %} active{% endif %}"
                     href="{% url 'approval_matrix' %}">Approval Matrix</a>
+                {% endif %}
+                {% if user|can_view_menu:"policy_hub" %}
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'policy_hub' %} active{% endif %}"
+                    href="{% url 'policy_hub' %}">Policy Hub</a>
                 {% endif %}
                 {% if user|can_view_menu:"documents_center" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'documents_center' %} active{% endif %}"

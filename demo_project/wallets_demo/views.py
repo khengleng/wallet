@@ -94,6 +94,7 @@ from .models import (
     ReconciliationEvidence,
     ReconciliationRun,
     SanctionScreeningRecord,
+    ServiceClassPolicy,
     SettlementPayout,
     SettlementBatchFile,
     SettlementException,
@@ -146,6 +147,32 @@ def _parse_amount(raw_value: str) -> Decimal:
     if value <= 0:
         raise ValidationError("Amount must be greater than 0.")
     return value
+
+
+def _parse_optional_amount(raw_value: str | None, field_name: str) -> Decimal | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    try:
+        parsed = Decimal(value)
+    except (InvalidOperation, TypeError):
+        raise ValidationError(f"Invalid {field_name}.")
+    if parsed <= Decimal("0"):
+        raise ValidationError(f"{field_name} must be greater than 0.")
+    return parsed
+
+
+def _parse_optional_positive_int(raw_value: str | None, field_name: str) -> int | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"Invalid {field_name}.")
+    if parsed <= 0:
+        raise ValidationError(f"{field_name} must be greater than 0.")
+    return parsed
 
 
 def _supported_currencies() -> list[str]:
@@ -1467,6 +1494,126 @@ def _enforce_merchant_risk_limits(
         raise ValidationError(
             f"Manual checker review required for amount >= {profile.require_manual_review_above}."
         )
+
+
+def _enforce_service_class_policy(
+    policy: ServiceClassPolicy,
+    *,
+    action: str,
+    amount: Decimal,
+    entity_label: str,
+    flow_type: str = "",
+    current_daily_count: int = 0,
+    current_daily_amount: Decimal = Decimal("0"),
+):
+    if not policy.is_active:
+        raise ValidationError(f"{entity_label} service class {policy.code} is inactive.")
+    if not policy.allows_wallet_action(action):
+        raise ValidationError(
+            f"{entity_label} service class {policy.code} does not allow {action}."
+        )
+    if flow_type and not policy.allows_flow(flow_type):
+        raise ValidationError(
+            f"{entity_label} service class {policy.code} does not allow flow {flow_type.upper()}."
+        )
+    if policy.single_txn_limit is not None and amount > policy.single_txn_limit:
+        raise ValidationError(
+            f"{entity_label} exceeds single transaction limit ({policy.single_txn_limit})."
+        )
+    if (
+        policy.daily_txn_count_limit is not None
+        and current_daily_count + 1 > policy.daily_txn_count_limit
+    ):
+        raise ValidationError(
+            f"{entity_label} exceeds daily transaction count limit ({policy.daily_txn_count_limit})."
+        )
+    if (
+        policy.daily_amount_limit is not None
+        and current_daily_amount + amount > policy.daily_amount_limit
+    ):
+        raise ValidationError(
+            f"{entity_label} exceeds daily amount limit ({policy.daily_amount_limit})."
+        )
+
+
+def _daily_user_activity(user: User, currency: str) -> tuple[int, Decimal]:
+    user_ct = ContentType.objects.get_for_model(User)
+    today = timezone.localdate()
+    day_start = timezone.make_aware(datetime.combine(today, dt_time.min))
+    day_end = timezone.make_aware(datetime.combine(today, dt_time.max))
+    qs = Transaction.objects.filter(
+        wallet__holder_type=user_ct,
+        wallet__holder_id=user.id,
+        wallet__slug=_wallet_slug(currency),
+        created_at__gte=day_start,
+        created_at__lte=day_end,
+    )
+    total = Decimal("0")
+    for value in qs.values_list("amount", flat=True):
+        try:
+            total += abs(Decimal(str(value)))
+        except Exception:
+            continue
+    return qs.count(), total
+
+
+def _daily_merchant_activity(merchant: Merchant, currency: str) -> tuple[int, Decimal]:
+    today = timezone.localdate()
+    day_start = timezone.make_aware(datetime.combine(today, dt_time.min))
+    day_end = timezone.make_aware(datetime.combine(today, dt_time.max))
+    qs = MerchantCashflowEvent.objects.filter(
+        merchant=merchant,
+        currency=currency,
+        created_at__gte=day_start,
+        created_at__lte=day_end,
+    )
+    total = qs.aggregate(total=models.Sum("amount")).get("total") or Decimal("0")
+    return qs.count(), total
+
+
+def _enforce_customer_service_policy(
+    user: User,
+    *,
+    action: str,
+    amount: Decimal,
+    currency: str,
+    flow_type: str = "",
+):
+    customer_cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
+    if customer_cif is None or customer_cif.service_class is None:
+        return
+    count, daily_amount = _daily_user_activity(user, currency)
+    _enforce_service_class_policy(
+        customer_cif.service_class,
+        action=action,
+        amount=amount,
+        flow_type=flow_type,
+        current_daily_count=count,
+        current_daily_amount=daily_amount,
+        entity_label=f"Customer {customer_cif.cif_no}",
+    )
+
+
+def _enforce_merchant_service_policy(
+    merchant: Merchant,
+    *,
+    action: str,
+    amount: Decimal,
+    currency: str,
+    flow_type: str = "",
+):
+    if merchant.service_class is None:
+        return
+    count, daily_amount = _daily_merchant_activity(merchant, currency)
+    _enforce_service_class_policy(
+        merchant.service_class,
+        action=action,
+        amount=amount,
+        flow_type=flow_type,
+        current_daily_count=count,
+        current_daily_amount=daily_amount,
+        entity_label=f"Merchant {merchant.code}",
+    )
 
 
 def _parse_iso_date(raw: str | None, *, default: date) -> date:
@@ -3780,18 +3927,62 @@ def operations_center(request):
                 currency = _normalize_currency(request.POST.get("currency"))
                 reference = (request.POST.get("reference") or "").strip()
                 note = (request.POST.get("note") or "").strip()
+                user_id = (request.POST.get("user_id") or "").strip()
+                counterparty_id = (request.POST.get("counterparty_merchant_id") or "").strip()
+                flow_user = None
+                counterparty_merchant = None
+
+                if flow_type in (FLOW_B2C, FLOW_C2B, FLOW_P2G, FLOW_G2P):
+                    if not user_id:
+                        raise ValidationError("User is required for selected flow.")
+                    flow_user = User.objects.get(id=user_id)
+                if flow_type == FLOW_B2B:
+                    if not counterparty_id:
+                        raise ValidationError("Counterparty merchant is required for B2B.")
+                    counterparty_merchant = Merchant.objects.get(id=counterparty_id)
+
+                _enforce_merchant_service_policy(
+                    merchant,
+                    action="transfer",
+                    amount=amount,
+                    currency=currency,
+                    flow_type=flow_type,
+                )
+                if flow_type in (FLOW_C2B, FLOW_P2G) and flow_user is not None:
+                    _enforce_customer_service_policy(
+                        flow_user,
+                        action="transfer",
+                        amount=amount,
+                        currency=currency,
+                        flow_type=flow_type,
+                    )
+                if flow_type in (FLOW_B2C, FLOW_G2P) and flow_user is not None:
+                    _enforce_customer_service_policy(
+                        flow_user,
+                        action="deposit",
+                        amount=amount,
+                        currency=currency,
+                        flow_type=flow_type,
+                    )
+                if flow_type == FLOW_B2B and counterparty_merchant is not None:
+                    _enforce_merchant_service_policy(
+                        counterparty_merchant,
+                        action="deposit",
+                        amount=amount,
+                        currency=currency,
+                        flow_type=flow_type,
+                    )
                 _enforce_merchant_risk_limits(merchant, amount, actor=request.user)
                 fee_amount = _merchant_fee_for_amount(merchant, flow_type, amount)
                 net_amount = (amount - fee_amount).quantize(Decimal("0.01"))
                 from_user = None
                 to_user = None
-                counterparty_merchant = None
 
                 merchant_wallet = _merchant_wallet_for_currency(merchant, currency)
                 wallet_service = get_wallet_service()
                 with transaction.atomic():
                     if flow_type == FLOW_B2C:
-                        to_user = User.objects.get(id=request.POST.get("user_id"))
+                        to_user = flow_user
                         user_wallet = _wallet_for_currency(to_user, currency)
                         _wallet_withdraw(wallet_service, 
                             merchant_wallet,
@@ -3804,7 +3995,7 @@ def operations_center(request):
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
                         )
                     elif flow_type == FLOW_C2B:
-                        from_user = User.objects.get(id=request.POST.get("user_id"))
+                        from_user = flow_user
                         user_wallet = _wallet_for_currency(from_user, currency)
                         _wallet_withdraw(wallet_service, 
                             user_wallet,
@@ -3817,9 +4008,6 @@ def operations_center(request):
                             meta={"flow_type": flow_type, "reference": reference, "note": note},
                         )
                     elif flow_type == FLOW_B2B:
-                        counterparty_merchant = Merchant.objects.get(
-                            id=request.POST.get("counterparty_merchant_id")
-                        )
                         other_capability, _created = MerchantWalletCapability.objects.get_or_create(
                             merchant=counterparty_merchant
                         )
@@ -3839,7 +4027,7 @@ def operations_center(request):
                     elif flow_type == FLOW_P2G:
                         if merchant.wallet_type != WALLET_TYPE_GOVERNMENT:
                             raise ValidationError("Selected merchant wallet type must be Government (G).")
-                        from_user = User.objects.get(id=request.POST.get("user_id"))
+                        from_user = flow_user
                         user_wallet = _wallet_for_currency(from_user, currency)
                         _wallet_withdraw(wallet_service, 
                             user_wallet,
@@ -3854,7 +4042,7 @@ def operations_center(request):
                     elif flow_type == FLOW_G2P:
                         if merchant.wallet_type != WALLET_TYPE_GOVERNMENT:
                             raise ValidationError("Selected merchant wallet type must be Government (G).")
-                        to_user = User.objects.get(id=request.POST.get("user_id"))
+                        to_user = flow_user
                         user_wallet = _wallet_for_currency(to_user, currency)
                         _wallet_withdraw(wallet_service, 
                             merchant_wallet,
@@ -3947,7 +4135,7 @@ def operations_center(request):
             messages.error(request, f"Operation failed: {exc}")
 
     try:
-        merchants = list(Merchant.objects.select_related("owner").order_by("code")[:200])
+        merchants = list(Merchant.objects.select_related("owner", "service_class").order_by("code")[:200])
         for merchant in merchants:
             try:
                 MerchantLoyaltyProgram.objects.get_or_create(merchant=merchant)
@@ -4833,6 +5021,13 @@ def wallet_management(request):
                 mobile_no = (request.POST.get("mobile_no") or "").strip()
                 email = (request.POST.get("email") or "").strip()
                 status = (request.POST.get("status") or CustomerCIF.STATUS_ACTIVE).strip().lower()
+                service_class_id = (request.POST.get("service_class_id") or "").strip()
+                service_class = None
+                if service_class_id:
+                    service_class = ServiceClassPolicy.objects.get(
+                        id=service_class_id,
+                        entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+                    )
                 if not legal_name:
                     raise ValidationError("Legal name is required.")
                 if status not in {
@@ -4851,6 +5046,7 @@ def wallet_management(request):
                         "legal_name": legal_name,
                         "mobile_no": mobile_no,
                         "email": email,
+                        "service_class": service_class,
                         "status": status,
                         "created_by": request.user,
                     },
@@ -4866,12 +5062,14 @@ def wallet_management(request):
                     customer_cif.legal_name = legal_name
                     customer_cif.mobile_no = mobile_no
                     customer_cif.email = email
+                    customer_cif.service_class = service_class
                     customer_cif.status = status
                     customer_cif.save(
                         update_fields=[
                             "legal_name",
                             "mobile_no",
                             "email",
+                            "service_class",
                             "status",
                             "updated_at",
                         ]
@@ -4889,6 +5087,7 @@ def wallet_management(request):
                     metadata={
                         "username": target_user.username,
                         "cif_no": customer_cif.cif_no,
+                        "service_class": customer_cif.service_class.code if customer_cif.service_class else "",
                         "status": customer_cif.status,
                         "created": created,
                     },
@@ -4899,6 +5098,7 @@ def wallet_management(request):
                     properties={
                         "username": target_user.username,
                         "cif_no": customer_cif.cif_no,
+                        "service_class": customer_cif.service_class.code if customer_cif.service_class else "",
                         "status": customer_cif.status,
                         "created": created,
                     },
@@ -4963,7 +5163,7 @@ def wallet_management(request):
 
     cif_query = (request.GET.get("q") or "").strip()
     cif_status = (request.GET.get("cif_status") or "").strip().lower()
-    cifs_qs = CustomerCIF.objects.select_related("user").order_by("cif_no")
+    cifs_qs = CustomerCIF.objects.select_related("user", "service_class").order_by("cif_no")
     if cif_query:
         cifs_qs = cifs_qs.filter(
             Q(cif_no__icontains=cif_query)
@@ -5014,6 +5214,9 @@ def wallet_management(request):
             "cif_query": cif_query,
             "operation_settings": _operation_settings(),
             "merchants": Merchant.objects.order_by("code")[:200],
+            "customer_service_class_policies": ServiceClassPolicy.objects.filter(
+                entity_type=ServiceClassPolicy.ENTITY_CUSTOMER
+            ).order_by("code"),
             "supported_currencies": _supported_currencies(),
             "user_wallet_rows": [
                 (wallet, user_map.get(wallet.holder_id), cif_map.get(wallet.holder_id))
@@ -5268,6 +5471,118 @@ def operations_settings(request):
             "default_sensitive_roles": DEFAULT_SENSITIVE_ROLES,
             "sensitive_domain_rules": merged_sensitive_domain_rules,
             "default_sensitive_domain_rules": DEFAULT_SENSITIVE_DOMAIN_RULES,
+        },
+    )
+
+
+@login_required
+def policy_hub(request):
+    policy_admin_roles = ("super_admin", "admin", "risk", "finance", "operation")
+    if not user_has_any_role(request.user, policy_admin_roles):
+        raise PermissionDenied("You do not have access to policy hub.")
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "").strip().lower()
+        try:
+            if form_type == "policy_upsert":
+                policy_id = (request.POST.get("policy_id") or "").strip()
+                entity_type = (request.POST.get("entity_type") or "").strip().lower()
+                if entity_type not in {
+                    ServiceClassPolicy.ENTITY_CUSTOMER,
+                    ServiceClassPolicy.ENTITY_MERCHANT,
+                }:
+                    raise ValidationError("Invalid entity type.")
+                code = (request.POST.get("code") or "").strip().upper()
+                name = (request.POST.get("name") or "").strip()
+                if not code or not name:
+                    raise ValidationError("Policy code and name are required.")
+                policy = (
+                    ServiceClassPolicy.objects.get(id=policy_id)
+                    if policy_id
+                    else ServiceClassPolicy(entity_type=entity_type)
+                )
+                policy.entity_type = entity_type
+                policy.code = code
+                policy.name = name
+                policy.description = (request.POST.get("description") or "").strip()
+                policy.is_active = request.POST.get("is_active") == "on"
+                policy.allow_deposit = request.POST.get("allow_deposit") == "on"
+                policy.allow_withdraw = request.POST.get("allow_withdraw") == "on"
+                policy.allow_transfer = request.POST.get("allow_transfer") == "on"
+                policy.allow_fx = request.POST.get("allow_fx") == "on"
+                policy.allow_b2b = request.POST.get("allow_b2b") == "on"
+                policy.allow_b2c = request.POST.get("allow_b2c") == "on"
+                policy.allow_c2b = request.POST.get("allow_c2b") == "on"
+                policy.allow_p2g = request.POST.get("allow_p2g") == "on"
+                policy.allow_g2p = request.POST.get("allow_g2p") == "on"
+                policy.single_txn_limit = _parse_optional_amount(
+                    request.POST.get("single_txn_limit"),
+                    "single transaction limit",
+                )
+                policy.daily_txn_count_limit = _parse_optional_positive_int(
+                    request.POST.get("daily_txn_count_limit"),
+                    "daily transaction count limit",
+                )
+                policy.daily_amount_limit = _parse_optional_amount(
+                    request.POST.get("daily_amount_limit"),
+                    "daily amount limit",
+                )
+                policy.full_clean()
+                policy.save()
+                messages.success(request, f"Policy {policy.entity_type}:{policy.code} saved.")
+                return redirect("policy_hub")
+
+            if form_type == "policy_assign_customer":
+                cif = CustomerCIF.objects.get(id=request.POST.get("cif_id"))
+                policy_id = (request.POST.get("policy_id") or "").strip()
+                policy = None
+                if policy_id:
+                    policy = ServiceClassPolicy.objects.get(
+                        id=policy_id,
+                        entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+                    )
+                cif.service_class = policy
+                cif.save(update_fields=["service_class", "updated_at"])
+                messages.success(
+                    request,
+                    f"Assigned policy for {cif.cif_no}: {policy.code if policy else 'Unassigned'}.",
+                )
+                return redirect("policy_hub")
+
+            if form_type == "policy_assign_merchant":
+                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                policy_id = (request.POST.get("policy_id") or "").strip()
+                policy = None
+                if policy_id:
+                    policy = ServiceClassPolicy.objects.get(
+                        id=policy_id,
+                        entity_type=ServiceClassPolicy.ENTITY_MERCHANT,
+                    )
+                merchant.service_class = policy
+                merchant.save(update_fields=["service_class", "updated_at"])
+                messages.success(
+                    request,
+                    f"Assigned policy for {merchant.code}: {policy.code if policy else 'Unassigned'}.",
+                )
+                return redirect("policy_hub")
+        except Exception as exc:
+            messages.error(request, f"Policy hub operation failed: {exc}")
+
+    customer_policies = ServiceClassPolicy.objects.filter(
+        entity_type=ServiceClassPolicy.ENTITY_CUSTOMER
+    ).order_by("code")
+    merchant_policies = ServiceClassPolicy.objects.filter(
+        entity_type=ServiceClassPolicy.ENTITY_MERCHANT
+    ).order_by("code")
+    return render(
+        request,
+        "wallets_demo/policy_hub.html",
+        {
+            "all_policies": ServiceClassPolicy.objects.order_by("entity_type", "code"),
+            "customer_policies": customer_policies,
+            "merchant_policies": merchant_policies,
+            "customer_cifs": CustomerCIF.objects.select_related("user", "service_class").order_by("cif_no")[:300],
+            "merchants": Merchant.objects.select_related("service_class").order_by("code")[:300],
         },
     )
 
@@ -5714,6 +6029,12 @@ def wallet_fx_exchange(request):
             if from_currency == to_currency:
                 raise ValidationError("Source and target currencies must be different.")
             amount = _parse_amount(request.POST.get("amount"))
+            _enforce_customer_service_policy(
+                request.user,
+                action="fx",
+                amount=amount,
+                currency=from_currency,
+            )
             fx = FxRate.latest_rate(from_currency, to_currency)
             if fx is None:
                 raise ValidationError(f"No active FX rate for {from_currency}/{to_currency}.")
@@ -5759,6 +6080,12 @@ def deposit(request):
 
         try:
             amount = _parse_amount(request.POST.get("amount"))
+            _enforce_customer_service_policy(
+                request.user,
+                action="deposit",
+                amount=amount,
+                currency=selected_currency,
+            )
             if _should_use_maker_checker(request.user):
                 approval_request = _submit_approval_request(
                     maker=request.user,
@@ -5824,6 +6151,12 @@ def withdraw(request):
 
         try:
             amount = _parse_amount(request.POST.get("amount"))
+            _enforce_customer_service_policy(
+                request.user,
+                action="withdraw",
+                amount=amount,
+                currency=selected_currency,
+            )
             wallet = _wallet_for_currency(request.user, selected_currency)
             if wallet.balance < amount:
                 messages.error(request, "Insufficient funds.")
@@ -5906,6 +6239,12 @@ def transfer(request):
         try:
             amount = _parse_amount(request.POST.get("amount"))
             recipient = User.objects.get(id=recipient_id)
+            _enforce_customer_service_policy(
+                request.user,
+                action="transfer",
+                amount=amount,
+                currency=selected_currency,
+            )
             sender_wallet = _wallet_for_currency(request.user, selected_currency)
 
             if sender_wallet.balance < amount:

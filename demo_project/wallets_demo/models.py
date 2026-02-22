@@ -785,6 +785,84 @@ class FxRate(models.Model):
         return latest
 
 
+class ServiceClassPolicy(models.Model):
+    ENTITY_CUSTOMER = "customer"
+    ENTITY_MERCHANT = "merchant"
+    ENTITY_CHOICES = (
+        (ENTITY_CUSTOMER, "Customer"),
+        (ENTITY_MERCHANT, "Merchant"),
+    )
+
+    entity_type = models.CharField(max_length=16, choices=ENTITY_CHOICES)
+    code = models.CharField(max_length=8)
+    name = models.CharField(max_length=64)
+    description = models.CharField(max_length=255, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+
+    allow_deposit = models.BooleanField(default=True)
+    allow_withdraw = models.BooleanField(default=True)
+    allow_transfer = models.BooleanField(default=True)
+    allow_fx = models.BooleanField(default=True)
+
+    allow_b2b = models.BooleanField(default=True)
+    allow_b2c = models.BooleanField(default=True)
+    allow_c2b = models.BooleanField(default=True)
+    allow_p2g = models.BooleanField(default=True)
+    allow_g2p = models.BooleanField(default=True)
+
+    single_txn_limit = models.DecimalField(
+        max_digits=20, decimal_places=2, null=True, blank=True
+    )
+    daily_txn_count_limit = models.PositiveIntegerField(null=True, blank=True)
+    daily_amount_limit = models.DecimalField(
+        max_digits=20, decimal_places=2, null=True, blank=True
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("entity_type", "code")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("entity_type", "code"),
+                name="uniq_service_class_policy_entity_code",
+            )
+        ]
+
+    def save(self, *args, **kwargs):
+        self.code = (self.code or "").strip().upper()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.single_txn_limit is not None and self.single_txn_limit <= Decimal("0"):
+            raise ValidationError("Single transaction limit must be greater than 0.")
+        if self.daily_amount_limit is not None and self.daily_amount_limit <= Decimal("0"):
+            raise ValidationError("Daily amount limit must be greater than 0.")
+        if self.daily_txn_count_limit is not None and self.daily_txn_count_limit <= 0:
+            raise ValidationError("Daily transaction count limit must be greater than 0.")
+
+    def allows_wallet_action(self, action: str) -> bool:
+        return {
+            "deposit": self.allow_deposit,
+            "withdraw": self.allow_withdraw,
+            "transfer": self.allow_transfer,
+            "fx": self.allow_fx,
+        }.get((action or "").strip().lower(), True)
+
+    def allows_flow(self, flow_type: str) -> bool:
+        return {
+            FLOW_B2B: self.allow_b2b,
+            FLOW_B2C: self.allow_b2c,
+            FLOW_C2B: self.allow_c2b,
+            FLOW_P2G: self.allow_p2g,
+            FLOW_G2P: self.allow_g2p,
+        }.get((flow_type or "").strip().lower(), True)
+
+    def __str__(self):
+        return f"{self.entity_type}:{self.code} - {self.name}"
+
+
 class Merchant(WalletMixin, models.Model):
     STATUS_ACTIVE = "active"
     STATUS_SUSPENDED = "suspended"
@@ -816,6 +894,14 @@ class Merchant(WalletMixin, models.Model):
         null=True,
         blank=True,
         related_name="managed_merchants",
+    )
+    service_class = models.ForeignKey(
+        ServiceClassPolicy,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="merchants",
+        limit_choices_to={"entity_type": ServiceClassPolicy.ENTITY_MERCHANT},
     )
     created_by = models.ForeignKey(
         User,
@@ -2183,6 +2269,14 @@ class CustomerCIF(models.Model):
     legal_name = models.CharField(max_length=128)
     mobile_no = models.CharField(max_length=40, blank=True, default="")
     email = models.EmailField(blank=True, default="")
+    service_class = models.ForeignKey(
+        ServiceClassPolicy,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="customer_cifs",
+        limit_choices_to={"entity_type": ServiceClassPolicy.ENTITY_CUSTOMER},
+    )
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     created_by = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="created_customer_cifs"

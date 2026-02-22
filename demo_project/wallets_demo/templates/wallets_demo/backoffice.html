@@ -168,6 +168,9 @@
                 {% if user|can_view_menu:"approval_matrix" %}
                 <a class="btn btn-outline" href="{% url 'approval_matrix' %}">Approval Matrix</a>
                 {% endif %}
+                {% if user|can_view_menu:"policy_hub" %}
+                <a class="btn btn-outline" href="{% url 'policy_hub' %}">Policy Hub</a>
+                {% endif %}
             </div>
         </div>
 

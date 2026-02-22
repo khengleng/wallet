@@ -83,6 +83,7 @@
                         <th>Status</th>
                         <th>Type</th>
                         <th>Owner</th>
+                        <th>Class</th>
                         <th>Contact</th>
                         <th>Capabilities</th>
                         <th>Loyalty</th>
@@ -97,6 +98,7 @@
                         <td>{{ m.status }}</td>
                         <td>{{ m.wallet_type }}</td>
                         <td>{% if m.owner %}{{ m.owner.username }}{% else %}-{% endif %}</td>
+                        <td>{% if m.service_class %}<code>{{ m.service_class.code }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td>
                         <td>{{ m.contact_email|mask_email }} / {{ m.contact_phone|mask_phone }}</td>
                         <td style="font-size:0.78rem;">{% with cap=m.wallet_capability %}B2B:{% if cap.supports_b2b%}Y{% else %}N{% endif %} B2C:{% if cap.supports_b2c %}Y{% else %}N{% endif %} C2B:{% if cap.supports_c2b %}Y{% else %}N{% endif %}{% endwith %}</td>
                         <td>{% with p=m.loyalty_program %}{% if p.is_enabled %}On{% else %}Off{% endif %}{% endwith %}
@@ -125,7 +127,7 @@
                         </td>
                     </tr>
                     {% empty %}<tr>
-                        <td colspan="9" class="text-muted" style="text-align:center;">No merchants yet.</td>
+                        <td colspan="10" class="text-muted" style="text-align:center;">No merchants yet.</td>
                     </tr>{% endfor %}
                 </tbody>
             </table>

@@ -1,0 +1,353 @@
+{% extends 'wallets_demo/base.html' %}
+{% block title %}Policy Hub - {{ org_name }}{% endblock %}
+
+{% block extra_style %}
+<style>
+  .policy-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  }
+
+  .policy-card {
+    border: 1px solid var(--border);
+    border-radius: 0.85rem;
+    padding: 1rem;
+    background: #fff;
+  }
+
+  .policy-card h4 {
+    margin: 0 0 0.35rem;
+  }
+
+  .policy-muted {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  .policy-kpi {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #3730a3;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+
+  .policy-flag-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin-top: 0.6rem;
+  }
+
+  .policy-flag-row label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+
+  .policy-table-wrap {
+    overflow-x: auto;
+  }
+
+  .policy-table td {
+    vertical-align: top;
+    font-size: 0.88rem;
+  }
+
+  .policy-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-weight: 700;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Policy Hub</h2>
+  <p class="text-muted">Central control for customer and merchant class-of-service rules. Define what each class can do and assign classes to CIF and merchant profiles.</p>
+</div>
+
+<div class="policy-grid">
+  <div class="card" style="margin-bottom:0;">
+    <h3>Create or Update Service Class Policy</h3>
+    <p class="policy-muted">Use code names like <code>A</code>, <code>B</code>, <code>Z</code>. Leave limits blank for no limit.</p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="form_type" value="policy_upsert" />
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+        <div class="form-group">
+          <label>Existing Policy (optional for update)</label>
+          <select name="policy_id">
+            <option value="">Create New</option>
+            {% for p in all_policies %}
+            <option value="{{ p.id }}">#{{ p.id }} - {{ p.entity_type }} - {{ p.code }} ({{ p.name }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Entity Type</label>
+          <select name="entity_type" required>
+            <option value="customer">Customer</option>
+            <option value="merchant">Merchant</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Code</label>
+          <input type="text" name="code" maxlength="8" placeholder="A" required />
+        </div>
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="name" maxlength="64" placeholder="Class A - Unrestricted" required />
+        </div>
+        <div class="form-group" style="grid-column:1/-1;">
+          <label>Description</label>
+          <input type="text" name="description" maxlength="255" placeholder="Optional description" />
+        </div>
+      </div>
+
+      <div class="policy-flag-row">
+        <label><input type="checkbox" name="is_active" checked /> Active</label>
+        <label><input type="checkbox" name="allow_deposit" checked /> Deposit</label>
+        <label><input type="checkbox" name="allow_withdraw" checked /> Withdraw</label>
+        <label><input type="checkbox" name="allow_transfer" checked /> Transfer</label>
+        <label><input type="checkbox" name="allow_fx" checked /> FX</label>
+      </div>
+      <div class="policy-flag-row">
+        <label><input type="checkbox" name="allow_b2b" checked /> B2B</label>
+        <label><input type="checkbox" name="allow_b2c" checked /> B2C</label>
+        <label><input type="checkbox" name="allow_c2b" checked /> C2B</label>
+        <label><input type="checkbox" name="allow_p2g" checked /> P2G</label>
+        <label><input type="checkbox" name="allow_g2p" checked /> G2P</label>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem; margin-top:1rem;">
+        <div class="form-group">
+          <label>Single Txn Limit</label>
+          <input type="number" name="single_txn_limit" min="0.01" step="0.01" />
+        </div>
+        <div class="form-group">
+          <label>Daily Txn Count Limit</label>
+          <input type="number" name="daily_txn_count_limit" min="1" step="1" />
+        </div>
+        <div class="form-group">
+          <label>Daily Amount Limit</label>
+          <input type="number" name="daily_amount_limit" min="0.01" step="0.01" />
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save Policy</button>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:0;">
+    <h3>Assign Policy to Customer CIF</h3>
+    <form method="post" style="margin-bottom:1rem;">
+      {% csrf_token %}
+      <input type="hidden" name="form_type" value="policy_assign_customer" />
+      <div class="form-group">
+        <label>Customer CIF</label>
+        <select name="cif_id" required>
+          {% for cif in customer_cifs %}
+          <option value="{{ cif.id }}">{{ cif.cif_no }} - {{ cif.user.username }} ({{ cif.legal_name }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Policy</label>
+        <select name="policy_id">
+          <option value="">Unassign</option>
+          {% for p in customer_policies %}
+          <option value="{{ p.id }}">{{ p.code }} - {{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Apply Customer Policy</button>
+    </form>
+
+    <h3 style="margin-top:1.25rem;">Assign Policy to Merchant</h3>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="form_type" value="policy_assign_merchant" />
+      <div class="form-group">
+        <label>Merchant</label>
+        <select name="merchant_id" required>
+          {% for m in merchants %}
+          <option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Policy</label>
+        <select name="policy_id">
+          <option value="">Unassign</option>
+          {% for p in merchant_policies %}
+          <option value="{{ p.id }}">{{ p.code }} - {{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">Apply Merchant Policy</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Current Assignments</h3>
+  <div class="policy-grid">
+    <div class="policy-card">
+      <h4>Customer CIF Assignments</h4>
+      <div class="policy-table-wrap">
+        <table class="policy-table">
+          <thead>
+            <tr>
+              <th>CIF</th>
+              <th>User</th>
+              <th>Policy</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for cif in customer_cifs %}
+            <tr>
+              <td><code>{{ cif.cif_no }}</code></td>
+              <td>{{ cif.user.username }}</td>
+              <td>{% if cif.service_class %}<span class="policy-code">{{ cif.service_class.code }}</span> - {{ cif.service_class.name }}{% else %}<span class="text-muted">Unassigned</span>{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3" class="text-muted" style="text-align:center;">No CIF records.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="policy-card">
+      <h4>Merchant Assignments</h4>
+      <div class="policy-table-wrap">
+        <table class="policy-table">
+          <thead>
+            <tr>
+              <th>Merchant</th>
+              <th>Name</th>
+              <th>Policy</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in merchants %}
+            <tr>
+              <td><code>{{ m.code }}</code></td>
+              <td>{{ m.name }}</td>
+              <td>{% if m.service_class %}<span class="policy-code">{{ m.service_class.code }}</span> - {{ m.service_class.name }}{% else %}<span class="text-muted">Unassigned</span>{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3" class="text-muted" style="text-align:center;">No merchants.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Customer Policy Catalog</h3>
+  <div class="policy-table-wrap">
+    <table class="policy-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Code</th>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Actions</th>
+          <th>Flows</th>
+          <th>Limits</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in customer_policies %}
+        <tr>
+          <td>{{ p.id }}</td>
+          <td class="policy-code">{{ p.code }}</td>
+          <td>{{ p.name }}{% if p.description %}<div class="policy-muted">{{ p.description }}</div>{% endif %}</td>
+          <td>{% if p.is_active %}<span class="policy-kpi">Active</span>{% else %}<span class="badge-blocked">Inactive</span>{% endif %}</td>
+          <td class="policy-muted">
+            Deposit: {% if p.allow_deposit %}Y{% else %}N{% endif %}<br>
+            Withdraw: {% if p.allow_withdraw %}Y{% else %}N{% endif %}<br>
+            Transfer: {% if p.allow_transfer %}Y{% else %}N{% endif %}<br>
+            FX: {% if p.allow_fx %}Y{% else %}N{% endif %}
+          </td>
+          <td class="policy-muted">
+            B2B: {% if p.allow_b2b %}Y{% else %}N{% endif %}<br>
+            B2C: {% if p.allow_b2c %}Y{% else %}N{% endif %}<br>
+            C2B: {% if p.allow_c2b %}Y{% else %}N{% endif %}<br>
+            P2G: {% if p.allow_p2g %}Y{% else %}N{% endif %}<br>
+            G2P: {% if p.allow_g2p %}Y{% else %}N{% endif %}
+          </td>
+          <td class="policy-muted">
+            Single: {{ p.single_txn_limit|default:"-" }}<br>
+            Daily Count: {{ p.daily_txn_count_limit|default:"-" }}<br>
+            Daily Amount: {{ p.daily_amount_limit|default:"-" }}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="text-muted" style="text-align:center;">No customer policies yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Merchant Policy Catalog</h3>
+  <div class="policy-table-wrap">
+    <table class="policy-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Code</th>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Actions</th>
+          <th>Flows</th>
+          <th>Limits</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in merchant_policies %}
+        <tr>
+          <td>{{ p.id }}</td>
+          <td class="policy-code">{{ p.code }}</td>
+          <td>{{ p.name }}{% if p.description %}<div class="policy-muted">{{ p.description }}</div>{% endif %}</td>
+          <td>{% if p.is_active %}<span class="policy-kpi">Active</span>{% else %}<span class="badge-blocked">Inactive</span>{% endif %}</td>
+          <td class="policy-muted">
+            Deposit: {% if p.allow_deposit %}Y{% else %}N{% endif %}<br>
+            Withdraw: {% if p.allow_withdraw %}Y{% else %}N{% endif %}<br>
+            Transfer: {% if p.allow_transfer %}Y{% else %}N{% endif %}<br>
+            FX: {% if p.allow_fx %}Y{% else %}N{% endif %}
+          </td>
+          <td class="policy-muted">
+            B2B: {% if p.allow_b2b %}Y{% else %}N{% endif %}<br>
+            B2C: {% if p.allow_b2c %}Y{% else %}N{% endif %}<br>
+            C2B: {% if p.allow_c2b %}Y{% else %}N{% endif %}<br>
+            P2G: {% if p.allow_p2g %}Y{% else %}N{% endif %}<br>
+            G2P: {% if p.allow_g2p %}Y{% else %}N{% endif %}
+          </td>
+          <td class="policy-muted">
+            Single: {{ p.single_txn_limit|default:"-" }}<br>
+            Daily Count: {{ p.daily_txn_count_limit|default:"-" }}<br>
+            Daily Amount: {{ p.daily_amount_limit|default:"-" }}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7" class="text-muted" style="text-align:center;">No merchant policies yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
