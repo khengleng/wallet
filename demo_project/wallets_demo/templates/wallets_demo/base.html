@@ -107,6 +107,8 @@
             display: flex;
             flex-direction: column;
             gap: 0.35rem;
+            overflow-y: auto;
+            padding-right: 0.2rem;
         }
 
         .sidebar-link {
@@ -476,6 +478,7 @@
     <div class="portal-layout">
         <aside class="sidebar">
             <nav>
+                <div class="sidebar-section-title">Wallet</div>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'dashboard' %} active{% endif %}"
                     href="{% url 'dashboard' %}">Dashboard</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'transfer' %} active{% endif %}"
@@ -486,34 +489,40 @@
                     href="{% url 'withdraw' %}">Withdraw</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'wallet_fx_exchange' %} active{% endif %}"
                     href="{% url 'wallet_fx_exchange' %}">FX Exchange</a>
+
+                <div class="sidebar-section-title">Merchant</div>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'merchant_portal' %} active{% endif %}"
                     href="{% url 'merchant_portal' %}">Merchant Self-Service</a>
+
                 {% if user|can_view_menu:"wallet_management" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'wallet_management' %} active{% endif %}"
                     href="{% url 'wallet_management' %}">Customer & Wallet Admin</a>
                 {% endif %}
 
                 {% if user|can_view_menu:"backoffice" %}
-                <div class="sidebar-section-title">Back Office</div>
+                <div class="sidebar-section-title">Back Office Home</div>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'backoffice' %} active{% endif %}"
                     href="{% url 'backoffice' %}">Back Office Home</a>
+
+                {% if user|can_view_menu:"operations_center" or user|can_view_menu:"ops_work_queue" or user|can_view_menu:"wallet_management" %}
+                <div class="sidebar-section-title">Operations</div>
                 {% if user|can_view_menu:"operations_center" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'operations_center' %} active{% endif %}"
                     href="{% url 'operations_center' %}">Merchant & Case Ops</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'case_detail' %} active{% endif %}"
-                    href="{% url 'operations_center' %}#oc-cases">Case Management 360</a>
+                    href="{% url 'operations_center' %}#oc-cases">Cases 360</a>
                 {% endif %}
                 {% if user|can_view_menu:"ops_work_queue" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'ops_work_queue' %} active{% endif %}"
                     href="{% url 'ops_work_queue' %}">Ops Work Queue</a>
                 {% endif %}
+                {% endif %}
+
+                {% if user|can_view_menu:"treasury_dashboard" or user|can_view_menu:"settlement_operations" or user|can_view_menu:"reconciliation_workbench" or user|can_view_menu:"accounting_dashboard" or user|can_view_menu:"fx_management" %}
+                <div class="sidebar-section-title">Finance & Treasury</div>
                 {% if user|can_view_menu:"treasury_dashboard" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'treasury_dashboard' %} active{% endif %}"
-                    href="{% url 'treasury_dashboard' %}">Company Funds</a>
-                {% endif %}
-                {% if user|can_view_menu:"accounting_dashboard" %}
-                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'accounting_dashboard' %} active{% endif %}"
-                    href="{% url 'accounting_dashboard' %}">Finance & Ledger</a>
+                    href="{% url 'treasury_dashboard' %}">Treasury Console</a>
                 {% endif %}
                 {% if user|can_view_menu:"settlement_operations" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'settlement_operations' %} active{% endif %}"
@@ -521,8 +530,20 @@
                 {% endif %}
                 {% if user|can_view_menu:"reconciliation_workbench" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'reconciliation_workbench' %} active{% endif %}"
-                    href="{% url 'reconciliation_workbench' %}">Reconciliation Workbench</a>
+                    href="{% url 'reconciliation_workbench' %}">Reconciliation</a>
                 {% endif %}
+                {% if user|can_view_menu:"accounting_dashboard" %}
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'accounting_dashboard' %} active{% endif %}"
+                    href="{% url 'accounting_dashboard' %}">Accounting Console</a>
+                {% endif %}
+                {% if user|can_view_menu:"fx_management" %}
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'fx_management' %} active{% endif %}"
+                    href="{% url 'fx_management' %}">Exchange Rate Admin</a>
+                {% endif %}
+                {% endif %}
+
+                {% if user|can_view_menu:"approval_matrix" or user|can_view_menu:"documents_center" or user|can_view_menu:"rbac_management" or user|can_view_menu:"operations_settings" %}
+                <div class="sidebar-section-title">Governance</div>
                 {% if user|can_view_menu:"approval_matrix" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'approval_matrix' %} active{% endif %}"
                     href="{% url 'approval_matrix' %}">Approval Matrix</a>
@@ -531,13 +552,10 @@
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'documents_center' %} active{% endif %}"
                     href="{% url 'documents_center' %}">Documents Center</a>
                 {% endif %}
-                {% if user|can_view_menu:"fx_management" %}
-                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'fx_management' %} active{% endif %}"
-                    href="{% url 'fx_management' %}">Exchange Rate Admin</a>
-                {% endif %}
                 {% if user|can_view_menu:"rbac_management" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'rbac_management' %} active{% endif %}"
                     href="{% url 'rbac_management' %}">User Roles & Access</a>
+                {% endif %}
                 {% if user|can_view_menu:"operations_settings" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'operations_settings' %} active{% endif %}"
                     href="{% url 'operations_settings' %}">System Setting</a>
