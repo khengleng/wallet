@@ -46,26 +46,34 @@
         font-weight: 700;
     }
 
-    .bo-action-groups {
+    .bo-flow-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
         gap: 0.8rem;
         margin-top: 1rem;
     }
 
-    .bo-action-card {
+    .bo-flow-card {
         border: 1px solid var(--border);
         border-radius: 0.85rem;
-        padding: 0.95rem;
+        padding: 1rem;
         background: #fff;
     }
 
-    .bo-action-card h4 {
-        margin: 0 0 0.4rem;
+    .bo-flow-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.6rem;
+        align-items: center;
+        margin-bottom: 0.35rem;
+    }
+
+    .bo-flow-card h4 {
+        margin: 0;
         font-size: 0.95rem;
     }
 
-    .bo-action-card p {
+    .bo-flow-card p {
         margin: 0 0 0.7rem;
         font-size: 0.82rem;
         color: var(--text-muted);
@@ -80,6 +88,22 @@
     .bo-actions .btn {
         padding: 0.45rem 0.7rem;
         font-size: 0.78rem;
+    }
+
+    .bo-kpi-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.2rem 0.5rem;
+        border-radius: 999px;
+        background: #eef2ff;
+        color: #3730a3;
+        font-size: 0.72rem;
+        font-weight: 700;
+    }
+
+    .bo-kpi-alert {
+        background: #fee2e2;
+        color: #991b1b;
     }
 </style>
 {% endblock %}
@@ -124,16 +148,41 @@
         </div>
     </div>
 
-    <div class="bo-action-groups">
-        <div class="bo-action-card">
-            <h4>Operations</h4>
-            <p>Day-to-day customer, merchant, and queue handling.</p>
+    <h3 style="margin:1.1rem 0 0.3rem;">Operational Flowboard</h3>
+    <p class="text-muted" style="margin-bottom:0.85rem;">Use this sequence to run daily operations with fewer clicks and clearer ownership.</p>
+
+    <div class="bo-flow-grid">
+        <div class="bo-flow-card">
+            <div class="bo-flow-head">
+                <h4>1. Start of Day</h4>
+                <span class="bo-kpi-chip">{{ total_users }} users</span>
+            </div>
+            <p>Validate platform setup, access model, and operational controls before transaction traffic starts.</p>
             <div class="bo-actions">
-                {% if user|can_view_menu:"operations_center" %}
-                <a class="btn btn-outline" href="{% url 'operations_center' %}">Merchant &amp; Case Ops</a>
+                {% if user|can_view_menu:"operations_settings" %}
+                <a class="btn btn-outline" href="{% url 'operations_settings' %}">System Setting</a>
                 {% endif %}
+                {% if user|can_view_menu:"rbac_management" %}
+                <a class="btn btn-outline" href="{% url 'rbac_management' %}">User Roles &amp; Access</a>
+                {% endif %}
+                {% if user|can_view_menu:"approval_matrix" %}
+                <a class="btn btn-outline" href="{% url 'approval_matrix' %}">Approval Matrix</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="bo-flow-card">
+            <div class="bo-flow-head">
+                <h4>2. Operations Processing</h4>
+                <span class="bo-kpi-chip">{{ recent_transactions|length }} recent txns</span>
+            </div>
+            <p>Handle customer onboarding, merchant/case operations, and day-to-day queue processing.</p>
+            <div class="bo-actions">
                 {% if user|can_view_menu:"wallet_management" %}
                 <a class="btn btn-outline" href="{% url 'wallet_management' %}">Customer &amp; Wallet Admin</a>
+                {% endif %}
+                {% if user|can_view_menu:"operations_center" %}
+                <a class="btn btn-outline" href="{% url 'operations_center' %}">Merchant &amp; Case Ops</a>
                 {% endif %}
                 {% if user|can_view_menu:"ops_work_queue" %}
                 <a class="btn btn-outline" href="{% url 'ops_work_queue' %}">Ops Work Queue</a>
@@ -141,9 +190,29 @@
             </div>
         </div>
 
-        <div class="bo-action-card">
-            <h4>Treasury &amp; Finance</h4>
-            <p>Company funds, settlement, reconciliation, and ledger controls.</p>
+        <div class="bo-flow-card">
+            <div class="bo-flow-head">
+                <h4>3. Approvals &amp; Exceptions</h4>
+                <span class="bo-kpi-chip {% if total_pending_approvals > 0 %}bo-kpi-alert{% endif %}">{{ total_pending_approvals }} pending</span>
+            </div>
+            <p>Resolve maker-checker decisions, investigate mismatches, and close risk/compliance exceptions.</p>
+            <div class="bo-actions">
+                <a class="btn btn-outline" href="#bo-tab-checker">Checker Queue</a>
+                {% if user|can_view_menu:"reconciliation_workbench" %}
+                <a class="btn btn-outline" href="{% url 'reconciliation_workbench' %}">Reconciliation</a>
+                {% endif %}
+                {% if user|can_view_menu:"documents_center" %}
+                <a class="btn btn-outline" href="{% url 'documents_center' %}">Documents Center</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="bo-flow-card">
+            <div class="bo-flow-head">
+                <h4>4. End of Day &amp; Finance</h4>
+                <span class="bo-kpi-chip">{{ my_requests|length }} my requests</span>
+            </div>
+            <p>Execute treasury, settlement, accounting, and FX controls for financial closing and reporting.</p>
             <div class="bo-actions">
                 {% if user|can_view_menu:"treasury_dashboard" %}
                 <a class="btn btn-outline" href="{% url 'treasury_dashboard' %}">Treasury Console</a>
@@ -151,28 +220,11 @@
                 {% if user|can_view_menu:"settlement_operations" %}
                 <a class="btn btn-outline" href="{% url 'settlement_operations' %}">Settlement Ops</a>
                 {% endif %}
-                {% if user|can_view_menu:"reconciliation_workbench" %}
-                <a class="btn btn-outline" href="{% url 'reconciliation_workbench' %}">Reconciliation</a>
-                {% endif %}
                 {% if user|can_view_menu:"accounting_dashboard" %}
                 <a class="btn btn-outline" href="{% url 'accounting_dashboard' %}">Accounting Console</a>
                 {% endif %}
                 {% if user|can_view_menu:"fx_management" %}
                 <a class="btn btn-outline" href="{% url 'fx_management' %}">FX Management</a>
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="bo-action-card">
-            <h4>Governance &amp; Access</h4>
-            <p>Role access, maker-checker controls, and operational documents.</p>
-            <div class="bo-actions">
-                {% if user|can_view_menu:"rbac_management" %}<a class="btn btn-outline" href="{% url 'rbac_management' %}">RBAC Roles</a>{% endif %}
-                {% if user|can_view_menu:"approval_matrix" %}
-                <a class="btn btn-outline" href="{% url 'approval_matrix' %}">Approval Matrix</a>
-                {% endif %}
-                {% if user|can_view_menu:"documents_center" %}
-                <a class="btn btn-outline" href="{% url 'documents_center' %}">Documents Center</a>
                 {% endif %}
             </div>
         </div>
