@@ -17,6 +17,14 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from jose import JWTError, jwt
+try:
+    from redis import Redis
+    from redis.exceptions import RedisError
+except Exception:  # pragma: no cover - optional runtime dependency
+    Redis = None  # type: ignore[assignment]
+
+    class RedisError(Exception):
+        pass
 
 from .config import settings
 from .schemas import AccountCreateRequest, MoneyRequest, TransferRequest
@@ -46,6 +54,25 @@ APP_START_MONOTONIC = time.monotonic()
 TOKEN_CACHE_TTL_SECONDS = 30
 token_cache_lock = Lock()
 token_introspection_cache: dict[str, dict[str, Any]] = {}
+rate_backend: str = settings.rate_limit_backend
+redis_rate_client: Redis | None = None
+
+REDIS_SLIDING_WINDOW_LUA = """
+local key = KEYS[1]
+local now_ms = tonumber(ARGV[1])
+local window_ms = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+local member = ARGV[4]
+local ttl = tonumber(ARGV[5])
+redis.call('ZREMRANGEBYSCORE', key, 0, now_ms - window_ms)
+local current = redis.call('ZCARD', key)
+if current >= limit then
+  return 0
+end
+redis.call('ZADD', key, now_ms, member)
+redis.call('EXPIRE', key, ttl)
+return 1
+"""
 
 
 def _split_csv(value: str) -> list[str]:
@@ -70,6 +97,28 @@ def _load_blocked_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Netwo
 
 BLOCKED_NETWORKS = _load_blocked_networks()
 BLOCKED_USER_AGENT_PATTERNS = [item.lower() for item in _split_csv(settings.waf_blocked_user_agents)]
+STEP_UP_CRITICAL_PATHS = set(_split_csv(settings.step_up_mfa_critical_paths))
+STEP_UP_AMR_VALUES = {item.lower() for item in _split_csv(settings.step_up_mfa_amr_values)}
+STEP_UP_ACR_VALUES = {item.lower() for item in _split_csv(settings.step_up_mfa_acr_values)}
+if rate_backend == "redis":
+    if Redis is None or not settings.redis_url:
+        logger.warning(
+            "RATE_LIMIT_BACKEND=redis requested but Redis client/URL unavailable, falling back to memory"
+        )
+        rate_backend = "memory"
+    else:
+        try:
+            redis_rate_client = Redis.from_url(
+                settings.redis_url,
+                decode_responses=True,
+                socket_timeout=0.3,
+                socket_connect_timeout=0.3,
+            )
+            redis_rate_client.ping()
+        except Exception:
+            logger.warning("Redis rate limiter unavailable at startup, falling back to memory")
+            redis_rate_client = None
+            rate_backend = "memory"
 
 
 def _inc_counter(key: str, value: int = 1) -> None:
@@ -251,6 +300,27 @@ def _parse_rate_limit(rate: str) -> tuple[int, int]:
 
 
 def _consume(key: str, limit_value: int, window_seconds: int) -> bool:
+    if rate_backend == "redis" and redis_rate_client is not None:
+        now_ms = int(time.time() * 1000)
+        member = f"{now_ms}-{secrets.token_hex(8)}"
+        window_ms = int(window_seconds * 1000)
+        ttl_seconds = max(window_seconds * 2, 60)
+        try:
+            allowed = redis_rate_client.eval(
+                REDIS_SLIDING_WINDOW_LUA,
+                1,
+                f"rate-limit:{key}",
+                now_ms,
+                window_ms,
+                limit_value,
+                member,
+                ttl_seconds,
+            )
+            return bool(int(allowed))
+        except RedisError:
+            # Fail over to in-process limits if Redis is transiently unavailable.
+            pass
+
     now = time.monotonic()
     with rate_lock:
         entries = rate_windows[key]
@@ -352,6 +422,43 @@ async def enforce_rate_limits(
     request.state.subject = subject
     request.state.rate_tier = profile_name
     return claims
+
+
+def _has_step_up_mfa(claims: dict[str, Any]) -> bool:
+    amr = claims.get("amr")
+    amr_values: list[str] = []
+    if isinstance(amr, list):
+        amr_values = [str(item).strip().lower() for item in amr]
+    elif isinstance(amr, str):
+        amr_values = [item.strip().lower() for item in amr.split(" ") if item.strip()]
+    if STEP_UP_AMR_VALUES and any(item in STEP_UP_AMR_VALUES for item in amr_values):
+        return True
+
+    acr = claims.get("acr")
+    if acr is not None and STEP_UP_ACR_VALUES:
+        if str(acr).strip().lower() in STEP_UP_ACR_VALUES:
+            return True
+    return False
+
+
+async def enforce_step_up_mfa(
+    request: Request,
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+) -> dict[str, Any]:
+    if not settings.step_up_mfa_enabled:
+        return claims
+    if request.url.path not in STEP_UP_CRITICAL_PATHS:
+        return claims
+    if _has_step_up_mfa(claims):
+        return claims
+    _audit(
+        "step_up_required",
+        subject=str(claims.get("sub", "")),
+        path=request.url.path,
+        amr=claims.get("amr"),
+        acr=claims.get("acr"),
+    )
+    raise HTTPException(status_code=403, detail="Step-up MFA required for this operation")
 
 
 async def _proxy(
@@ -536,7 +643,7 @@ async def deposit(
 async def withdraw(
     request: Request,
     payload: MoneyRequest,
-    claims: dict[str, Any] = Depends(enforce_rate_limits),
+    claims: dict[str, Any] = Depends(enforce_step_up_mfa),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
     _inc_counter("requests_total")
@@ -558,7 +665,7 @@ async def withdraw(
 async def transfer(
     request: Request,
     payload: TransferRequest,
-    claims: dict[str, Any] = Depends(enforce_rate_limits),
+    claims: dict[str, Any] = Depends(enforce_step_up_mfa),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ):
     _inc_counter("requests_total")

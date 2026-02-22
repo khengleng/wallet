@@ -17,6 +17,7 @@ from .schemas import (
     TransferResult,
 )
 from .service import (
+    CurrencyMismatchError,
     InsufficientFundsError,
     apply_deposit,
     apply_transfer,
@@ -183,6 +184,8 @@ def withdraw_endpoint(
         }
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CurrencyMismatchError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except InsufficientFundsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     finally:

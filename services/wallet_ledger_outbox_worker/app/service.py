@@ -12,6 +12,10 @@ class InsufficientFundsError(Exception):
     pass
 
 
+class CurrencyMismatchError(Exception):
+    pass
+
+
 def _record_processed_request(
     db: Session, idempotency_key: str, response_body: dict
 ) -> dict:
@@ -148,6 +152,10 @@ def apply_transfer(
         receiver = accounts.get(to_account_id)
         if sender is None or receiver is None:
             raise ValueError("One or both accounts not found")
+        if sender.currency != receiver.currency:
+            raise CurrencyMismatchError(
+                "Cross-currency transfer requires FX workflow and is not allowed on this endpoint"
+            )
         if sender.balance < amount:
             raise InsufficientFundsError("Insufficient funds")
 

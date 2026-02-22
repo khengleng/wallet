@@ -55,6 +55,10 @@ services:
       METRICS_TOKEN: local-metrics-token
       RATE_LIMIT_PER_IP: 120/minute
       RATE_LIMIT_PER_USER: 240/minute
+      RATE_LIMIT_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
+      STEP_UP_MFA_ENABLED: "true"
+      STEP_UP_MFA_CRITICAL_PATHS: /v1/transactions/withdraw,/v1/transactions/transfer
     ports:
       - "8082:8080"
     depends_on:

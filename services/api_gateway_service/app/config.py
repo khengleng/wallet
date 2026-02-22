@@ -86,6 +86,26 @@ class Settings:
     waf_blocked_ips: str = os.getenv("WAF_BLOCKED_IPS", "")
     waf_blocked_cidrs: str = os.getenv("WAF_BLOCKED_CIDRS", "")
     waf_blocked_user_agents: str = os.getenv("WAF_BLOCKED_USER_AGENTS", "")
+    rate_limit_backend: str = os.getenv("RATE_LIMIT_BACKEND", "memory").strip().lower()
+    redis_url: str = _env("REDIS_URL", "").strip()
+    step_up_mfa_enabled: bool = os.getenv("STEP_UP_MFA_ENABLED", "true").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    step_up_mfa_critical_paths: str = os.getenv(
+        "STEP_UP_MFA_CRITICAL_PATHS",
+        "/v1/transactions/withdraw,/v1/transactions/transfer",
+    )
+    step_up_mfa_amr_values: str = os.getenv(
+        "STEP_UP_MFA_AMR_VALUES",
+        "mfa,otp,totp,webauthn",
+    )
+    step_up_mfa_acr_values: str = os.getenv(
+        "STEP_UP_MFA_ACR_VALUES",
+        "2,urn:mace:incommon:iap:silver",
+    )
 
     @property
     def is_production(self) -> bool:

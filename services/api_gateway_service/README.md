@@ -45,6 +45,14 @@ JWT-authenticated gateway in front of `wallet-ledger-service`.
   - `WAF_BLOCKED_IPS` comma-separated IPs (example `1.2.3.4,8.8.8.8`)
   - `WAF_BLOCKED_CIDRS` comma-separated CIDRs (example `10.0.0.0/8,203.0.113.0/24`)
   - `WAF_BLOCKED_USER_AGENTS` comma-separated case-insensitive substrings (example `sqlmap,curl/8.`)
+- Distributed rate limiting (recommended for multi-replica production):
+  - `RATE_LIMIT_BACKEND=redis`
+  - `REDIS_URL=redis://<host>:6379/0`
+- Step-up MFA on critical operations:
+  - `STEP_UP_MFA_ENABLED=true`
+  - `STEP_UP_MFA_CRITICAL_PATHS=/v1/transactions/withdraw,/v1/transactions/transfer`
+  - `STEP_UP_MFA_AMR_VALUES=mfa,otp,totp,webauthn`
+  - `STEP_UP_MFA_ACR_VALUES=2,urn:mace:incommon:iap:silver`
 
 ## Run Locally
 ```bash
