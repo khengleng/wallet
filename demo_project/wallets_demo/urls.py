@@ -55,6 +55,48 @@ urlpatterns = [
     path('login/', views.portal_login, name='login'),
     path('profile/', views.profile, name='profile'),
     path('mobile/native-lab/', views.mobile_native_lab, name='mobile_native_lab'),
+    path('api/playground/personas/', views.mobile_playground_personas, name='mobile_playground_personas'),
+    path(
+        'api/playground/policy-tariff/simulate/',
+        views.mobile_playground_policy_tariff_simulate,
+        name='mobile_playground_policy_tariff_simulate',
+    ),
+    path(
+        'api/playground/assistant/action/',
+        views.mobile_playground_assistant_action,
+        name='mobile_playground_assistant_action',
+    ),
+    path(
+        'api/playground/journey/run/',
+        views.mobile_playground_journey_run,
+        name='mobile_playground_journey_run',
+    ),
+    path(
+        'api/playground/feature-flags/preview/',
+        views.mobile_playground_feature_flags_preview,
+        name='mobile_playground_feature_flags_preview',
+    ),
+    path('api/playground/abtest/', views.mobile_playground_abtest, name='mobile_playground_abtest'),
+    path(
+        'api/playground/event/validate/',
+        views.mobile_playground_event_validate,
+        name='mobile_playground_event_validate',
+    ),
+    path(
+        'api/playground/risk/simulate/',
+        views.mobile_playground_risk_simulate,
+        name='mobile_playground_risk_simulate',
+    ),
+    path(
+        'api/playground/contracts/replay/',
+        views.mobile_playground_contract_replay,
+        name='mobile_playground_contract_replay',
+    ),
+    path(
+        'api/playground/release-gate/',
+        views.mobile_playground_release_gate,
+        name='mobile_playground_release_gate',
+    ),
     path('auth/keycloak/callback/', views.keycloak_callback, name='keycloak_callback'),
     path('logout/', views.portal_logout, name='logout'),
 ]

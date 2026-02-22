@@ -253,6 +253,18 @@
       <p class="text-muted">Live responses from mobile APIs.</p>
       <div id="api-output" class="mono">Waiting for action...</div>
     </div>
+    <div class="card">
+      <h3>Assistant Prompt Playground</h3>
+      <p class="text-muted">Use this to chat directly even if the phone tab is not active.</p>
+      <div class="form-group">
+        <label>Prompt</label>
+        <textarea id="assistant-prompt" rows="4" placeholder="Ask the assistant, e.g. How can I transfer 100 USD safely?"></textarea>
+      </div>
+      <div class="flex gap-2">
+        <button id="btn-assistant-send" class="btn btn-primary" type="button">Send Prompt</button>
+        <button id="btn-assistant-clear" class="btn btn-outline" type="button">Clear Chat</button>
+      </div>
+    </div>
   </section>
 </div>
 
@@ -479,9 +491,11 @@
 
     async function sendChat() {
       const input = document.getElementById("chat-input");
-      const message = input.value.trim();
+      const promptBox = document.getElementById("assistant-prompt");
+      const message = (input.value || promptBox.value || "").trim();
       if (!message) return;
       input.value = "";
+      promptBox.value = "";
       appendChat("user", message);
 
       try {
@@ -521,6 +535,12 @@
     document.getElementById("btn-save-signals").addEventListener("click", saveSignals);
     document.getElementById("btn-run-sandbox").addEventListener("click", runSandbox);
     document.getElementById("btn-chat-send").addEventListener("click", sendChat);
+    document.getElementById("btn-assistant-send").addEventListener("click", sendChat);
+    document.getElementById("btn-assistant-clear").addEventListener("click", function() {
+      const log = document.getElementById("chat-log");
+      log.innerHTML = '<div class="chat-msg bot">Assistant ready. Ask anything about wallet usage.</div>';
+      setOutput({ chat_cleared: true });
+    });
     document.getElementById("chat-input").addEventListener("keydown", function(e) {
       if (e.key === "Enter") sendChat();
     });

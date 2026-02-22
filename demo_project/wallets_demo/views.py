@@ -910,6 +910,525 @@ def mobile_native_lab(request):
     )
 
 
+def _has_playground_access(user: User) -> bool:
+    return bool(
+        user_has_any_role(user, BACKOFFICE_ROLES)
+        or user.is_superuser
+        or user.username.strip().lower() == "superadmin"
+    )
+
+
+def _playground_forbidden() -> JsonResponse:
+    return JsonResponse(
+        {"ok": False, "error": {"code": "forbidden", "message": "Playground access denied."}},
+        status=403,
+    )
+
+
+@login_required
+def mobile_playground_personas(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "GET":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    personas: list[dict] = []
+    cifs = (
+        CustomerCIF.objects.select_related("user", "service_class")
+        .order_by("-updated_at", "-id")[:25]
+    )
+    for cif in cifs:
+        personas.append(
+            {
+                "persona_key": f"user:{cif.user.username}",
+                "username": cif.user.username,
+                "email": cif.user.email,
+                "wallet_type": cif.user.wallet_type,
+                "cif_no": cif.cif_no,
+                "cif_status": cif.status,
+                "service_class": cif.service_class.code if cif.service_class else "",
+            }
+        )
+    if not personas:
+        personas.append(
+            {
+                "persona_key": "new_user",
+                "username": "",
+                "email": "",
+                "wallet_type": WALLET_TYPE_CUSTOMER,
+                "cif_no": "",
+                "cif_status": "pending_cif",
+                "service_class": "Z",
+            }
+        )
+    return JsonResponse({"ok": True, "data": {"personas": personas}})
+
+
+@login_required
+def mobile_playground_policy_tariff_simulate(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return _mobile_json_error("Invalid payload.", code="invalid_payload")
+
+    try:
+        amount = _parse_amount(payload.get("amount"))
+        currency = _normalize_currency(payload.get("currency"))
+        action = str(payload.get("action") or "transfer").strip().lower()
+        flow_type = str(payload.get("flow_type") or "").strip().lower()
+        if flow_type and flow_type not in {FLOW_B2B, FLOW_B2C, FLOW_C2B, FLOW_P2G, FLOW_G2P}:
+            return _mobile_json_error("Invalid flow_type.", code="invalid_flow_type")
+        payer_entity = str(payload.get("payer_entity_type") or TariffRule.ENTITY_CUSTOMER).strip().lower()
+        payee_entity = str(payload.get("payee_entity_type") or TariffRule.ENTITY_CUSTOMER).strip().lower()
+        tx_type = str(payload.get("transaction_type") or action).strip().lower()
+    except ValidationError as exc:
+        return _mobile_json_error(str(exc), code="validation_error")
+
+    payer_code = str(payload.get("payer_service_class") or "").strip().upper()
+    payee_code = str(payload.get("payee_service_class") or "").strip().upper()
+    payer_policy = None
+    payee_policy = None
+    if payer_code:
+        payer_policy = ServiceClassPolicy.objects.filter(code=payer_code, is_active=True).first()
+    if payee_code:
+        payee_policy = ServiceClassPolicy.objects.filter(code=payee_code, is_active=True).first()
+
+    checks: list[dict] = []
+    allowed = True
+    if payer_policy is not None:
+        try:
+            _enforce_service_class_policy(
+                payer_policy,
+                action=action,
+                amount=amount,
+                flow_type=flow_type,
+                entity_label=f"Payer {payer_policy.code}",
+            )
+            checks.append({"scope": "payer_policy", "status": "allow"})
+        except ValidationError as exc:
+            allowed = False
+            checks.append({"scope": "payer_policy", "status": "block", "reason": str(exc)})
+
+    rule = _resolve_tariff_rule(
+        transaction_type=tx_type,
+        amount=amount,
+        currency=currency,
+        payer_entity_type=payer_entity,
+        payee_entity_type=payee_entity,
+        payer_service_class=payer_policy,
+        payee_service_class=payee_policy,
+    )
+    tariff_fee = _calculate_tariff_fee(rule, amount) if rule is not None else Decimal("0")
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "allowed": allowed,
+                "checks": checks,
+                "tariff": {
+                    "matched": bool(rule),
+                    "rule_id": rule.id if rule else None,
+                    "charge_side": rule.charge_side if rule else "",
+                    "fee": str(tariff_fee),
+                },
+            },
+        }
+    )
+
+
+@login_required
+def mobile_playground_assistant_action(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return _mobile_json_error("Invalid payload.", code="invalid_payload")
+
+    action = str(payload.get("action") or "").strip().lower()
+    if action not in {"deposit", "withdraw", "transfer"}:
+        return _mobile_json_error("Unsupported action.", code="invalid_action")
+    execute = bool(payload.get("execute", False))
+    currency = _normalize_currency(payload.get("currency"))
+    amount = _parse_amount(payload.get("amount"))
+    description = str(payload.get("description") or f"playground_{action}").strip()[:255]
+
+    actor = request.user
+    from_username = str(payload.get("from_username") or actor.username).strip()
+    to_username = str(payload.get("to_username") or "").strip()
+    try:
+        from_user = User.objects.get(username=from_username)
+    except User.DoesNotExist:
+        return _mobile_json_error("from_username not found.", code="user_not_found")
+    to_user = None
+    if action == "transfer":
+        if not to_username:
+            return _mobile_json_error("to_username is required for transfer.", code="to_user_required")
+        try:
+            to_user = User.objects.get(username=to_username)
+        except User.DoesNotExist:
+            return _mobile_json_error("to_username not found.", code="user_not_found")
+
+    tariff_rule = None
+    tariff_fee = Decimal("0")
+    if action == "transfer" and to_user is not None:
+        payer_service_class = _customer_service_class(from_user)
+        payee_service_class = _customer_service_class(to_user)
+        tariff_rule = _resolve_tariff_rule(
+            transaction_type="transfer",
+            amount=amount,
+            currency=currency,
+            payer_entity_type=TariffRule.ENTITY_CUSTOMER,
+            payee_entity_type=TariffRule.ENTITY_CUSTOMER,
+            payer_service_class=payer_service_class,
+            payee_service_class=payee_service_class,
+        )
+        if tariff_rule is not None:
+            tariff_fee = _calculate_tariff_fee(tariff_rule, amount)
+
+    try:
+        if action in {"withdraw", "transfer"}:
+            _enforce_customer_service_policy(
+                from_user,
+                action="transfer" if action == "transfer" else action,
+                amount=amount,
+                currency=currency,
+            )
+    except ValidationError as exc:
+        return JsonResponse(
+            {
+                "ok": True,
+                "data": {
+                    "allowed": False,
+                    "execute": execute,
+                    "reason": str(exc),
+                    "tariff_fee": str(tariff_fee),
+                },
+            }
+        )
+
+    from_wallet = _wallet_for_currency(from_user, currency)
+    to_wallet = _wallet_for_currency(to_user, currency) if to_user is not None else None
+    total_required = amount
+    if tariff_rule is not None and tariff_rule.charge_side == TariffRule.CHARGE_SIDE_PAYER:
+        total_required += tariff_fee
+    if action in {"withdraw", "transfer"} and from_wallet.balance < total_required:
+        return JsonResponse(
+            {
+                "ok": True,
+                "data": {
+                    "allowed": False,
+                    "execute": execute,
+                    "reason": "Insufficient funds for requested action.",
+                    "required": str(total_required),
+                    "current_balance": str(from_wallet.balance),
+                },
+            }
+        )
+
+    if not execute:
+        return JsonResponse(
+            {
+                "ok": True,
+                "data": {
+                    "allowed": True,
+                    "execute": False,
+                    "tariff_fee": str(tariff_fee),
+                    "charge_side": tariff_rule.charge_side if tariff_rule else "",
+                },
+            }
+        )
+
+    with transaction.atomic():
+        wallet_service = get_wallet_service()
+        if action == "deposit":
+            _wallet_deposit(
+                wallet_service,
+                from_wallet,
+                amount,
+                meta={"description": description, "currency": currency, "service_type": "playground_deposit"},
+            )
+        elif action == "withdraw":
+            _wallet_withdraw(
+                wallet_service,
+                from_wallet,
+                amount,
+                meta={"description": description, "currency": currency, "service_type": "playground_withdraw"},
+            )
+        else:
+            _wallet_withdraw(
+                wallet_service,
+                from_wallet,
+                amount,
+                meta={"description": description, "currency": currency, "service_type": "playground_transfer"},
+            )
+            if to_wallet is not None:
+                _wallet_deposit(
+                    wallet_service,
+                    to_wallet,
+                    amount,
+                    meta={"description": description, "currency": currency, "service_type": "playground_transfer"},
+                )
+            if tariff_rule is not None and tariff_fee > Decimal("0"):
+                _apply_tariff_fee(
+                    wallet_service=wallet_service,
+                    rule=tariff_rule,
+                    fee=tariff_fee,
+                    currency=currency,
+                    payer_wallet=from_wallet,
+                    payee_wallet=to_wallet,
+                    meta={"transaction_type": "transfer", "currency": currency},
+                )
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "allowed": True,
+                "execute": True,
+                "action": action,
+                "from_user": from_user.username,
+                "to_user": to_user.username if to_user else "",
+                "amount": str(amount),
+                "currency": currency,
+                "tariff_fee": str(tariff_fee),
+            },
+        }
+    )
+
+
+@login_required
+def mobile_playground_journey_run(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    scenario = str(payload.get("scenario") or "onboard_to_transfer").strip().lower()
+    username = str(payload.get("username") or request.user.username).strip()
+    user = User.objects.filter(username=username).first()
+    if user is None:
+        return _mobile_json_error("username not found.", code="user_not_found")
+    currency = _normalize_currency(payload.get("currency") or "USD")
+    steps: list[dict] = []
+
+    cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
+    steps.append(
+        {
+            "step": "cif_check",
+            "status": "ok" if cif else "warn",
+            "details": cif.cif_no if cif else "No CIF yet (self onboarding required).",
+        }
+    )
+    wallet = _wallet_for_currency(user, currency)
+    steps.append(
+        {
+            "step": "wallet_check",
+            "status": "ok",
+            "details": f"{wallet.slug} {wallet.balance} {currency}",
+        }
+    )
+    can_transfer = True
+    reason = ""
+    try:
+        _enforce_customer_service_policy(
+            user,
+            action="transfer",
+            amount=Decimal("1.00"),
+            currency=currency,
+        )
+    except ValidationError as exc:
+        can_transfer = False
+        reason = str(exc)
+    steps.append(
+        {
+            "step": "policy_transfer_smoke",
+            "status": "ok" if can_transfer else "block",
+            "details": "transfer_allowed" if can_transfer else reason,
+        }
+    )
+    rr = release_readiness_snapshot()
+    steps.append(
+        {
+            "step": "release_gate_snapshot",
+            "status": "ok" if rr.get("overall_status") in {"green", "ok"} else "warn",
+            "details": rr,
+        }
+    )
+    return JsonResponse({"ok": True, "data": {"scenario": scenario, "steps": steps}})
+
+
+@login_required
+def mobile_playground_feature_flags_preview(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    flags = payload.get("flags") if isinstance(payload.get("flags"), dict) else {}
+    modules = {
+        "wallet_module": bool(flags.get("wallet_module", True)),
+        "transfer_module": bool(flags.get("transfer_module", True)),
+        "fx_module": bool(flags.get("fx_module", True)),
+        "assistant_module": bool(flags.get("assistant_module", True)),
+        "merchant_module": bool(flags.get("merchant_module", True)),
+    }
+    return JsonResponse({"ok": True, "data": {"modules": modules}})
+
+
+@login_required
+def mobile_playground_abtest(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    experiment = str(payload.get("experiment") or "home_widgets_v1").strip()
+    variants = payload.get("variants")
+    if not isinstance(variants, list) or not variants:
+        variants = ["A", "B"]
+    seed = f"{experiment}:{request.user.username}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+    idx = int(digest[:8], 16) % len(variants)
+    return JsonResponse(
+        {"ok": True, "data": {"experiment": experiment, "variant": variants[idx], "variants": variants}}
+    )
+
+
+@login_required
+def mobile_playground_event_validate(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    event_name = str(payload.get("event_name") or "").strip()
+    props = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+    required_fields = {
+        "mobile_self_onboard_completed": ["cif_no", "service_class", "wallet_count"],
+        "wallet_transfer_success": ["amount", "currency", "recipient"],
+        "mobile.profile.update": ["cif_no"],
+    }.get(event_name, [])
+    missing = [field for field in required_fields if field not in props]
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "event_name": event_name,
+                "valid": not missing,
+                "missing_fields": missing,
+                "required_fields": required_fields,
+            },
+        }
+    )
+
+
+@login_required
+def mobile_playground_risk_simulate(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    amount = Decimal(str(payload.get("amount") or "0"))
+    tx_count_1h = int(payload.get("tx_count_1h") or 0)
+    new_device = bool(payload.get("new_device", False))
+    impossible_travel = bool(payload.get("impossible_travel", False))
+    score = Decimal("0")
+    if amount >= Decimal("1000"):
+        score += Decimal("30")
+    if tx_count_1h >= 10:
+        score += Decimal("30")
+    if new_device:
+        score += Decimal("20")
+    if impossible_travel:
+        score += Decimal("30")
+    decision = "allow"
+    controls: list[str] = []
+    if score >= Decimal("70"):
+        decision = "block"
+        controls = ["step_up_mfa", "manual_review", "velocity_lock"]
+    elif score >= Decimal("40"):
+        decision = "step_up"
+        controls = ["step_up_mfa", "enhanced_monitoring"]
+    return JsonResponse(
+        {"ok": True, "data": {"risk_score": str(score), "decision": decision, "controls": controls}}
+    )
+
+
+@login_required
+def mobile_playground_contract_replay(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    method = str(payload.get("method") or "GET").strip().upper()
+    path = str(payload.get("path") or "/api/mobile/bootstrap/").strip()
+    if not path.startswith("/"):
+        return _mobile_json_error("Path must start with /", code="invalid_path")
+    body_payload = payload.get("body") if isinstance(payload.get("body"), dict) else {}
+    data_bytes = None if method == "GET" else json.dumps(body_payload).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    if path.startswith("/mobile/"):
+        token = request.session.get("oidc_access_token", "")
+        if not token:
+            return _mobile_json_error("No OIDC token in session.", code="token_required")
+        headers["Authorization"] = f"Bearer {token}"
+        full_url = request.build_absolute_uri(path)
+    else:
+        full_url = request.build_absolute_uri(path)
+    try:
+        req = Request(full_url, data=data_bytes, headers=headers, method=method)
+        with urlopen(req, timeout=12) as resp:
+            raw = resp.read().decode("utf-8")
+            status_code = int(getattr(resp, "status", 200) or 200)
+        response_json = json.loads(raw or "{}")
+        return JsonResponse({"ok": True, "data": {"status": status_code, "response": response_json}})
+    except Exception as exc:
+        return JsonResponse(
+            {"ok": False, "error": {"code": "replay_failed", "message": str(exc)}},
+            status=502,
+        )
+
+
+@login_required
+def mobile_playground_release_gate(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+    if request.method != "GET":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+    snapshot = release_readiness_snapshot()
+    return JsonResponse({"ok": True, "data": snapshot})
+
+
 def _mobile_json_error(message: str, *, status: int = 400, code: str = "bad_request") -> JsonResponse:
     return JsonResponse({"ok": False, "error": {"code": code, "message": message}}, status=status)
 
