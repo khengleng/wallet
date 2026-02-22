@@ -10,7 +10,7 @@
             <p><strong>{{ case_obj.title }}</strong></p>
             <p class="text-muted">{{ case_obj.description|default:"No description" }}</p>
         </div>
-        <a class="btn btn-outline" href="{% url 'operations_center' %}#oc-cases">Back to Case List</a>
+        <a class="btn btn-outline" href="{% url 'operations_center' %}?tab=oc-cases#oc-cases">Back to Case List</a>
     </div>
 </div>
 
