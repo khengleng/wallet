@@ -16,6 +16,7 @@ Dedicated backend-for-frontend service for the mobile app channel.
 - `GET /v1/personalization` -> personalized native MFE layout payload
 - `POST /v1/personalization/signals` -> collect user data points for personalization
 - `GET /v1/personalization/ai` -> OpenAI-augmented personalization suggestions
+- `POST /v1/assistant/chat` -> ChatGPT-like assistant response for native app
 - `POST /v1/onboarding/self` -> self onboarding (CIF-first)
 - `GET /v1/wallets/balance` -> wallet balances summary
 - `GET /v1/wallets/statement` -> wallet transaction statement
@@ -28,6 +29,8 @@ Dedicated backend-for-frontend service for the mobile app channel.
 - `web` service mobile endpoints:
   - `/api/mobile/bootstrap/`
   - `/api/mobile/profile/`
+  - `/api/mobile/personalization/`
+  - `/api/mobile/personalization/signals/`
   - `/api/mobile/onboarding/self/`
   - `/api/mobile/statement/`
 

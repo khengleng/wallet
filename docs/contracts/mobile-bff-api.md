@@ -78,6 +78,20 @@ Body example:
 ### `GET /v1/personalization/ai`
 Returns OpenAI-augmented recommendations for native screen/widget personalization.
 
+### `POST /v1/assistant/chat`
+ChatGPT-like wallet assistant endpoint for the native app.
+
+Body example:
+```json
+{
+  "message": "How can I increase my transfer limit?",
+  "context": {
+    "screen": "home",
+    "locale": "en-KH"
+  }
+}
+```
+
 ### `POST /v1/onboarding/self`
 Body:
 ```json

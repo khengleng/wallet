@@ -46,3 +46,8 @@ class MobileProfileUpdateRequest(BaseModel):
 
 class MobilePersonalizationSignalsRequest(BaseModel):
     data_points: dict = Field(default_factory=dict)
+
+
+class MobileAssistantChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    context: dict = Field(default_factory=dict)

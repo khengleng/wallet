@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Res
 
 from .config import settings
 from .schemas import (
+    MobileAssistantChatRequest,
     MobileOidcTokenExchangeRequest,
     MobilePasswordResetRequest,
     MobilePersonalizationSignalsRequest,
@@ -307,6 +308,81 @@ async def _openai_personalization(
     }
 
 
+async def _openai_assistant_chat(
+    *,
+    subject: str,
+    message: str,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    if not settings.openai_api_key:
+        return {
+            "enabled": False,
+            "status": "fallback",
+            "reply": "AI assistant is not configured yet. Please contact support.",
+            "suggested_actions": ["view_balance", "recent_transactions", "contact_support"],
+        }
+
+    model_context = {
+        "subject_hash": hash(subject),
+        "context": context,
+        "question": message,
+    }
+    instructions = (
+        "You are a wallet app assistant for a native mobile app. "
+        "Be concise, safe, and actionable. "
+        "Do not invent balances or completed actions. "
+        "Return strict JSON: {reply: string, suggested_actions: string[]}. "
+        "If transaction execution is requested, respond with guidance only."
+    )
+    request_payload = {
+        "model": settings.openai_model,
+        "input": [
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": json.dumps(model_context, separators=(",", ":"))},
+        ],
+        "max_output_tokens": 350,
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+    }
+    endpoint = f"{settings.openai_base_url}/responses"
+    try:
+        async with httpx.AsyncClient(timeout=settings.openai_timeout_seconds) as client:
+            response = await client.post(endpoint, headers=headers, json=request_payload)
+        response.raise_for_status()
+        body = response.json()
+    except Exception:
+        _inc_counter("upstream_errors_total")
+        return {
+            "enabled": True,
+            "status": "fallback",
+            "reply": "I cannot reach the AI service right now. Please try again shortly.",
+            "suggested_actions": ["retry", "view_balance", "contact_support"],
+        }
+
+    output_text = ""
+    for item in body.get("output", []) or []:
+        for content in item.get("content", []) or []:
+            if content.get("type") in {"output_text", "text"}:
+                output_text += str(content.get("text", ""))
+    parsed = _extract_json_object(output_text) or {}
+    reply = str(parsed.get("reply") or "").strip()
+    actions = parsed.get("suggested_actions")
+    if not isinstance(actions, list):
+        actions = []
+    actions = [str(a) for a in actions if str(a).strip()][:8]
+    if not reply:
+        reply = "Here is your assistant response. Please ask a more specific question."
+    return {
+        "enabled": True,
+        "status": "ok",
+        "model": settings.openai_model,
+        "reply": reply,
+        "suggested_actions": actions,
+    }
+
+
 def _subject_from_auth(auth_ctx: dict[str, Any]) -> str:
     if auth_ctx.get("service"):
         raise HTTPException(status_code=403, detail="Service token cannot perform this operation")
@@ -440,6 +516,34 @@ async def mobile_personalization_ai(
         "data": {
             "personalization": base_payload.get("data", {}),
             "ai": ai_result,
+        },
+    }
+
+
+@app.post("/v1/assistant/chat")
+async def mobile_assistant_chat(
+    payload: MobileAssistantChatRequest,
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    bootstrap = await _proxy_web("GET", "/api/mobile/bootstrap/", token=auth_ctx["token"])
+    personalization = await _proxy_web("GET", "/api/mobile/personalization/", token=auth_ctx["token"])
+    context = {
+        "wallet_count": len(bootstrap.get("data", {}).get("wallets", []) or []),
+        "onboarding_status": bootstrap.get("data", {}).get("onboarding", {}).get("status"),
+        "segments": personalization.get("data", {}).get("segments", []),
+        "client_context": payload.context if isinstance(payload.context, dict) else {},
+    }
+    ai_result = await _openai_assistant_chat(
+        subject=str(auth_ctx.get("sub") or ""),
+        message=payload.message,
+        context=context,
+    )
+    return {
+        "ok": True,
+        "data": {
+            "assistant": ai_result,
+            "context": context,
         },
     }
 

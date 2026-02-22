@@ -64,11 +64,14 @@ For mobile, use a **modular app shell** pattern (microfrontend equivalent), not 
   - case creation, complaint/dispute status tracking
 - `settings-security-module`
   - devices, sessions, PIN/password controls, alerts
+- `assistant-module`
+  - ChatGPT-like conversational assistant for wallet guidance and contextual actions
 
 ## Backend Integration Contract
 Mobile app should not call internal microservices directly.
 
 - Primary path: `api-gateway-service` for transactional APIs.
+- Mobile experience path: `mobile-bff-service` for channel-specific profile/personalization/assistant APIs.
 - Identity path: `identity-service` for token/session/device/recovery flows.
 - Notifications path: OneSignal/CleverTap SDKs via controlled adapter only.
 - Role enforcement:
