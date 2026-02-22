@@ -419,15 +419,19 @@
     </style>
     <script>
         function switchTab(btn, tabId) {
-            var bar = btn.closest('.tab-bar');
-            var panes = document.querySelectorAll('#' + tabId.split('-').slice(0, -1).join('-') + '-container .tab-pane, .tab-pane');
-            bar.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
-            document.querySelectorAll('.tab-pane').forEach(function (p) {
-                if (p.id && (p.id === tabId || btn.dataset.group && p.dataset.group === btn.dataset.group)) p.classList.remove('active');
-            });
+            const bar = btn.closest('.tab-bar');
+            if (bar) {
+                bar.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            }
             btn.classList.add('active');
-            var pane = document.getElementById(tabId);
+
+            // Find all panes in the same container or just all panes on page
+            const container = btn.closest('.tab-container') || document;
+            container.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+            const pane = document.getElementById(tabId);
             if (pane) pane.classList.add('active');
+
             history.replaceState(null, '', '#' + tabId);
         }
         function initTabs() {
