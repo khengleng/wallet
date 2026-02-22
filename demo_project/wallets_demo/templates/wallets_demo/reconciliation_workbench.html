@@ -1,0 +1,190 @@
+{% extends 'wallets_demo/base.html' %}
+{% block title %}Reconciliation Workbench - {{ org_name }}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Reconciliation Workbench</h2>
+    <p class="text-muted">Transaction matching, break taxonomy management, maker-checker break resolution, and evidence handling.</p>
+</div>
+
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="rw-runs" onclick="switchTab(this,'rw-runs')">Runs</button>
+    <button class="tab-btn" data-tab="rw-breaks" onclick="switchTab(this,'rw-breaks')">Breaks</button>
+    <button class="tab-btn" data-tab="rw-evidence" onclick="switchTab(this,'rw-evidence')">Evidence</button>
+</div>
+
+<div class="tab-pane active" id="rw-runs">
+    <div class="card">
+        <h3>Create Reconciliation Run</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="reconciliation_run_create" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group"><label>Source</label><input type="text" name="source" value="internal_vs_settlement" /></div>
+                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Period Start</label><input type="date" name="period_start" /></div>
+                <div class="form-group"><label>Period End</label><input type="date" name="period_end" /></div>
+                <div class="form-group"><label>External Count</label><input type="number" min="0" name="external_count" value="0" /></div>
+                <div class="form-group"><label>External Amount</label><input type="number" step="0.01" min="0" name="external_amount" value="0" /></div>
+            </div>
+            <button class="btn btn-primary" type="submit">Run Reconciliation</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Reconciliation Runs</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Run No</th>
+                        <th>Period</th>
+                        <th>Currency</th>
+                        <th>Internal</th>
+                        <th>External</th>
+                        <th>Delta Count</th>
+                        <th>Delta Amount</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for run in runs %}
+                    <tr>
+                        <td>{{ run.run_no }}</td>
+                        <td style="font-size:0.78rem;">{{ run.period_start }} → {{ run.period_end }}</td>
+                        <td>{{ run.currency }}</td>
+                        <td>{{ run.internal_count }} / {{ run.internal_amount }}</td>
+                        <td>{{ run.external_count }} / {{ run.external_amount }}</td>
+                        <td>{{ run.delta_count }}</td>
+                        <td>{{ run.delta_amount }}</td>
+                        <td>{{ run.status }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="8" class="text-muted" style="text-align:center;">No reconciliation runs.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="tab-pane" id="rw-breaks">
+    <div class="card">
+        <h3>Break Workbench</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Run</th>
+                        <th>Category</th>
+                        <th>Issue</th>
+                        <th>Delta</th>
+                        <th>Match</th>
+                        <th>Resolution</th>
+                        <th>Assigned</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for br in breaks %}
+                    <tr>
+                        <td>#{{ br.id }}</td>
+                        <td>{{ br.run.run_no }}</td>
+                        <td>{{ br.break_category }}</td>
+                        <td>{{ br.issue_type }}</td>
+                        <td>{{ br.delta_amount }}</td>
+                        <td>{% if br.match_status == 'matched' %}<span class="badge-active">Matched</span>{% else %}<span class="badge-pending">Unmatched</span>{% endif %}</td>
+                        <td>{{ br.resolution_status }}</td>
+                        <td>{% if br.assigned_to %}{{ br.assigned_to.username }}{% else %}-{% endif %}</td>
+                        <td>
+                            <form method="post" style="display:flex;gap:0.3rem;flex-wrap:wrap; margin-bottom:0.35rem;">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="reconciliation_match_update" />
+                                <input type="hidden" name="break_id" value="{{ br.id }}" />
+                                <select name="break_category">
+                                    {% for value,label in break_categories %}
+                                    <option value="{{ value }}" {% if br.break_category == value %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <input type="text" name="internal_txn_ref" placeholder="Internal ref" value="{{ br.internal_txn_ref }}" style="max-width:130px;" />
+                                <input type="text" name="external_txn_ref" placeholder="External ref" value="{{ br.external_txn_ref }}" style="max-width:130px;" />
+                                <input type="text" name="note" placeholder="Note" value="{{ br.note }}" style="max-width:130px;" />
+                                <button class="btn btn-primary" type="submit" name="match_action" value="match">Match</button>
+                                <button class="btn btn-outline" type="submit" name="match_action" value="unmatch">Unmatch</button>
+                            </form>
+
+                            <form method="post" style="display:flex;gap:0.3rem;flex-wrap:wrap; margin-bottom:0.35rem;">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="reconciliation_resolution_request" />
+                                <input type="hidden" name="break_id" value="{{ br.id }}" />
+                                <input type="text" name="resolution_request_note" placeholder="Maker note" style="max-width:130px;" />
+                                <select name="required_checker_role" style="max-width:140px;">
+                                    <option value="risk" {% if br.required_checker_role == 'risk' %}selected{% endif %}>risk</option>
+                                    <option value="admin" {% if br.required_checker_role == 'admin' %}selected{% endif %}>admin</option>
+                                    <option value="super_admin" {% if br.required_checker_role == 'super_admin' %}selected{% endif %}>super_admin</option>
+                                    <option value="finance" {% if br.required_checker_role == 'finance' %}selected{% endif %}>finance</option>
+                                </select>
+                                <button class="btn btn-outline" type="submit">Request Resolution</button>
+                            </form>
+
+                            <form method="post" style="display:flex;gap:0.3rem;flex-wrap:wrap;">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="reconciliation_resolution_decision" />
+                                <input type="hidden" name="break_id" value="{{ br.id }}" />
+                                <input type="text" name="resolution_checker_note" placeholder="Checker note" style="max-width:130px;" />
+                                <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve</button>
+                                <button class="btn btn-outline" type="submit" name="decision" value="reject">Reject</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="9" class="text-muted" style="text-align:center;">No reconciliation breaks.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="tab-pane" id="rw-evidence">
+    <div class="card">
+        <h3>Upload Break Evidence</h3>
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="reconciliation_evidence_add" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group"><label>Break</label><select name="break_id" required>{% for br in breaks %}<option value="{{ br.id }}">#{{ br.id }} - {{ br.run.run_no }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Title</label><input type="text" name="title" required /></div>
+                <div class="form-group"><label>Type</label><input type="text" name="document_type" value="supporting_doc" /></div>
+                <div class="form-group"><label>File (optional)</label><input type="file" name="document_file" /></div>
+                <div class="form-group"><label>External URL (optional)</label><input type="url" name="external_url" /></div>
+                <div class="form-group"><label>Note</label><input type="text" name="note" /></div>
+            </div>
+            <button class="btn btn-primary" type="submit">Upload Evidence</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Evidence Registry</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead><tr><th>Time</th><th>Break</th><th>Title</th><th>Type</th><th>Source</th><th>Uploaded By</th></tr></thead>
+                <tbody>
+                    {% for ev in evidences %}
+                    <tr>
+                        <td style="font-size:0.78rem;">{{ ev.created_at|date:"d M Y H:i" }}</td>
+                        <td>#{{ ev.recon_break.id }}</td>
+                        <td>{{ ev.title }}</td>
+                        <td>{{ ev.document_type }}</td>
+                        <td>{% if ev.file %}<a href="{{ ev.file.url }}" target="_blank" rel="noopener">File</a>{% endif %}{% if ev.file and ev.external_url %} / {% endif %}{% if ev.external_url %}<a href="{{ ev.external_url }}" target="_blank" rel="noopener">URL</a>{% endif %}</td>
+                        <td>{{ ev.uploaded_by.username }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" class="text-muted" style="text-align:center;">No evidence records.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

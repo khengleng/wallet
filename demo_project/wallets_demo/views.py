@@ -84,6 +84,7 @@ from .models import (
     OperationCaseNote,
     OperationSetting,
     ReconciliationBreak,
+    ReconciliationEvidence,
     ReconciliationRun,
     SanctionScreeningRecord,
     SettlementPayout,
@@ -2484,9 +2485,13 @@ def operations_center(request):
                     created_by=request.user,
                 )
                 if run.delta_count != 0 or run.delta_amount != Decimal("0.00"):
+                    category = ReconciliationBreak.CATEGORY_AMOUNT
+                    if run.delta_amount == Decimal("0.00") and run.delta_count != 0:
+                        category = ReconciliationBreak.CATEGORY_COUNT
                     ReconciliationBreak.objects.create(
                         run=run,
                         issue_type="summary_mismatch",
+                        break_category=category,
                         expected_amount=run.internal_amount,
                         actual_amount=run.external_amount,
                         delta_amount=run.delta_amount,
@@ -2520,6 +2525,20 @@ def operations_center(request):
                     raise ValidationError("Invalid reconciliation break status.")
                 recon_break.status = status
                 recon_break.note = (request.POST.get("note") or recon_break.note).strip()
+                category = (request.POST.get("break_category") or recon_break.break_category).strip()
+                valid_categories = {choice[0] for choice in ReconciliationBreak.CATEGORY_CHOICES}
+                if category in valid_categories:
+                    recon_break.break_category = category
+                recon_break.internal_txn_ref = (
+                    request.POST.get("internal_txn_ref") or recon_break.internal_txn_ref
+                ).strip()
+                recon_break.external_txn_ref = (
+                    request.POST.get("external_txn_ref") or recon_break.external_txn_ref
+                ).strip()
+                if recon_break.internal_txn_ref or recon_break.external_txn_ref:
+                    recon_break.match_status = ReconciliationBreak.MATCH_MATCHED
+                else:
+                    recon_break.match_status = ReconciliationBreak.MATCH_UNMATCHED
                 assigned_to_id = request.POST.get("assigned_to")
                 recon_break.assigned_to = (
                     User.objects.filter(id=assigned_to_id).first() if assigned_to_id else recon_break.assigned_to
@@ -2531,6 +2550,10 @@ def operations_center(request):
                     update_fields=[
                         "status",
                         "note",
+                        "break_category",
+                        "internal_txn_ref",
+                        "external_txn_ref",
+                        "match_status",
                         "assigned_to",
                         "resolved_by",
                         "resolved_at",
@@ -3678,6 +3701,236 @@ def settlement_operations(request):
                 "settlement", "payout", "batch_file", "assigned_to", "created_by", "resolved_by"
             ).order_by("-created_at")[:200],
             "users": User.objects.order_by("username")[:300],
+        },
+    )
+
+
+@login_required
+def reconciliation_workbench(request):
+    roles = ("super_admin", "admin", "operation", "finance", "risk", "treasury")
+    if not user_has_any_role(request.user, roles):
+        raise PermissionDenied("You do not have access to reconciliation workbench.")
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "").strip().lower()
+        try:
+            if form_type == "reconciliation_run_create":
+                _require_role_or_perm(request.user, roles=("super_admin", "admin", "finance", "risk", "operation"))
+                currency = _normalize_currency(request.POST.get("currency"))
+                period_start = _parse_iso_date(
+                    request.POST.get("period_start"),
+                    default=timezone.localdate() - timedelta(days=1),
+                )
+                period_end = _parse_iso_date(
+                    request.POST.get("period_end"),
+                    default=timezone.localdate(),
+                )
+                if period_start > period_end:
+                    raise ValidationError("Reconciliation start date cannot be after end date.")
+                internal_qs = MerchantCashflowEvent.objects.filter(
+                    currency=currency,
+                    created_at__date__gte=period_start,
+                    created_at__date__lte=period_end,
+                    settled_at__isnull=False,
+                )
+                internal_count = internal_qs.count()
+                internal_amount = (
+                    internal_qs.aggregate(total=models.Sum("net_amount")).get("total")
+                    or Decimal("0.00")
+                )
+                external_count = int(request.POST.get("external_count") or 0)
+                external_amount = Decimal(request.POST.get("external_amount") or "0")
+                run = ReconciliationRun.objects.create(
+                    source=(request.POST.get("source") or "internal_vs_settlement").strip(),
+                    run_no=_new_recon_no(),
+                    currency=currency,
+                    period_start=period_start,
+                    period_end=period_end,
+                    internal_count=internal_count,
+                    internal_amount=internal_amount,
+                    external_count=external_count,
+                    external_amount=external_amount,
+                    delta_count=internal_count - external_count,
+                    delta_amount=(internal_amount - external_amount).quantize(Decimal("0.01")),
+                    status=ReconciliationRun.STATUS_COMPLETED,
+                    created_by=request.user,
+                )
+                if run.delta_count != 0 or run.delta_amount != Decimal("0.00"):
+                    category = ReconciliationBreak.CATEGORY_AMOUNT
+                    if run.delta_amount == Decimal("0.00") and run.delta_count != 0:
+                        category = ReconciliationBreak.CATEGORY_COUNT
+                    ReconciliationBreak.objects.create(
+                        run=run,
+                        issue_type="summary_mismatch",
+                        break_category=category,
+                        expected_amount=run.internal_amount,
+                        actual_amount=run.external_amount,
+                        delta_amount=run.delta_amount,
+                        note=f"Count delta {run.delta_count}",
+                        status=ReconciliationBreak.STATUS_OPEN,
+                        assigned_to=request.user,
+                        created_by=request.user,
+                    )
+                messages.success(request, f"Reconciliation run {run.run_no} completed.")
+                return redirect("reconciliation_workbench")
+
+            if form_type == "reconciliation_match_update":
+                _require_role_or_perm(request.user, roles=roles)
+                recon_break = ReconciliationBreak.objects.get(id=request.POST.get("break_id"))
+                recon_break.break_category = (request.POST.get("break_category") or recon_break.break_category).strip()
+                recon_break.internal_txn_ref = (request.POST.get("internal_txn_ref") or "").strip()
+                recon_break.external_txn_ref = (request.POST.get("external_txn_ref") or "").strip()
+                recon_break.note = (request.POST.get("note") or recon_break.note).strip()
+                action = (request.POST.get("match_action") or "match").strip().lower()
+                if action == "match":
+                    if not recon_break.internal_txn_ref and not recon_break.external_txn_ref:
+                        raise ValidationError("Provide at least one transaction reference for match.")
+                    recon_break.match_status = ReconciliationBreak.MATCH_MATCHED
+                elif action == "unmatch":
+                    recon_break.match_status = ReconciliationBreak.MATCH_UNMATCHED
+                else:
+                    raise ValidationError("Invalid match action.")
+                recon_break.status = ReconciliationBreak.STATUS_IN_REVIEW
+                recon_break.save(
+                    update_fields=[
+                        "break_category",
+                        "internal_txn_ref",
+                        "external_txn_ref",
+                        "note",
+                        "match_status",
+                        "status",
+                        "updated_at",
+                    ]
+                )
+                messages.success(request, f"Reconciliation break #{recon_break.id} {recon_break.match_status}.")
+                return redirect("reconciliation_workbench")
+
+            if form_type == "reconciliation_resolution_request":
+                _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "finance", "treasury"))
+                recon_break = ReconciliationBreak.objects.get(id=request.POST.get("break_id"))
+                if recon_break.resolution_status == ReconciliationBreak.RESOLUTION_PENDING:
+                    raise ValidationError("Resolution request already pending checker decision.")
+                recon_break.resolution_status = ReconciliationBreak.RESOLUTION_PENDING
+                recon_break.resolution_requested_by = request.user
+                recon_break.resolution_requested_at = timezone.now()
+                recon_break.resolution_request_note = (
+                    request.POST.get("resolution_request_note") or recon_break.resolution_request_note
+                ).strip()
+                recon_break.status = ReconciliationBreak.STATUS_IN_REVIEW
+                recon_break.required_checker_role = (
+                    request.POST.get("required_checker_role") or recon_break.required_checker_role or "risk"
+                ).strip()
+                recon_break.save(
+                    update_fields=[
+                        "resolution_status",
+                        "resolution_requested_by",
+                        "resolution_requested_at",
+                        "resolution_request_note",
+                        "status",
+                        "required_checker_role",
+                        "updated_at",
+                    ]
+                )
+                messages.success(request, f"Resolution request submitted for break #{recon_break.id}.")
+                return redirect("reconciliation_workbench")
+
+            if form_type == "reconciliation_resolution_decision":
+                _require_role_or_perm(request.user, roles=("super_admin", "admin", "risk", "finance"))
+                recon_break = ReconciliationBreak.objects.get(id=request.POST.get("break_id"))
+                decision = (request.POST.get("decision") or "").strip().lower()
+                if recon_break.resolution_status != ReconciliationBreak.RESOLUTION_PENDING:
+                    raise ValidationError("Resolution is not pending checker decision.")
+                required_role = (recon_break.required_checker_role or "").strip()
+                if required_role and not user_has_any_role(request.user, (required_role,)):
+                    raise PermissionDenied(f"Checker must have role {required_role}.")
+                recon_break.resolution_checker = request.user
+                recon_break.resolution_checker_note = (
+                    request.POST.get("resolution_checker_note") or recon_break.resolution_checker_note
+                ).strip()
+                recon_break.resolution_decided_at = timezone.now()
+                if decision == "approve":
+                    recon_break.resolution_status = ReconciliationBreak.RESOLUTION_APPROVED
+                    recon_break.status = ReconciliationBreak.STATUS_RESOLVED
+                    recon_break.resolved_by = request.user
+                    recon_break.resolved_at = timezone.now()
+                elif decision == "reject":
+                    recon_break.resolution_status = ReconciliationBreak.RESOLUTION_REJECTED
+                    recon_break.status = ReconciliationBreak.STATUS_OPEN
+                else:
+                    raise ValidationError("Invalid resolution decision.")
+                recon_break.save(
+                    update_fields=[
+                        "resolution_checker",
+                        "resolution_checker_note",
+                        "resolution_decided_at",
+                        "resolution_status",
+                        "status",
+                        "resolved_by",
+                        "resolved_at",
+                        "updated_at",
+                    ]
+                )
+                messages.success(request, f"Resolution decision applied for break #{recon_break.id}.")
+                return redirect("reconciliation_workbench")
+
+            if form_type == "reconciliation_evidence_add":
+                _require_role_or_perm(request.user, roles=roles)
+                recon_break = ReconciliationBreak.objects.select_related("merchant").get(
+                    id=request.POST.get("break_id")
+                )
+                title = (request.POST.get("title") or "").strip()
+                if not title:
+                    raise ValidationError("Evidence title is required.")
+                evidence = ReconciliationEvidence(
+                    recon_break=recon_break,
+                    title=title,
+                    document_type=(request.POST.get("document_type") or "supporting_doc").strip(),
+                    external_url=(request.POST.get("external_url") or "").strip(),
+                    note=(request.POST.get("note") or "").strip(),
+                    uploaded_by=request.user,
+                )
+                upload = request.FILES.get("document_file")
+                if upload:
+                    evidence.file = upload
+                evidence.full_clean()
+                evidence.save()
+                BusinessDocument.objects.create(
+                    source_module=BusinessDocument.SOURCE_RECONCILIATION,
+                    title=evidence.title,
+                    document_type=evidence.document_type,
+                    file=evidence.file if evidence.file else None,
+                    external_url=evidence.external_url,
+                    is_internal=True,
+                    metadata_json={"reconciliation_break_id": recon_break.id, "note": evidence.note},
+                    merchant=recon_break.merchant,
+                    uploaded_by=request.user,
+                )
+                messages.success(request, "Reconciliation evidence uploaded.")
+                return redirect("reconciliation_workbench")
+        except Exception as exc:
+            messages.error(request, f"Reconciliation workbench operation failed: {exc}")
+
+    runs = ReconciliationRun.objects.select_related("created_by").order_by("-created_at")[:150]
+    breaks = ReconciliationBreak.objects.select_related(
+        "run", "merchant", "assigned_to", "resolved_by", "resolution_requested_by", "resolution_checker"
+    ).order_by("-created_at")[:250]
+    evidences = ReconciliationEvidence.objects.select_related("recon_break", "uploaded_by").order_by("-created_at")[:300]
+    evidence_map: dict[int, list[ReconciliationEvidence]] = {}
+    for ev in evidences:
+        evidence_map.setdefault(ev.recon_break_id, []).append(ev)
+
+    return render(
+        request,
+        "wallets_demo/reconciliation_workbench.html",
+        {
+            "supported_currencies": _supported_currencies(),
+            "runs": runs,
+            "breaks": breaks,
+            "evidences": evidences,
+            "evidence_map": evidence_map,
+            "users": User.objects.order_by("username")[:300],
+            "break_categories": ReconciliationBreak.CATEGORY_CHOICES,
+            "resolution_status_choices": ReconciliationBreak.RESOLUTION_CHOICES,
         },
     )
 

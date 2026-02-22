@@ -507,6 +507,8 @@
                     href="{% url 'accounting_dashboard' %}">Finance & Ledger</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'settlement_operations' %} active{% endif %}"
                     href="{% url 'settlement_operations' %}">Settlement Ops</a>
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'reconciliation_workbench' %} active{% endif %}"
+                    href="{% url 'reconciliation_workbench' %}">Reconciliation Workbench</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'approval_matrix' %} active{% endif %}"
                     href="{% url 'approval_matrix' %}">Approval Matrix</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'documents_center' %} active{% endif %}"

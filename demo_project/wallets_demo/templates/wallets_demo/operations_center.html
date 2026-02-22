@@ -671,6 +671,11 @@
      ══════════════════════════════════════════════════════ -->
 <div class="tab-pane" id="oc-recon">
     <div class="card">
+        <h3>Reconciliation Workbench</h3>
+        <p class="text-muted">Use the advanced reconciliation screen for transaction match/unmatch, maker-checker resolution, and evidence.</p>
+        <a class="btn btn-outline" href="{% url 'reconciliation_workbench' %}">Open Reconciliation Workbench</a>
+    </div>
+    <div class="card">
         <h3>Run Reconciliation</h3>
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="reconciliation_run_create" />

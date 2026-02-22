@@ -1409,6 +1409,40 @@ class ReconciliationBreak(models.Model):
         (STATUS_IN_REVIEW, "In Review"),
         (STATUS_RESOLVED, "Resolved"),
     )
+    CATEGORY_AMOUNT = "amount_mismatch"
+    CATEGORY_COUNT = "count_mismatch"
+    CATEGORY_MISSING_EXTERNAL = "missing_external"
+    CATEGORY_MISSING_INTERNAL = "missing_internal"
+    CATEGORY_DUPLICATE = "duplicate"
+    CATEGORY_TIMING = "timing_cutoff"
+    CATEGORY_REFERENCE = "reference_mismatch"
+    CATEGORY_OTHER = "other"
+    CATEGORY_CHOICES = (
+        (CATEGORY_AMOUNT, "Amount mismatch"),
+        (CATEGORY_COUNT, "Count mismatch"),
+        (CATEGORY_MISSING_EXTERNAL, "Missing external"),
+        (CATEGORY_MISSING_INTERNAL, "Missing internal"),
+        (CATEGORY_DUPLICATE, "Duplicate"),
+        (CATEGORY_TIMING, "Timing / cutoff"),
+        (CATEGORY_REFERENCE, "Reference mismatch"),
+        (CATEGORY_OTHER, "Other"),
+    )
+    MATCH_UNMATCHED = "unmatched"
+    MATCH_MATCHED = "matched"
+    MATCH_CHOICES = (
+        (MATCH_UNMATCHED, "Unmatched"),
+        (MATCH_MATCHED, "Matched"),
+    )
+    RESOLUTION_NONE = "none"
+    RESOLUTION_PENDING = "pending"
+    RESOLUTION_APPROVED = "approved"
+    RESOLUTION_REJECTED = "rejected"
+    RESOLUTION_CHOICES = (
+        (RESOLUTION_NONE, "None"),
+        (RESOLUTION_PENDING, "Pending"),
+        (RESOLUTION_APPROVED, "Approved"),
+        (RESOLUTION_REJECTED, "Rejected"),
+    )
 
     run = models.ForeignKey(
         ReconciliationRun, on_delete=models.CASCADE, related_name="breaks"
@@ -1422,11 +1456,49 @@ class ReconciliationBreak(models.Model):
     )
     reference = models.CharField(max_length=128, blank=True, default="")
     issue_type = models.CharField(max_length=64, default="amount_mismatch")
+    break_category = models.CharField(
+        max_length=32,
+        choices=CATEGORY_CHOICES,
+        default=CATEGORY_AMOUNT,
+    )
+    match_status = models.CharField(
+        max_length=16,
+        choices=MATCH_CHOICES,
+        default=MATCH_UNMATCHED,
+        db_index=True,
+    )
+    internal_txn_ref = models.CharField(max_length=128, blank=True, default="")
+    external_txn_ref = models.CharField(max_length=128, blank=True, default="")
     expected_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
     actual_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
     delta_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
     note = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    resolution_status = models.CharField(
+        max_length=16,
+        choices=RESOLUTION_CHOICES,
+        default=RESOLUTION_NONE,
+        db_index=True,
+    )
+    resolution_requested_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="requested_reconciliation_break_resolutions",
+    )
+    resolution_requested_at = models.DateTimeField(null=True, blank=True)
+    resolution_request_note = models.CharField(max_length=255, blank=True, default="")
+    resolution_checker = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="checked_reconciliation_break_resolutions",
+    )
+    resolution_checker_note = models.CharField(max_length=255, blank=True, default="")
+    resolution_decided_at = models.DateTimeField(null=True, blank=True)
+    required_checker_role = models.CharField(max_length=32, blank=True, default="risk")
     assigned_to = models.ForeignKey(
         User,
         on_delete=models.PROTECT,
@@ -1453,6 +1525,31 @@ class ReconciliationBreak(models.Model):
 
     def __str__(self):
         return f"{self.run.run_no}:{self.status}:{self.issue_type}"
+
+
+class ReconciliationEvidence(models.Model):
+    recon_break = models.ForeignKey(
+        ReconciliationBreak, on_delete=models.CASCADE, related_name="evidences"
+    )
+    title = models.CharField(max_length=255)
+    document_type = models.CharField(max_length=64, default="supporting_doc")
+    file = models.FileField(upload_to="reconciliation_evidence/", null=True, blank=True)
+    external_url = models.URLField(blank=True, default="")
+    note = models.CharField(max_length=255, blank=True, default="")
+    uploaded_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="uploaded_reconciliation_evidences"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def clean(self):
+        if not self.file and not self.external_url:
+            raise ValidationError("Either file or external URL is required.")
+
+    def __str__(self):
+        return f"{self.recon_break.id}:{self.title}"
 
 
 class ChargebackCase(models.Model):
