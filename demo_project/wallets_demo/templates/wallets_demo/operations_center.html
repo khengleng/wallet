@@ -989,7 +989,7 @@
                 <tbody>
                     {% for item in cases %}
                     <tr>
-                        <td>{{ item.case_no }}</td>
+                        <td><a href="{% url 'case_detail' item.id %}">{{ item.case_no }}</a></td>
                         <td>{{ item.case_type }}</td>
                         <td>{{ item.priority }}</td>
                         <td>{{ item.status }}</td>
@@ -1008,6 +1008,7 @@
                                 </select><input type="text" name="note" placeholder="Note"
                                     style="max-width:100px;" /><button class="btn btn-outline"
                                     type="submit">Update</button></form>
+                            <a class="btn btn-outline" href="{% url 'case_detail' item.id %}" style="margin-top:0.35rem;">Open 360</a>
                         </td>
                     </tr>
                     {% empty %}<tr>

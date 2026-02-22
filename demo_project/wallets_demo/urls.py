@@ -14,6 +14,7 @@ urlpatterns = [
     path('backoffice/documents/', views.documents_center, name='documents_center'),
     path('backoffice/settings/', views.operations_settings, name='operations_settings'),
     path('backoffice/operations/', views.operations_center, name='operations_center'),
+    path('backoffice/cases/<int:case_id>/', views.case_detail, name='case_detail'),
     path('merchant/portal/', views.merchant_portal, name='merchant_portal'),
     path('backoffice/wallets/', views.wallet_management, name='wallet_management'),
     path('backoffice/accounting/', views.accounting_dashboard, name='accounting_dashboard'),

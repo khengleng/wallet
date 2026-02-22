@@ -4375,6 +4375,124 @@ def documents_center(request):
 
 
 @login_required
+def case_detail(request, case_id: int):
+    operation_roles = ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "sales", "treasury")
+    if not user_has_any_role(request.user, operation_roles):
+        raise PermissionDenied("You do not have access to case management.")
+
+    case = get_object_or_404(
+        OperationCase.objects.select_related("customer", "merchant", "assigned_to", "created_by"),
+        id=case_id,
+    )
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "").strip().lower()
+        try:
+            if form_type == "case_update":
+                _require_role_or_perm(request.user, roles=operation_roles)
+                case.status = (request.POST.get("status") or case.status).strip()
+                case.priority = (request.POST.get("priority") or case.priority).strip()
+                case.title = (request.POST.get("title") or case.title).strip() or case.title
+                case.description = (request.POST.get("description") or case.description).strip()
+                assigned_user_id = request.POST.get("assigned_to")
+                case.assigned_to = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
+                if case.status in (OperationCase.STATUS_RESOLVED, OperationCase.STATUS_CLOSED):
+                    case.resolved_at = timezone.now()
+                case.save(
+                    update_fields=[
+                        "status",
+                        "priority",
+                        "title",
+                        "description",
+                        "assigned_to",
+                        "resolved_at",
+                        "updated_at",
+                    ]
+                )
+                messages.success(request, f"Case {case.case_no} updated.")
+                return redirect("case_detail", case_id=case.id)
+
+            if form_type == "case_note_add":
+                _require_role_or_perm(request.user, roles=operation_roles)
+                note_text = (request.POST.get("note") or "").strip()
+                if not note_text:
+                    raise ValidationError("Note is required.")
+                OperationCaseNote.objects.create(
+                    case=case,
+                    note=note_text,
+                    is_internal=request.POST.get("is_internal") == "on",
+                    created_by=request.user,
+                )
+                messages.success(request, "Case note added.")
+                return redirect("case_detail", case_id=case.id)
+
+            if form_type == "case_document_add":
+                _require_role_or_perm(request.user, roles=operation_roles)
+                title = (request.POST.get("title") or "").strip()
+                if not title:
+                    raise ValidationError("Document title is required.")
+                document = BusinessDocument(
+                    source_module=BusinessDocument.SOURCE_CASE,
+                    title=title,
+                    document_type=(request.POST.get("document_type") or "evidence").strip(),
+                    external_url=(request.POST.get("external_url") or "").strip(),
+                    is_internal=request.POST.get("is_internal") == "on",
+                    case=case,
+                    merchant=case.merchant,
+                    customer=case.customer,
+                    uploaded_by=request.user,
+                    metadata_json={"note": (request.POST.get("note") or "").strip()},
+                )
+                upload = request.FILES.get("document_file")
+                if upload:
+                    document.file = upload
+                document.full_clean()
+                document.save()
+                messages.success(request, "Case document uploaded.")
+                return redirect("case_detail", case_id=case.id)
+        except Exception as exc:
+            messages.error(request, f"Case operation failed: {exc}")
+
+    notes = OperationCaseNote.objects.select_related("created_by").filter(case=case).order_by("-created_at")[:300]
+    refunds = DisputeRefundRequest.objects.select_related("maker", "checker", "merchant", "customer").filter(
+        case=case
+    ).order_by("-created_at")[:100]
+    chargebacks = ChargebackCase.objects.select_related("assigned_to", "merchant", "customer").filter(
+        case=case
+    ).order_by("-created_at")[:100]
+    alerts = TransactionMonitoringAlert.objects.select_related("assigned_to", "merchant", "user").filter(
+        case=case
+    ).order_by("-created_at")[:100]
+    documents = BusinessDocument.objects.select_related("uploaded_by").filter(
+        Q(case=case)
+        | Q(refund_request__case=case)
+        | Q(chargeback__case=case)
+    ).distinct().order_by("-created_at")[:300]
+    linked_cashflows = MerchantCashflowEvent.objects.select_related(
+        "merchant", "from_user", "to_user"
+    ).filter(
+        Q(merchant=case.merchant) | Q(from_user=case.customer) | Q(to_user=case.customer)
+    ).order_by("-created_at")[:120]
+
+    return render(
+        request,
+        "wallets_demo/case_detail.html",
+        {
+            "case_obj": case,
+            "notes": notes,
+            "refunds": refunds,
+            "chargebacks": chargebacks,
+            "alerts": alerts,
+            "documents": documents,
+            "linked_cashflows": linked_cashflows,
+            "users": User.objects.order_by("username")[:300],
+            "case_priority_choices": OperationCase.PRIORITY_CHOICES,
+            "case_status_choices": OperationCase.STATUS_CHOICES,
+        },
+    )
+
+
+@login_required
 def wallet_fx_exchange(request):
     if request.method == "POST":
         try:

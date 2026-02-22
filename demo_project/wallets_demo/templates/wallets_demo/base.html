@@ -497,6 +497,8 @@
                     href="{% url 'backoffice' %}">Back Office Home</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'operations_center' %} active{% endif %}"
                     href="{% url 'operations_center' %}">Merchant & Case Ops</a>
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'case_detail' %} active{% endif %}"
+                    href="{% url 'operations_center' %}#oc-cases">Case Management 360</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'ops_work_queue' %} active{% endif %}"
                     href="{% url 'ops_work_queue' %}">Ops Work Queue</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'treasury_dashboard' %} active{% endif %}"
