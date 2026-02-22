@@ -2854,6 +2854,30 @@ def operations_center(request):
                 )
                 return redirect("operations_center")
 
+            if form_type == "case_sla_escalation_run":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "risk", "finance"),
+                )
+                output = io.StringIO()
+                fallback_sla_hours = int(
+                    request.POST.get("fallback_sla_hours")
+                    or int(getattr(settings, "OPS_CASE_SLA_HOURS", 24))
+                )
+                call_command(
+                    "escalate_operation_cases",
+                    actor_username=request.user.username,
+                    fallback_sla_hours=max(1, fallback_sla_hours),
+                    dry_run=request.POST.get("dry_run") == "on",
+                    stdout=output,
+                )
+                out_text = output.getvalue().strip()
+                messages.success(
+                    request,
+                    out_text or "Case SLA escalation job completed.",
+                )
+                return redirect("operations_center")
+
             if form_type == "settlement_payout_submit":
                 _require_role_or_perm(
                     request.user,

@@ -956,6 +956,20 @@
      ══════════════════════════════════════════════════════ -->
 <div class="tab-pane" id="oc-cases">
     <div class="card">
+        <h3>Case SLA Escalation Automation</h3>
+        <p class="text-muted">Escalate overdue open/in-progress cases based on SLA due date.</p>
+        <form method="post">
+            {% csrf_token %}<input type="hidden" name="form_type" value="case_sla_escalation_run" />
+            <div style="display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:end;">
+                <div class="form-group" style="margin-bottom:0;"><label>Fallback SLA Hours (for legacy cases without due date)</label><input type="number" name="fallback_sla_hours" min="1" value="24" /></div>
+                <label style="display:flex;gap:0.5rem;align-items:center;margin:0;"><input type="checkbox" name="dry_run" checked />
+                    Dry run</label>
+            </div>
+            <button class="btn btn-primary" type="submit" style="margin-top:0.75rem;">Run Case SLA Escalation</button>
+        </form>
+    </div>
+
+    <div class="card">
         <h3>Create Case (Complaint / Dispute / Refund)</h3>
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="case_create" />

@@ -1554,3 +1554,23 @@ class OperationCaseSLAWorkflowTests(TestCase):
         case.refresh_from_db()
         self.assertEqual(case.status, OperationCase.STATUS_OPEN)
         self.assertFalse(TransactionMonitoringAlert.objects.filter(case=case).exists())
+
+    def test_case_sla_escalation_run_from_operations_center(self):
+        self.client.login(username="case_ops", password="pass12345")
+        with patch("wallets_demo.views.call_command") as mocked_call:
+            mocked_call.return_value = None
+            response = self.client.post(
+                reverse("operations_center"),
+                {
+                    "form_type": "case_sla_escalation_run",
+                    "fallback_sla_hours": "24",
+                    "dry_run": "on",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        mocked_call.assert_called_once()
+        args, kwargs = mocked_call.call_args
+        self.assertEqual(args[0], "escalate_operation_cases")
+        self.assertEqual(kwargs["actor_username"], "case_ops")
+        self.assertEqual(kwargs["fallback_sla_hours"], 24)
+        self.assertTrue(kwargs["dry_run"])
