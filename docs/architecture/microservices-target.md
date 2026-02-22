@@ -17,6 +17,7 @@
   - Ops/risk API + consumer: `OPS_RISK_DATABASE_URL`
   - Audit exporter: `AUDIT_EXPORT_DATABASE_URL` (or explicit shared `BACKOFFICE_DATABASE_URL`)
   - Production enforcement: set `DATABASE_ISOLATION_MODE=strict`.
+  - Validation helper: `python scripts/ops/check_db_isolation.py` (non-zero exit on violations).
 
 ## Communication
 - Synchronous: REST/gRPC for request/response operations.

@@ -6,7 +6,8 @@ This runbook defines the release gate for business operations services.
 
 1. Migrations applied on target environment (`python manage.py migrate --noinput`).
 2. RBAC permissions reseeded (`python manage.py seed_rbac`).
-3. Release readiness snapshot executed from Operations Center:
+3. Database isolation validation passed (`python scripts/ops/check_db_isolation.py`).
+4. Release readiness snapshot executed from Operations Center:
    - `pending_refunds == 0` (or approved exception)
    - `failed_payouts == 0` (or approved exception)
    - `open_recon_breaks == 0` (or approved exception)
@@ -14,9 +15,9 @@ This runbook defines the release gate for business operations services.
    - Automation equivalent:
      - `python manage.py release_readiness_gate` (fails with non-zero exit when gate fails)
      - `python manage.py release_readiness_gate --json` (machine-readable output)
-4. Metrics endpoint healthy and scraped:
+5. Metrics endpoint healthy and scraped:
    - `wallet_ops_*` metrics present.
-5. Smoke tests pass:
+6. Smoke tests pass:
    - `wallets_demo.tests.CustomerCIFWalletManagementTests`
    - `wallets_demo.tests.MerchantEnterpriseOperationsTests`
    - `wallets_demo.tests.MerchantOpsWorkflowTests`
