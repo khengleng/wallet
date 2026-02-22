@@ -13,7 +13,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth import update_session_auth_hash
@@ -32,7 +32,6 @@ from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.text import get_valid_filename
-from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 
@@ -856,6 +855,234 @@ def profile(request):
             "password_form": password_form,
             "auth_mode": "keycloak_oidc" if is_keycloak else "local",
         },
+    )
+
+
+def _mobile_json_error(message: str, *, status: int = 400, code: str = "bad_request") -> JsonResponse:
+    return JsonResponse({"ok": False, "error": {"code": code, "message": message}}, status=status)
+
+
+def _mobile_current_user(request) -> User | None:
+    user = getattr(request, "user", None)
+    if user is None or not user.is_authenticated:
+        return None
+    return user
+
+
+def _default_mobile_customer_service_class() -> ServiceClassPolicy | None:
+    preferred_code = (
+        getattr(settings, "MOBILE_SELF_ONBOARD_DEFAULT_SERVICE_CLASS", "Z").strip().upper()
+    )
+    if preferred_code:
+        explicit = ServiceClassPolicy.objects.filter(
+            entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+            is_active=True,
+            code=preferred_code,
+        ).first()
+        if explicit is not None:
+            return explicit
+    return ServiceClassPolicy.objects.filter(
+        entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+        is_active=True,
+    ).order_by("-code", "id").first()
+
+
+def _mobile_wallet_currencies(payload: dict) -> list[str]:
+    supported = set(_supported_currencies())
+    base_currency = _normalize_currency(getattr(settings, "PLATFORM_BASE_CURRENCY", "USD"))
+    currencies: list[str] = [base_currency]
+
+    preferred = (payload.get("preferred_currency") or "").strip().upper()
+    if preferred and preferred in supported and preferred not in currencies:
+        currencies.append(preferred)
+
+    requested = payload.get("wallet_currencies")
+    if isinstance(requested, list):
+        for item in requested:
+            currency = str(item or "").strip().upper()
+            if currency and currency in supported and currency not in currencies:
+                currencies.append(currency)
+
+    return currencies
+
+
+def _serialize_wallet_for_mobile(wallet: Wallet) -> dict:
+    meta = _wallet_meta(wallet)
+    return {
+        "wallet_pk": wallet.id,
+        "wallet_id": meta.get("wallet_id", ""),
+        "slug": wallet.slug,
+        "currency": meta.get("currency", "").upper(),
+        "balance": str(wallet.balance),
+        "is_frozen": bool(meta.get("frozen", False)),
+    }
+
+
+def mobile_bootstrap(request):
+    user = _mobile_current_user(request)
+    if user is None:
+        return _mobile_json_error(
+            "Authentication required.",
+            status=401,
+            code="unauthorized",
+        )
+    if request.method != "GET":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    customer_cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
+    user_ct = ContentType.objects.get_for_model(User)
+    wallets: list[dict] = []
+    for wallet in Wallet.objects.filter(holder_type=user_ct, holder_id=user.id).order_by("slug"):
+        _ensure_wallet_business_id(wallet)
+        wallets.append(_serialize_wallet_for_mobile(wallet))
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "user": {
+                    "username": user.username,
+                    "email": user.email,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "wallet_type": user.wallet_type,
+                },
+                "onboarding": {
+                    "is_completed": customer_cif is not None,
+                    "status": customer_cif.status if customer_cif else "pending_cif",
+                },
+                "cif": {
+                    "cif_no": customer_cif.cif_no,
+                    "legal_name": customer_cif.legal_name,
+                    "mobile_no": customer_cif.mobile_no,
+                    "email": customer_cif.email,
+                    "service_class": customer_cif.service_class.code
+                    if customer_cif and customer_cif.service_class
+                    else "",
+                }
+                if customer_cif
+                else None,
+                "wallets": wallets,
+            },
+        }
+    )
+
+
+@transaction.atomic
+def mobile_self_onboard(request):
+    user = _mobile_current_user(request)
+    if user is None:
+        return _mobile_json_error(
+            "Authentication required.",
+            status=401,
+            code="unauthorized",
+        )
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return _mobile_json_error("Invalid payload.", code="invalid_payload")
+
+    legal_name = (payload.get("legal_name") or "").strip()
+    if not legal_name:
+        legal_name = f"{user.first_name} {user.last_name}".strip() or user.username
+    mobile_no = (payload.get("mobile_no") or "").strip()
+    onboarding_email = (payload.get("email") or user.email or "").strip().lower()
+    if not onboarding_email:
+        return _mobile_json_error("Email is required for self onboarding.", code="email_required")
+
+    customer_cif, created = CustomerCIF.objects.get_or_create(
+        user=user,
+        defaults={
+            "cif_no": _new_cif_no(),
+            "legal_name": legal_name,
+            "mobile_no": mobile_no,
+            "email": onboarding_email,
+            "service_class": _default_mobile_customer_service_class(),
+            "status": CustomerCIF.STATUS_ACTIVE,
+            "created_by": user,
+        },
+    )
+    if not created:
+        if customer_cif.status in {CustomerCIF.STATUS_BLOCKED, CustomerCIF.STATUS_CLOSED}:
+            return _mobile_json_error(
+                "Account is blocked or closed. Please contact customer service.",
+                status=403,
+                code="cif_not_active",
+            )
+        customer_cif.legal_name = legal_name
+        customer_cif.mobile_no = mobile_no
+        customer_cif.email = onboarding_email
+        if customer_cif.service_class is None:
+            customer_cif.service_class = _default_mobile_customer_service_class()
+        customer_cif.save(
+            update_fields=["legal_name", "mobile_no", "email", "service_class", "updated_at"]
+        )
+
+    if user.email != onboarding_email:
+        user.email = onboarding_email
+        user.save(update_fields=["email"])
+    if user.wallet_type != WALLET_TYPE_CUSTOMER:
+        user.wallet_type = WALLET_TYPE_CUSTOMER
+        user.save(update_fields=["wallet_type"])
+
+    wallets: list[dict] = []
+    for currency in _mobile_wallet_currencies(payload):
+        wallet = _wallet_for_currency(user, currency)
+        _ensure_wallet_business_id(wallet)
+        wallets.append(_serialize_wallet_for_mobile(wallet))
+
+    _audit(
+        request,
+        "mobile.self_onboard",
+        target_type="CustomerCIF",
+        target_id=str(customer_cif.id),
+        metadata={
+            "username": user.username,
+            "cif_no": customer_cif.cif_no,
+            "wallet_count": len(wallets),
+            "created": created,
+        },
+    )
+    try:
+        track_event(
+            source="mobile",
+            event_name="mobile_self_onboard_completed",
+            user=user,
+            session_id=request.session.session_key or "",
+            external_id=user.username,
+            properties={
+                "cif_no": customer_cif.cif_no,
+                "service_class": customer_cif.service_class.code
+                if customer_cif.service_class
+                else "",
+                "wallet_count": len(wallets),
+                "created": created,
+            },
+        )
+    except Exception:
+        pass
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "created": created,
+                "cif": {
+                    "cif_no": customer_cif.cif_no,
+                    "status": customer_cif.status,
+                    "service_class": customer_cif.service_class.code
+                    if customer_cif.service_class
+                    else "",
+                },
+                "wallets": wallets,
+            },
+        },
+        status=201 if created else 200,
     )
 
 

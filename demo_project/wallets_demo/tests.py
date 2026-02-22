@@ -38,12 +38,14 @@ from .models import (
     OperationCaseNote,
     ReconciliationBreak,
     ReconciliationRun,
+    ServiceClassPolicy,
     SettlementException,
     SettlementPayout,
     TransactionMonitoringAlert,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
+    WALLET_TYPE_CUSTOMER,
 )
 from .rbac import assign_roles, seed_role_groups
 
@@ -759,6 +761,60 @@ class CustomerCIFWalletManagementTests(TestCase):
         filtered = list(response.context["customer_cifs"].object_list)
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].cif_no, "CIF-0030")
+
+
+class MobileSelfOnboardingApiTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username="mobile_user",
+            email="mobile_user@example.com",
+            password="pass12345",
+        )
+        self.default_policy = ServiceClassPolicy.objects.create(
+            entity_type=ServiceClassPolicy.ENTITY_CUSTOMER,
+            code="Z",
+            name="Starter",
+            description="Default low-risk class for self onboarding",
+            is_active=True,
+            allow_deposit=True,
+            allow_withdraw=False,
+            allow_transfer=False,
+            allow_fx=False,
+        )
+
+    def test_mobile_bootstrap_requires_authentication(self):
+        response = self.client.get(reverse("mobile_bootstrap"))
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(response.json()["ok"])
+
+    def test_mobile_self_onboard_creates_cif_and_wallets(self):
+        self.client.login(username="mobile_user", password="pass12345")
+        response = self.client.post(
+            reverse("mobile_self_onboard"),
+            data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"EUR","wallet_currencies":["USD","EUR"]}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["data"]["created"])
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.wallet_type, WALLET_TYPE_CUSTOMER)
+        cif = CustomerCIF.objects.get(user=self.user)
+        self.assertEqual(cif.legal_name, "Mobile User")
+        self.assertEqual(cif.service_class_id, self.default_policy.id)
+        self.assertEqual(cif.status, CustomerCIF.STATUS_ACTIVE)
+
+        bootstrap = self.client.get(reverse("mobile_bootstrap"))
+        self.assertEqual(bootstrap.status_code, 200)
+        bootstrap_payload = bootstrap.json()
+        self.assertTrue(bootstrap_payload["data"]["onboarding"]["is_completed"])
+        wallet_currencies = {w["currency"] for w in bootstrap_payload["data"]["wallets"]}
+        self.assertIn("USD", wallet_currencies)
+        self.assertIn("EUR", wallet_currencies)
 
 
 class MerchantEnterpriseOperationsTests(TestCase):

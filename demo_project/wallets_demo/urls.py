@@ -3,6 +3,8 @@ from . import views
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
+    path('api/mobile/bootstrap/', views.mobile_bootstrap, name='mobile_bootstrap'),
+    path('api/mobile/onboarding/self/', views.mobile_self_onboard, name='mobile_self_onboard'),
     path('metrics', views.metrics, name='metrics'),
     path('fx/exchange/', views.wallet_fx_exchange, name='wallet_fx_exchange'),
     path('backoffice/', views.backoffice, name='backoffice'),
