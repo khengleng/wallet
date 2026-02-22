@@ -21,11 +21,14 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.core.cache import cache
+from django.core.management import call_command
+from django.core.files.storage import default_storage
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models, transaction
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.text import get_valid_filename
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
@@ -999,6 +1002,89 @@ def treasury_dashboard(request):
         raise PermissionDenied("You do not have access to treasury.")
 
     if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "treasury_transfer_request").strip().lower()
+        if form_type == "treasury_account_upsert":
+            _require_role_or_perm(
+                request.user,
+                roles=("super_admin", "admin", "treasury"),
+            )
+            try:
+                account_id = (request.POST.get("account_id") or "").strip()
+                name = (request.POST.get("name") or "").strip()
+                if not name:
+                    raise ValidationError("Treasury account name is required.")
+                currency = _normalize_currency(request.POST.get("currency"))
+                balance_raw = (request.POST.get("balance") or "0").strip()
+                try:
+                    balance = Decimal(balance_raw)
+                except (InvalidOperation, TypeError):
+                    raise ValidationError("Invalid opening balance.")
+                if balance < 0:
+                    raise ValidationError("Opening balance cannot be negative.")
+
+                if account_id:
+                    account = TreasuryAccount.objects.get(id=account_id)
+                    account.name = name
+                    account.currency = currency
+                    account.balance = balance
+                    account.save(update_fields=["name", "currency", "balance", "updated_at"])
+                    messages.success(request, f"Treasury account {account.name} updated.")
+                else:
+                    account = TreasuryAccount.objects.create(
+                        name=name,
+                        currency=currency,
+                        balance=balance,
+                        is_active=True,
+                    )
+                    messages.success(request, f"Treasury account {account.name} created.")
+                return redirect("treasury_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Treasury account save failed: {exc}")
+
+        if form_type == "treasury_account_toggle":
+            _require_role_or_perm(
+                request.user,
+                roles=("super_admin", "admin", "treasury"),
+            )
+            try:
+                account = TreasuryAccount.objects.get(id=request.POST.get("account_id"))
+                action = (request.POST.get("action") or "").strip().lower()
+                if action == "activate":
+                    account.is_active = True
+                elif action == "deactivate":
+                    account.is_active = False
+                else:
+                    raise ValidationError("Invalid account action.")
+                account.save(update_fields=["is_active", "updated_at"])
+                messages.success(
+                    request,
+                    f"Treasury account {account.name} set to {'active' if account.is_active else 'inactive'}.",
+                )
+                return redirect("treasury_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Treasury account status update failed: {exc}")
+
+        if form_type == "treasury_policy_update":
+            _require_role_or_perm(
+                request.user,
+                roles=("super_admin", "admin", "treasury"),
+            )
+            try:
+                policy = TreasuryPolicy.get_solo()
+                policy.single_txn_limit = _parse_amount(request.POST.get("single_txn_limit"))
+                policy.daily_outflow_limit = _parse_amount(request.POST.get("daily_outflow_limit"))
+                policy.require_super_admin_above = _parse_amount(
+                    request.POST.get("require_super_admin_above")
+                )
+                policy.currency = _normalize_currency(request.POST.get("currency"))
+                policy.updated_by = request.user
+                policy.full_clean()
+                policy.save()
+                messages.success(request, "Treasury policy updated.")
+                return redirect("treasury_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Treasury policy update failed: {exc}")
+
         if not user_has_any_role(request.user, MAKER_ROLES):
             raise PermissionDenied("You do not have maker role for treasury requests.")
         try:
@@ -1052,6 +1138,7 @@ def treasury_dashboard(request):
             messages.error(request, f"Treasury request failed: {exc}")
 
     accounts = TreasuryAccount.objects.filter(is_active=True).order_by("name")
+    all_accounts = TreasuryAccount.objects.order_by("name")
     treasury_policy = TreasuryPolicy.get_solo()
     pending_requests = TreasuryTransferRequest.objects.filter(
         status=TreasuryTransferRequest.STATUS_PENDING
@@ -1062,11 +1149,13 @@ def treasury_dashboard(request):
         "wallets_demo/treasury.html",
         {
             "accounts": accounts,
+            "all_accounts": all_accounts,
             "pending_requests": pending_requests,
             "my_requests": my_requests,
             "can_make_treasury_request": user_has_any_role(request.user, MAKER_ROLES),
             "can_check_treasury_request": user_has_any_role(request.user, CHECKER_ROLES),
             "treasury_policy": treasury_policy,
+            "supported_currencies": _supported_currencies(),
         },
     )
 
@@ -1333,6 +1422,46 @@ def accounting_dashboard(request):
 
     if request.method == "POST":
         form_type = request.POST.get("form_type")
+        if form_type == "period_governance":
+            try:
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "risk"),
+                )
+                period_start = _parse_iso_date(
+                    request.POST.get("period_start"),
+                    default=timezone.localdate().replace(day=1),
+                )
+                period_end = _parse_iso_date(
+                    request.POST.get("period_end"),
+                    default=timezone.localdate(),
+                )
+                if period_start > period_end:
+                    raise ValidationError("Period start cannot be after period end.")
+                currency = _normalize_currency(request.POST.get("currency"))
+                action = (request.POST.get("action") or "close").strip().lower()
+                if action not in {"close", "open"}:
+                    raise ValidationError("Invalid period action.")
+                output = io.StringIO()
+                call_command(
+                    "manage_accounting_period",
+                    actor_username=request.user.username,
+                    period_start=period_start.isoformat(),
+                    period_end=period_end.isoformat(),
+                    currency=currency,
+                    action=action,
+                    dry_run=request.POST.get("dry_run") == "on",
+                    stdout=output,
+                )
+                out_text = output.getvalue().strip()
+                messages.success(
+                    request,
+                    out_text or f"Accounting period action completed ({action}).",
+                )
+                return redirect("accounting_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Accounting period governance failed: {exc}")
+
         if form_type == "fx_rate_create":
             try:
                 _require_role_or_perm(
@@ -1498,6 +1627,7 @@ def accounting_dashboard(request):
             "can_post_entries": user_has_any_role(request.user, ACCOUNTING_CHECKER_ROLES),
             "supported_currencies": _supported_currencies(),
             "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:50],
+            "accounting_periods": AccountingPeriodClose.objects.select_related("closed_by").order_by("-period_start")[:60],
             "base_currency": getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper(),
         },
     )
@@ -1877,6 +2007,42 @@ def operations_center(request):
                 )
                 return redirect("operations_center")
 
+            if form_type == "settlement_automation_run":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "treasury", "operation"),
+                )
+                period_start = _parse_iso_date(
+                    request.POST.get("period_start"),
+                    default=timezone.localdate() - timedelta(days=1),
+                )
+                period_end = _parse_iso_date(
+                    request.POST.get("period_end"),
+                    default=timezone.localdate(),
+                )
+                if period_start > period_end:
+                    raise ValidationError("Settlement automation period start cannot be after end date.")
+                currency = (request.POST.get("currency") or "").strip().upper()
+                if currency:
+                    currency = _normalize_currency(currency)
+                output = io.StringIO()
+                call_command(
+                    "automate_settlements",
+                    actor_username=request.user.username,
+                    period_start=period_start.isoformat(),
+                    period_end=period_end.isoformat(),
+                    currency=currency or None,
+                    create_payouts=request.POST.get("create_payouts") == "on",
+                    dry_run=request.POST.get("dry_run") == "on",
+                    stdout=output,
+                )
+                out_text = output.getvalue().strip()
+                messages.success(
+                    request,
+                    out_text or "Settlement automation completed.",
+                )
+                return redirect("operations_center")
+
             if form_type == "merchant_settlement_update":
                 _require_role_or_perm(
                     request.user,
@@ -2052,6 +2218,25 @@ def operations_center(request):
                     metadata={"case_no": refund.case.case_no},
                 )
                 messages.success(request, f"Refund request #{refund.id} approved and executed.")
+                return redirect("operations_center")
+
+            if form_type == "refund_escalation_run":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "operation", "risk", "finance"),
+                )
+                output = io.StringIO()
+                call_command(
+                    "escalate_refund_disputes",
+                    actor_username=request.user.username,
+                    dry_run=request.POST.get("dry_run") == "on",
+                    stdout=output,
+                )
+                out_text = output.getvalue().strip()
+                messages.success(
+                    request,
+                    out_text or "Refund escalation job completed.",
+                )
                 return redirect("operations_center")
 
             if form_type == "settlement_payout_submit":
@@ -2362,8 +2547,19 @@ def operations_center(request):
                 )
                 chargeback = ChargebackCase.objects.get(id=request.POST.get("chargeback_id"))
                 doc_url = (request.POST.get("document_url") or "").strip()
+                upload = request.FILES.get("document_file")
+                if upload:
+                    safe_name = get_valid_filename(upload.name or "evidence.bin")
+                    stored_path = default_storage.save(
+                        f"chargeback_evidence/{timezone.now().strftime('%Y%m%d_%H%M%S')}_{safe_name}",
+                        upload,
+                    )
+                    try:
+                        doc_url = default_storage.url(stored_path)
+                    except Exception:
+                        doc_url = f"/media/{stored_path}"
                 if not doc_url:
-                    raise ValidationError("Document URL is required.")
+                    raise ValidationError("Document URL or document file is required.")
                 ChargebackEvidence.objects.create(
                     chargeback=chargeback,
                     document_type=(request.POST.get("document_type") or "receipt").strip(),
@@ -3048,6 +3244,10 @@ def operations_center(request):
             defaults={"updated_by": merchant.updated_by},
         )
     cases = OperationCase.objects.select_related("customer", "merchant", "assigned_to").order_by("-created_at")[:100]
+    case_ids = [item.id for item in cases]
+    case_notes = OperationCaseNote.objects.select_related("created_by", "case").filter(
+        case_id__in=case_ids
+    ).order_by("-created_at")[:300]
     loyalty_events = MerchantLoyaltyEvent.objects.select_related("merchant", "customer").order_by("-created_at")[:100]
     cashflow_events = (
         MerchantCashflowEvent.objects.select_related(
@@ -3106,6 +3306,7 @@ def operations_center(request):
         {
             "merchants": merchants,
             "cases": cases,
+            "case_notes_feed": case_notes,
             "loyalty_events": loyalty_events,
             "cashflow_events": cashflow_events,
             "kyb_requests": kyb_requests,

@@ -209,6 +209,57 @@
             </table>
         </div>
     </div>
+
+    <div class="card">
+        <h3>Loyalty Event Execution</h3>
+        <form method="post">
+            {% csrf_token %}<input type="hidden" name="form_type" value="loyalty_event_create" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group"><label>Merchant</label><select name="merchant_id" required>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Customer</label><select name="customer_id" required>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Event Type</label><select name="event_type">{% for value,label in event_type_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Flow Type</label><select name="flow_type">{% for value,label in flow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Amount</label><input type="number" step="0.01" min="0.01" name="amount" required /></div>
+                <div class="form-group"><label>Reference</label><input type="text" name="reference" /></div>
+                <div class="form-group" style="grid-column:1/-1;"><label>Note</label><input type="text" name="note" /></div>
+            </div>
+            <button class="btn btn-primary" type="submit">Post Loyalty Event</button>
+        </form>
+        <div style="overflow-x:auto;margin-top:1rem;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Merchant</th>
+                        <th>Customer</th>
+                        <th>Type</th>
+                        <th>Flow</th>
+                        <th>Points</th>
+                        <th>Amount</th>
+                        <th>Ref</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for le in loyalty_events %}
+                    <tr>
+                        <td style="font-size:0.78rem;">{{ le.created_at|date:"d M H:i" }}</td>
+                        <td>{{ le.merchant.code }}</td>
+                        <td>{{ le.customer.username }}</td>
+                        <td>{{ le.event_type }}</td>
+                        <td>{{ le.flow_type|upper }}</td>
+                        <td>{{ le.points }}</td>
+                        <td>{{ le.amount }} {{ le.currency }}</td>
+                        <td>{{ le.reference|default:"-" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-muted" style="text-align:center;">No loyalty events yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════
@@ -484,6 +535,25 @@
      ══════════════════════════════════════════════════════ -->
 <div class="tab-pane" id="oc-settlement">
     <div class="card">
+        <h3>Settlement Automation</h3>
+        <p class="text-muted">Run batch settlement generation from unsettled merchant cashflow events.</p>
+        <form method="post">
+            {% csrf_token %}<input type="hidden" name="form_type" value="settlement_automation_run" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group"><label>Period Start</label><input type="date" name="period_start" /></div>
+                <div class="form-group"><label>Period End</label><input type="date" name="period_end" /></div>
+                <div class="form-group"><label>Currency (optional)</label><select name="currency">
+                        <option value="">All</option>{% for c in supported_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+                    </select></div>
+            </div>
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+                <label><input type="checkbox" name="create_payouts" /> Auto-create payouts</label>
+                <label><input type="checkbox" name="dry_run" checked /> Dry run</label>
+            </div>
+            <button class="btn btn-primary" type="submit">Run Settlement Automation</button>
+        </form>
+    </div>
+    <div class="card">
         <h3>Settlement Management</h3>
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_settlement_create" />
@@ -700,6 +770,16 @@
      ══════════════════════════════════════════════════════ -->
 <div class="tab-pane" id="oc-disputes">
     <div class="card">
+        <h3>Refund SLA Escalation Automation</h3>
+        <p class="text-muted">Escalate overdue pending refund requests automatically.</p>
+        <form method="post">
+            {% csrf_token %}<input type="hidden" name="form_type" value="refund_escalation_run" />
+            <label style="display:flex;gap:0.5rem;margin-bottom:1rem;"><input type="checkbox" name="dry_run" checked />
+                Dry run</label>
+            <button class="btn btn-primary" type="submit">Run Refund Escalation</button>
+        </form>
+    </div>
+    <div class="card">
         <h3>Dispute Refund (Maker / Checker)</h3>
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="dispute_refund_submit" />
@@ -821,6 +901,49 @@
             </table>
         </div>
     </div>
+
+    <div class="card">
+        <h3>Chargeback Evidence Upload</h3>
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}<input type="hidden" name="form_type" value="chargeback_evidence_add" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group"><label>Chargeback</label><select name="chargeback_id" required>{% for cb in chargebacks %}<option value="{{ cb.id }}">{{ cb.chargeback_no }} - {{ cb.merchant.code }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Document Type</label><input type="text" name="document_type" value="receipt" /></div>
+                <div class="form-group"><label>Document URL (optional)</label><input type="url" name="document_url" /></div>
+                <div class="form-group"><label>Upload File (optional)</label><input type="file" name="document_file" /></div>
+                <div class="form-group"><label>Note</label><input type="text" name="note" /></div>
+            </div>
+            <button class="btn btn-primary" type="submit">Upload Evidence</button>
+        </form>
+        <div style="overflow-x:auto;margin-top:1rem;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Chargeback</th>
+                        <th>Type</th>
+                        <th>URL</th>
+                        <th>Uploader</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ev in chargeback_evidences %}
+                    <tr>
+                        <td style="font-size:0.78rem;">{{ ev.created_at|date:"d M H:i" }}</td>
+                        <td>{{ ev.chargeback.chargeback_no }}</td>
+                        <td>{{ ev.document_type }}</td>
+                        <td><a href="{{ ev.document_url }}" target="_blank" rel="noopener">{{ ev.document_url }}</a></td>
+                        <td>{% if ev.uploaded_by %}{{ ev.uploaded_by.username }}{% else %}-{% endif %}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-muted" style="text-align:center;">No chargeback evidences yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <!-- ══════════════════════════════════════════════════════
@@ -890,6 +1013,38 @@
                     {% empty %}<tr>
                         <td colspan="8" class="text-muted" style="text-align:center;">No cases yet.</td>
                     </tr>{% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card">
+        <h3>Case Notes Timeline</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Case</th>
+                        <th>Author</th>
+                        <th>Visibility</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for note in case_notes_feed %}
+                    <tr>
+                        <td style="font-size:0.78rem;">{{ note.created_at|date:"d M H:i" }}</td>
+                        <td>{{ note.case.case_no }}</td>
+                        <td>{{ note.created_by.username }}</td>
+                        <td>{% if note.is_internal %}Internal{% else %}External{% endif %}</td>
+                        <td>{{ note.note }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not case_notes_feed %}
+                    <tr>
+                        <td colspan="5" class="text-muted" style="text-align:center;">No case notes yet.</td>
+                    </tr>
+                    {% endif %}
                 </tbody>
             </table>
         </div>
@@ -1050,6 +1205,64 @@
             </div>
             <button class="btn btn-primary" type="submit">Apply Period Action</button>
         </form>
+    </div>
+    <div class="card">
+        <h3>Journal Backdate (Maker / Checker)</h3>
+        <form method="post">
+            {% csrf_token %}<input type="hidden" name="form_type" value="journal_backdate_request" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group"><label>Journal Entry</label><select name="entry_id" required>{% for entry in journal_entries %}<option value="{{ entry.id }}">{{ entry.entry_no }} - {{ entry.currency }} - {{ entry.status }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Requested Date</label><input type="date" name="requested_date" required /></div>
+                <div class="form-group" style="grid-column:1/-1;"><label>Reason</label><input type="text" name="reason" required /></div>
+            </div>
+            <button class="btn btn-primary" type="submit">Submit Backdate Request</button>
+        </form>
+        <div style="overflow-x:auto;margin-top:1rem;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Entry</th>
+                        <th>Requested Date</th>
+                        <th>Status</th>
+                        <th>Maker</th>
+                        <th>Checker</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in backdate_approvals %}
+                    <tr>
+                        <td>#{{ req.id }}</td>
+                        <td>{{ req.entry.entry_no }}</td>
+                        <td>{{ req.requested_date }}</td>
+                        <td>{{ req.status }}</td>
+                        <td>{% if req.maker %}{{ req.maker.username }}{% else %}-{% endif %}</td>
+                        <td>{% if req.checker %}{{ req.checker.username }}{% else %}-{% endif %}</td>
+                        <td>
+                            {% if req.status == "pending" %}
+                            <form method="post" style="display:flex;gap:0.3rem;">
+                                {% csrf_token %}<input type="hidden" name="form_type" value="journal_backdate_decision" /><input type="hidden" name="approval_id" value="{{ req.id }}" />
+                                <select name="decision">
+                                    <option value="approve">Approve</option>
+                                    <option value="reject">Reject</option>
+                                </select>
+                                <input type="text" name="checker_note" placeholder="Note" style="max-width:120px;" />
+                                <button class="btn btn-outline" type="submit">Submit</button>
+                            </form>
+                            {% else %}
+                            {{ req.checker_note|default:"-" }}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-muted" style="text-align:center;">No backdate requests yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
     <div class="card">
         <h3>Data Retention</h3>

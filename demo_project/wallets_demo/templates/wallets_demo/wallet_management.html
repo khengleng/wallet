@@ -137,9 +137,11 @@
         <div style="display:flex; gap:0.5rem; margin-top:1rem; align-items:center;">
             <span class="text-muted" style="font-size:0.85rem;">Page {{ customer_cifs.number }} of {{ customer_cifs.paginator.num_pages }}</span>
             {% if customer_cifs.has_previous %}
+            <a class="btn btn-outline" style="padding:0.35rem 0.65rem; font-size:0.8rem;"
             href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.previous_page_number }}">← Prev</a>
             {% endif %}
             {% if customer_cifs.has_next %}
+            <a class="btn btn-outline" style="padding:0.35rem 0.65rem; font-size:0.8rem;"
             href="?q={{ cif_query|urlencode }}&cif_status={{ selected_cif_status|urlencode }}&page={{ customer_cifs.next_page_number }}">Next →</a>
             {% endif %}
         </div>
@@ -294,8 +296,10 @@
                 </div>
                 <div class="form-group">
                     <label>Merchant (for merchant scope)</label>
+                    <select name="merchant_id">
                     {% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} – {{ m.name }}</option>{% empty %}
                     <option value="">No merchant found</option>{% endfor %}
+                    </select>
                 </div>
                 <div class="form-group">
                     <label>Wallet Slug</label>
