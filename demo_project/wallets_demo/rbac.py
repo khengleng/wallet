@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from django.conf import settings
 from django.contrib.auth.models import Group, Permission
 
 
@@ -392,11 +391,7 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "view_operationcasenote"),
             ("wallets_demo", "add_operationcasenote"),
             ("wallets_demo", "view_customercif"),
-            ("wallets_demo", "add_customercif"),
-            ("wallets_demo", "change_customercif"),
             ("wallets_demo", "view_merchantkybrequest"),
-            ("wallets_demo", "add_merchantkybrequest"),
-            ("wallets_demo", "change_merchantkybrequest"),
             ("wallets_demo", "view_merchantfeerule"),
             ("wallets_demo", "view_merchantriskprofile"),
             ("wallets_demo", "view_merchantsettlementrecord"),
@@ -412,8 +407,6 @@ ROLE_DEFINITIONS: dict[str, RoleDefinition] = {
             ("wallets_demo", "add_chargebackevidence"),
             ("wallets_demo", "change_chargebackevidence"),
             ("wallets_demo", "view_transactionmonitoringalert"),
-            ("wallets_demo", "add_transactionmonitoringalert"),
-            ("wallets_demo", "change_transactionmonitoringalert"),
         ),
     ),
     "risk": RoleDefinition(
@@ -679,13 +672,6 @@ def user_has_any_role(user, roles: Iterable[str]) -> bool:
     if not getattr(user, "is_authenticated", False):
         return False
     if getattr(user, "is_superuser", False):
-        return True
-    bootstrap_superadmins = {
-        str(email).strip().lower()
-        for email in getattr(settings, "KEYCLOAK_BOOTSTRAP_SUPERADMIN_EMAILS", ())
-        if str(email).strip()
-    }
-    if (getattr(user, "email", "") or "").strip().lower() in bootstrap_superadmins:
         return True
     # Treat super_admin group membership as global access even if superuser flag is stale.
     if user.groups.filter(name="super_admin").exists():

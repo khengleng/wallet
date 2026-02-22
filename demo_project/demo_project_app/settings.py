@@ -225,6 +225,9 @@ FX_PROVIDER_FALLBACK = os.getenv("FX_PROVIDER_FALLBACK", "open_er_api").strip().
 REDIS_URL = os.getenv("REDIS_URL", "").strip()
 FX_RATE_CACHE_TTL_SECONDS = int(os.getenv("FX_RATE_CACHE_TTL_SECONDS", "60"))
 METRICS_TOKEN = _env("METRICS_TOKEN", "").strip()
+METRICS_ALLOW_PUBLIC = os.getenv(
+    "METRICS_ALLOW_PUBLIC", "true" if DEBUG else "false"
+).lower() == "true"
 AUTH_MODE = os.getenv("AUTH_MODE", "local").strip().lower()
 KEYCLOAK_BASE_URL = os.getenv("KEYCLOAK_BASE_URL", "").strip().rstrip("/")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "").strip()
@@ -238,6 +241,9 @@ KEYCLOAK_INTROSPECTION_TIMEOUT_SECONDS = float(
 )
 KEYCLOAK_SESSION_CHECK_INTERVAL_SECONDS = int(
     os.getenv("KEYCLOAK_SESSION_CHECK_INTERVAL_SECONDS", "120")
+)
+KEYCLOAK_ROLE_SYNC_FAIL_OPEN = (
+    os.getenv("KEYCLOAK_ROLE_SYNC_FAIL_OPEN", "false").lower() == "true"
 )
 IDENTITY_SERVICE_BASE_URL = _env("IDENTITY_SERVICE_BASE_URL", "").strip().rstrip("/")
 IDENTITY_SERVICE_API_KEY = _env("IDENTITY_SERVICE_API_KEY", "").strip()

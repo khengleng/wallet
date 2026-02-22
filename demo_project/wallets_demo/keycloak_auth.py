@@ -72,10 +72,10 @@ def sync_user_roles_from_keycloak_claims(user, claims: dict[str, Any]) -> list[s
     if effective_email in bootstrap_emails and "super_admin" not in mapped_roles:
         mapped_roles = ["super_admin", *mapped_roles]
 
-    # Preserve existing privileges when IdP token does not include role claims.
-    # This avoids accidental role stripping for admin users on incomplete claims.
-    if not mapped_roles:
+    if not mapped_roles and getattr(settings, "KEYCLOAK_ROLE_SYNC_FAIL_OPEN", False):
+        # Compatibility fallback; disabled by default for secure fail-closed behavior.
         return list(user.groups.values_list("name", flat=True))
+
     seed_role_groups()
     assign_roles(user, mapped_roles)
 

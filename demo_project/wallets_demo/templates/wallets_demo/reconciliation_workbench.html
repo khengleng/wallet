@@ -53,8 +53,8 @@
                         <td>{{ run.run_no }}</td>
                         <td style="font-size:0.78rem;">{{ run.period_start }} → {{ run.period_end }}</td>
                         <td>{{ run.currency }}</td>
-                        <td>{{ run.internal_count }} / {{ run.internal_amount }}</td>
-                        <td>{{ run.external_count }} / {{ run.external_amount }}</td>
+                        <td>{{ run.internal_count }} / {% sensitive_value run.internal_amount "settlement_amount" %}</td>
+                        <td>{{ run.external_count }} / {% sensitive_value run.external_amount "settlement_amount" %}</td>
                         <td>{{ run.delta_count }}</td>
                         <td>{% sensitive_value run.delta_amount "settlement_amount" %}</td>
                         <td>{{ run.status }}</td>

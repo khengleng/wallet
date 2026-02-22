@@ -14,7 +14,6 @@ from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.http import HttpResponse
-import traceback
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
@@ -793,6 +792,8 @@ def metrics(request):
         provided = request.headers.get("X-Metrics-Token", "")
         if provided != expected:
             return HttpResponse("Unauthorized\n", status=401, content_type="text/plain")
+    elif not getattr(settings, "METRICS_ALLOW_PUBLIC", False):
+        return HttpResponse("Unauthorized\n", status=401, content_type="text/plain")
 
     uptime_seconds = int(time.monotonic() - APP_START_MONOTONIC)
     lines = [
@@ -1344,8 +1345,10 @@ def fx_management(request):
                 "fx_provider": getattr(settings, "FX_PROVIDER", "frankfurter"),
             },
         )
-    except Exception as e:
-        return HttpResponse(f"DEBUG FX ERROR: {e}\n{traceback.format_exc()}", status=500, content_type="text/plain")
+    except Exception:
+        logger.exception("Unable to render FX management page.")
+        messages.error(request, "Unable to load FX management at the moment.")
+        return redirect("backoffice")
 
 
 def _new_entry_no() -> str:
@@ -5045,8 +5048,10 @@ def merchant_portal(request):
                 "can_manage_all_merchants": can_manage_all,
             },
         )
-    except Exception as e:
-        return HttpResponse(f"DEBUG MERCHANT ERROR: {e}\n{traceback.format_exc()}", status=500, content_type="text/plain")
+    except Exception:
+        logger.exception("Unable to render merchant portal.")
+        messages.error(request, "Unable to load merchant portal at the moment.")
+        return redirect("backoffice")
 
 
 @login_required
@@ -5500,6 +5505,10 @@ def rbac_management(request):
             for role_name in ROLE_DEFINITIONS.keys()
             if request.POST.get(f"role_{role_name}") == "on"
         ]
+        if "super_admin" in selected_roles and not user_has_any_role(
+            request.user, ("super_admin",)
+        ):
+            raise PermissionDenied("Only super admin can assign super admin role.")
         assign_roles(target_user, selected_roles)
         messages.success(
             request,
