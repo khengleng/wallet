@@ -11,6 +11,9 @@ This runbook defines the release gate for business operations services.
    - `failed_payouts == 0` (or approved exception)
    - `open_recon_breaks == 0` (or approved exception)
    - `open_high_alerts == 0` (or approved exception)
+   - Automation equivalent:
+     - `python manage.py release_readiness_gate` (fails with non-zero exit when gate fails)
+     - `python manage.py release_readiness_gate --json` (machine-readable output)
 4. Metrics endpoint healthy and scraped:
    - `wallet_ops_*` metrics present.
 5. Smoke tests pass:

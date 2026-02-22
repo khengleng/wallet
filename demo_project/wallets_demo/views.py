@@ -34,6 +34,7 @@ from dj_wallet.utils import get_exchange_service, get_wallet_service
 
 from .fx_sync import sync_external_fx_rates
 from .analytics import track_event
+from .release_readiness import release_readiness_snapshot
 from .identity_client import (
     oidc_auth_url as identity_oidc_auth_url,
     oidc_logout_url as identity_oidc_logout_url,
@@ -2607,25 +2608,16 @@ def operations_center(request):
                     request.user,
                     roles=("super_admin", "admin", "operation", "risk", "finance"),
                 )
-                pending_refunds = DisputeRefundRequest.objects.filter(
-                    status=DisputeRefundRequest.STATUS_PENDING
-                ).count()
-                failed_payouts = SettlementPayout.objects.filter(
-                    status=SettlementPayout.STATUS_FAILED
-                ).count()
-                open_recon_breaks = ReconciliationBreak.objects.filter(
-                    status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW]
-                ).count()
-                open_high_alerts = TransactionMonitoringAlert.objects.filter(
-                    status=TransactionMonitoringAlert.STATUS_OPEN,
-                    severity="high",
-                ).count()
+                snapshot = release_readiness_snapshot()
                 messages.success(
                     request,
                     (
                         "Release readiness snapshot: "
-                        f"pending_refunds={pending_refunds}, failed_payouts={failed_payouts}, "
-                        f"open_recon_breaks={open_recon_breaks}, open_high_alerts={open_high_alerts}."
+                        f"pending_refunds={snapshot['pending_refunds']}, "
+                        f"failed_payouts={snapshot['failed_payouts']}, "
+                        f"open_recon_breaks={snapshot['open_recon_breaks']}, "
+                        f"open_high_alerts={snapshot['open_high_alerts']}. "
+                        f"gate={'PASS' if snapshot['is_ready'] else 'FAIL'}"
                     ),
                 )
                 return redirect("operations_center")
