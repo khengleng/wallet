@@ -86,8 +86,9 @@ def _build_checks() -> Iterable[EndpointCheck]:
     identity_base = _env_required("SMOKE_IDENTITY_BASE_URL")
     ops_risk_base = _env_required("SMOKE_OPS_RISK_BASE_URL")
     audit_export_base = _env_required("SMOKE_AUDIT_EXPORT_BASE_URL")
+    mobile_bff_base = os.getenv("SMOKE_MOBILE_BFF_BASE_URL", "").strip().rstrip("/")
 
-    return [
+    checks = [
         EndpointCheck("web.healthz", f"{web_base}/healthz", "status", "ok"),
         EndpointCheck("web.readyz", f"{web_base}/readyz", "status", "ready"),
         EndpointCheck("gateway.healthz", f"{gateway_base}/healthz", "status", "ok"),
@@ -101,6 +102,14 @@ def _build_checks() -> Iterable[EndpointCheck]:
         EndpointCheck("audit_export.healthz", f"{audit_export_base}/healthz", "status", "ok"),
         EndpointCheck("audit_export.readyz", f"{audit_export_base}/readyz", "status", "ready"),
     ]
+    if mobile_bff_base:
+        checks.extend(
+            [
+                EndpointCheck("mobile_bff.healthz", f"{mobile_bff_base}/healthz", "status", "ok"),
+                EndpointCheck("mobile_bff.readyz", f"{mobile_bff_base}/readyz", "status", "ready"),
+            ]
+        )
+    return checks
 
 
 def main() -> int:

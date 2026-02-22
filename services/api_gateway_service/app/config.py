@@ -53,6 +53,13 @@ class Settings:
     identity_service_timeout_seconds: float = float(
         os.getenv("IDENTITY_SERVICE_TIMEOUT_SECONDS", "3.0")
     )
+    mobile_bff_base_url: str = _env(
+        "MOBILE_BFF_BASE_URL", "http://localhost:8090"
+    ).strip().rstrip("/")
+    mobile_bff_timeout_seconds: float = float(
+        os.getenv("MOBILE_BFF_TIMEOUT_SECONDS", "8.0")
+    )
+    mobile_bff_service_api_key: str = _env("MOBILE_BFF_SERVICE_API_KEY", "").strip()
     ledger_base_url: str = os.getenv(
         "LEDGER_BASE_URL",
         "http://localhost:8081",
@@ -123,6 +130,7 @@ if settings.is_production:
                 for key, value in (
                     ("IDENTITY_SERVICE_BASE_URL", settings.identity_service_base_url),
                     ("IDENTITY_SERVICE_API_KEY", settings.identity_service_api_key),
+                    ("MOBILE_BFF_BASE_URL", settings.mobile_bff_base_url),
                 )
                 if not value
             ]

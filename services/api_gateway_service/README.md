@@ -7,6 +7,7 @@ JWT-authenticated gateway in front of `wallet-ledger-service`.
 - Apply per-IP and per-user rate limiting.
 - Forward validated requests to ledger using internal auth (`api_key` or signed HMAC headers).
 - Emit audit logs for auth failures and transaction attempts.
+- Expose mobile channel passthrough routes under `/mobile/v1/*` to `mobile-bff-service`.
 
 ## Required Env Vars
 - `ENVIRONMENT=production`
@@ -21,6 +22,10 @@ JWT-authenticated gateway in front of `wallet-ledger-service`.
   - `IDENTITY_SERVICE_API_KEY`
   - `IDENTITY_SERVICE_TIMEOUT_SECONDS` (default `3.0`)
   - `JWT_AUDIENCE` (expected audience claim)
+- Mobile channel upstream:
+  - `MOBILE_BFF_BASE_URL` (e.g. `https://mobile-bff-service-...`)
+  - `MOBILE_BFF_TIMEOUT_SECONDS` (default `8.0`)
+  - `MOBILE_BFF_SERVICE_API_KEY` (must match mobile-bff `SERVICE_API_KEY`; optional if not used)
 - `LEDGER_BASE_URL` (for Railway use internal domain when possible)
 - Internal service auth:
   - `INTERNAL_AUTH_MODE` (`api_key` or `hmac`)
@@ -62,6 +67,12 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8082
 ```
+
+## Mobile Channel Routes
+- `GET /mobile/v1/bootstrap`
+- `POST /mobile/v1/onboarding/self`
+- `GET /mobile/v1/wallets/balance`
+- `GET /mobile/v1/wallets/statement`
 
 ## Metrics
 - `wallet_gateway_waf_blocked_total` increments when requests are blocked by WAF deny rules.

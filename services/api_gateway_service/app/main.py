@@ -15,7 +15,7 @@ from uuid import UUID
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from jose import JWTError, jwt
 try:
     from redis import Redis
@@ -184,6 +184,10 @@ def _forward_headers(
 
 def _identity_host() -> str:
     return urlparse(settings.identity_service_base_url).hostname or "identity-service"
+
+
+def _mobile_bff_host() -> str:
+    return urlparse(settings.mobile_bff_base_url).hostname or "mobile-bff-service"
 
 
 async def _decode_keycloak_token(token: str) -> dict[str, Any]:
@@ -532,6 +536,49 @@ async def _proxy(
         return body
 
 
+async def _proxy_mobile_bff(
+    request: Request,
+    *,
+    method: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    params: dict[str, Any] | None = None,
+) -> Any:
+    url = f"{settings.mobile_bff_base_url.rstrip('/')}{path}"
+    headers: dict[str, str] = {}
+    auth = request.headers.get("authorization", "")
+    if auth:
+        headers["Authorization"] = auth
+    if settings.mobile_bff_service_api_key:
+        headers["X-Service-Api-Key"] = settings.mobile_bff_service_api_key
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+    try:
+        async with httpx.AsyncClient(timeout=settings.mobile_bff_timeout_seconds) as client:
+            resp = await client.request(
+                method=method,
+                url=url,
+                headers=headers,
+                json=payload,
+                params=params,
+            )
+    except httpx.HTTPError as exc:
+        _inc_counter("upstream_errors_total")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Mobile BFF unavailable ({_mobile_bff_host()})",
+        ) from exc
+
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"detail": "Invalid upstream response"}
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=body.get("detail", body))
+    return body
+
+
 def _require_metrics_token(
     x_metrics_token: str | None = Header(default=None, alias="X-Metrics-Token"),
     authorization: str | None = Header(default=None, alias="Authorization"),
@@ -681,4 +728,71 @@ async def transfer(
         "/v1/transactions/transfer",
         payload.model_dump(mode="json"),
         idempotency_key=idempotency_key,
+    )
+
+
+@app.get("/mobile/v1/bootstrap")
+async def mobile_bootstrap_gateway(
+    request: Request,
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_bootstrap", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="GET",
+        path="/v1/bootstrap",
+    )
+
+
+@app.post("/mobile/v1/onboarding/self")
+async def mobile_self_onboard_gateway(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_self_onboard", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="POST",
+        path="/v1/onboarding/self",
+        payload=payload,
+    )
+
+
+@app.get("/mobile/v1/wallets/balance")
+async def mobile_balance_gateway(
+    request: Request,
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_balance", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="GET",
+        path="/v1/wallets/balance",
+    )
+
+
+@app.get("/mobile/v1/wallets/statement")
+async def mobile_statement_gateway(
+    request: Request,
+    wallet_slug: str | None = Query(default=None),
+    currency: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_statement", subject=claims["sub"])
+    params: dict[str, Any] = {"limit": limit}
+    if wallet_slug:
+        params["wallet_slug"] = wallet_slug
+    if currency:
+        params["currency"] = currency
+    return await _proxy_mobile_bff(
+        request,
+        method="GET",
+        path="/v1/wallets/statement",
+        params=params,
     )
