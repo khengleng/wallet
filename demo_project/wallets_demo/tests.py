@@ -18,6 +18,7 @@ from .models import (
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
+    JournalEntryApproval,
     JournalBackdateApproval,
     JournalLine,
     Merchant,
@@ -211,6 +212,91 @@ class AccountingWorkflowTests(TestCase):
 
         with self.assertRaises(Exception):
             entry.post(self.checker)
+
+
+class AccountingOpsWorkbenchTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.finance = User.objects.create_user(username="finance_ops", password="pass12345")
+        self.checker = User.objects.create_user(username="checker_ops", password="pass12345")
+        assign_roles(self.finance, ["finance"])
+        assign_roles(self.checker, ["admin"])
+        self.cash = ChartOfAccount.objects.create(
+            code="1011",
+            name="Cash Ops",
+            account_type=ChartOfAccount.TYPE_ASSET,
+            currency="USD",
+        )
+        self.liability = ChartOfAccount.objects.create(
+            code="2011",
+            name="Liability Ops",
+            account_type=ChartOfAccount.TYPE_LIABILITY,
+            currency="USD",
+        )
+
+    def _create_draft_entry(self) -> JournalEntry:
+        entry = JournalEntry.objects.create(
+            entry_no="JE-OPS-1",
+            created_by=self.finance,
+            description="Ops draft",
+            currency="USD",
+        )
+        JournalLine.objects.create(entry=entry, account=self.cash, debit="50.00", credit="0")
+        JournalLine.objects.create(entry=entry, account=self.liability, debit="0", credit="50.00")
+        return entry
+
+    def test_submit_and_approve_journal_posting_queue(self):
+        entry = self._create_draft_entry()
+        self.client.login(username="finance_ops", password="pass12345")
+        response = self.client.post(
+            reverse("accounting_dashboard"),
+            {
+                "form_type": "journal_submit_for_checker",
+                "entry_id": entry.id,
+                "reason": "ready for posting",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        approval = JournalEntryApproval.objects.get(entry=entry)
+        self.assertEqual(approval.status, JournalEntryApproval.STATUS_PENDING)
+
+        self.client.logout()
+        self.client.login(username="checker_ops", password="pass12345")
+        response = self.client.post(
+            reverse("accounting_dashboard"),
+            {
+                "form_type": "journal_approval_decision",
+                "approval_id": approval.id,
+                "decision": "approve",
+                "checker_note": "approved",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        approval.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertEqual(approval.status, JournalEntryApproval.STATUS_APPROVED)
+        self.assertEqual(entry.status, JournalEntry.STATUS_POSTED)
+
+    def test_reversal_request_creates_pending_approval(self):
+        posted = self._create_draft_entry()
+        posted.post(self.checker)
+        self.client.login(username="finance_ops", password="pass12345")
+        response = self.client.post(
+            reverse("accounting_dashboard"),
+            {
+                "form_type": "journal_reversal_request",
+                "source_entry_id": posted.id,
+                "reason": "duplicate posting",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        approval = JournalEntryApproval.objects.filter(
+            source_entry=posted,
+            request_type=JournalEntryApproval.TYPE_REVERSAL,
+        ).first()
+        self.assertIsNotNone(approval)
+        self.assertEqual(approval.status, JournalEntryApproval.STATUS_PENDING)
 
 
 class FxWorkflowTests(TestCase):

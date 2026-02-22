@@ -13,6 +13,7 @@
         Entries</button>
     <button class="tab-btn" data-tab="acc-tab-trial" onclick="switchTab(this,'acc-tab-trial')">📈 Trial Balance</button>
     <button class="tab-btn" data-tab="acc-tab-period" onclick="switchTab(this,'acc-tab-period')">🔒 Period Governance</button>
+    <button class="tab-btn" data-tab="acc-tab-ops" onclick="switchTab(this,'acc-tab-ops')">⚙️ Accounting Ops</button>
 </div>
 
 <!-- Chart of Accounts -->
@@ -232,13 +233,23 @@
                         <td>{{ entry.total_debit }}</td>
                         <td>{{ entry.total_credit }}</td>
                         <td>
+                            {% if entry.approval_request and entry.approval_request.status == "pending" %}
+                            <span class="badge badge-info">In checker queue</span>
+                            {% endif %}
                             {% if can_post_entries %}
                             <form method="post" action="{% url 'accounting_post_entry' entry.id %}">
                                 {% csrf_token %}
                                 <button type="submit" class="btn btn-primary">Post</button>
                             </form>
                             {% else %}
-                            <span class="text-muted">Checker required</span>
+                            <form method="post">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="journal_submit_for_checker">
+                                <input type="hidden" name="entry_id" value="{{ entry.id }}">
+                                <input type="text" name="reason" placeholder="Reason for posting request"
+                                    style="max-width:220px; margin-bottom:0.35rem;">
+                                <button type="submit" class="btn btn-outline">Submit for Checker</button>
+                            </form>
                             {% endif %}
                         </td>
                     </tr>
@@ -325,6 +336,20 @@
                 <input type="checkbox" name="dry_run">
                 <span>Dry run only</span>
             </label>
+            <div style="display:grid;grid-template-columns:1fr;gap:0.4rem;margin-bottom:1rem;">
+                <label style="display:flex;align-items:center;gap:0.5rem;margin:0;">
+                    <input type="checkbox" name="check_tb_balanced">
+                    <span>Checklist: Trial balance reviewed and balanced</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:0.5rem;margin:0;">
+                    <input type="checkbox" name="check_no_draft">
+                    <span>Checklist: No pending draft journals to be posted</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:0.5rem;margin:0;">
+                    <input type="checkbox" name="check_recon_done">
+                    <span>Checklist: Reconciliation and settlement cut-off completed</span>
+                </label>
+            </div>
             <button type="submit" class="btn btn-primary">Run Governance Check</button>
         </form>
     </div>
@@ -356,6 +381,192 @@
                     {% empty %}
                     <tr>
                         <td colspan="6" class="text-muted" style="text-align:center;">No accounting periods recorded.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="tab-pane" id="acc-tab-ops">
+    <div class="card">
+        <h3>Maker-Checker Posting Queue</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Entry No</th>
+                        <th>Type</th>
+                        <th>Source Entry</th>
+                        <th>Maker</th>
+                        <th>Reason</th>
+                        <th>Status</th>
+                        <th>Decision</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in approval_queue %}
+                    <tr>
+                        <td>#{{ req.id }}</td>
+                        <td>{{ req.entry.entry_no }}</td>
+                        <td>{{ req.request_type }}</td>
+                        <td>{% if req.source_entry %}{{ req.source_entry.entry_no }}{% else %}-{% endif %}</td>
+                        <td>{{ req.maker.username }}</td>
+                        <td>{{ req.reason|default:"-" }}</td>
+                        <td>{{ req.status }}</td>
+                        <td>
+                            {% if can_post_entries %}
+                            <form method="post" style="display:flex; gap:0.35rem;">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="journal_approval_decision">
+                                <input type="hidden" name="approval_id" value="{{ req.id }}">
+                                <select name="decision">
+                                    <option value="approve">Approve</option>
+                                    <option value="reject">Reject</option>
+                                </select>
+                                <input type="text" name="checker_note" placeholder="Checker note"
+                                    style="max-width:150px;">
+                                <button type="submit" class="btn btn-outline">Submit</button>
+                            </form>
+                            {% else %}
+                            <span class="text-muted">Checker role required</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-muted" style="text-align:center;">No pending approvals.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if can_create_ops_request %}
+    <div class="card">
+        <h3>Reversal Request</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="journal_reversal_request">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                    <label>Source Posted Entry</label>
+                    <select name="source_entry_id" required>
+                        <option value="">Select posted entry</option>
+                        {% for entry in posted_entries %}
+                        <option value="{{ entry.id }}">{{ entry.entry_no }} - {{ entry.reference }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Reason</label>
+                    <input type="text" name="reason" placeholder="Reason for reversal" required>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Create Reversal Draft</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Reclass Request</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="journal_reclass_request">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                <div class="form-group">
+                    <label>Source Posted Entry</label>
+                    <select name="source_entry_id" required>
+                        <option value="">Select posted entry</option>
+                        {% for entry in posted_entries %}
+                        <option value="{{ entry.id }}">{{ entry.entry_no }} - {{ entry.reference }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Amount</label>
+                    <input type="number" name="amount" min="0.01" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label>From Account</label>
+                    <select name="from_account_id" required>
+                        <option value="">Select account</option>
+                        {% for account in accounts %}
+                        <option value="{{ account.id }}">{{ account.code }} - {{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>To Account</label>
+                    <select name="to_account_id" required>
+                        <option value="">Select account</option>
+                        {% for account in accounts %}
+                        <option value="{{ account.id }}">{{ account.code }} - {{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group" style="grid-column:1 / -1;">
+                    <label>Reason</label>
+                    <input type="text" name="reason" placeholder="Business reason" required>
+                </div>
+                <div class="form-group" style="grid-column:1 / -1;">
+                    <label>Memo</label>
+                    <input type="text" name="memo" placeholder="Optional memo">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Create Reclass Draft</button>
+        </form>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h3>Accounting Export</h3>
+        <form method="post" style="display:flex; gap:0.5rem; align-items:end;">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="journal_export">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Export Type</label>
+                <select name="export_type" required>
+                    <option value="trial_balance">Trial Balance</option>
+                    <option value="journal_register">Journal Register</option>
+                    <option value="approval_queue">Approval Queue</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-outline">Download CSV</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Recent Approval History</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Entry</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Maker</th>
+                        <th>Checker</th>
+                        <th>Decided At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in approval_history %}
+                    <tr>
+                        <td>#{{ req.id }}</td>
+                        <td>{{ req.entry.entry_no }}</td>
+                        <td>{{ req.request_type }}</td>
+                        <td>{{ req.status }}</td>
+                        <td>{{ req.maker.username }}</td>
+                        <td>{% if req.checker %}{{ req.checker.username }}{% else %}-{% endif %}</td>
+                        <td>{% if req.decided_at %}{{ req.decided_at|date:"d M Y H:i" }}{% else %}-{% endif %}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-muted" style="text-align:center;">No approval history yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

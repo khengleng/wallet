@@ -66,6 +66,7 @@ from .models import (
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
+    JournalEntryApproval,
     JournalBackdateApproval,
     JournalLine,
     LoginLockout,
@@ -1289,6 +1290,60 @@ def _new_entry_no() -> str:
     return _new_prefixed_ref(_clean_prefix(settings_row.journal_entry_prefix, "JE"))
 
 
+def _create_reversal_entry(*, source_entry: JournalEntry, actor: User, reason: str) -> JournalEntry:
+    reversal = JournalEntry.objects.create(
+        entry_no=_new_entry_no(),
+        reference=f"REV-{source_entry.entry_no}",
+        description=f"Reversal of {source_entry.entry_no}. {reason}".strip(),
+        currency=source_entry.currency,
+        created_by=actor,
+    )
+    for line in source_entry.lines.select_related("account").all():
+        JournalLine.objects.create(
+            entry=reversal,
+            account=line.account,
+            debit=line.credit,
+            credit=line.debit,
+            memo=(line.memo or "")[:255],
+        )
+    return reversal
+
+
+def _create_reclass_entry(
+    *,
+    source_entry: JournalEntry,
+    from_account: ChartOfAccount,
+    to_account: ChartOfAccount,
+    amount: Decimal,
+    actor: User,
+    memo: str = "",
+) -> JournalEntry:
+    if source_entry.currency != from_account.currency or source_entry.currency != to_account.currency:
+        raise ValidationError("Reclass accounts must match source entry currency.")
+    entry = JournalEntry.objects.create(
+        entry_no=_new_entry_no(),
+        reference=f"RCL-{source_entry.entry_no}",
+        description=f"Reclass from {from_account.code} to {to_account.code}",
+        currency=source_entry.currency,
+        created_by=actor,
+    )
+    JournalLine.objects.create(
+        entry=entry,
+        account=to_account,
+        debit=amount,
+        credit=Decimal("0"),
+        memo=memo[:255],
+    )
+    JournalLine.objects.create(
+        entry=entry,
+        account=from_account,
+        debit=Decimal("0"),
+        credit=amount,
+        memo=memo[:255],
+    )
+    return entry
+
+
 def _new_case_no() -> str:
     settings_row = _operation_settings()
     return _new_prefixed_ref(_clean_prefix(settings_row.case_no_prefix, "CASE"))
@@ -1512,6 +1567,13 @@ def accounting_dashboard(request):
                 action = (request.POST.get("action") or "close").strip().lower()
                 if action not in {"close", "open"}:
                     raise ValidationError("Invalid period action.")
+                if action == "close" and request.POST.get("dry_run") != "on":
+                    if request.POST.get("check_tb_balanced") != "on":
+                        raise ValidationError("Confirm trial balance check before closing period.")
+                    if request.POST.get("check_no_draft") != "on":
+                        raise ValidationError("Confirm no draft journals before closing period.")
+                    if request.POST.get("check_recon_done") != "on":
+                        raise ValidationError("Confirm reconciliation completion before closing period.")
                 output = io.StringIO()
                 call_command(
                     "manage_accounting_period",
@@ -1654,9 +1716,298 @@ def accounting_dashboard(request):
             except Exception as exc:
                 messages.error(request, f"Unable to save journal entry: {exc}")
 
+        if form_type == "journal_submit_for_checker":
+            try:
+                entry = JournalEntry.objects.get(id=request.POST.get("entry_id"))
+                if entry.status != JournalEntry.STATUS_DRAFT:
+                    raise ValidationError("Only draft journal entries can be submitted.")
+                if (
+                    entry.created_by_id != request.user.id
+                    and not user_has_any_role(request.user, ("super_admin", "admin", "risk"))
+                ):
+                    raise PermissionDenied("You can submit only your own draft journal entries.")
+                reason = (request.POST.get("reason") or "").strip()
+                approval, created = JournalEntryApproval.objects.get_or_create(
+                    entry=entry,
+                    defaults={
+                        "request_type": JournalEntryApproval.TYPE_POST,
+                        "maker": request.user,
+                        "reason": reason,
+                    },
+                )
+                if not created:
+                    if approval.status == JournalEntryApproval.STATUS_PENDING:
+                        raise ValidationError("Entry is already in checker queue.")
+                    approval.status = JournalEntryApproval.STATUS_PENDING
+                    approval.maker = request.user
+                    approval.checker = None
+                    approval.checker_note = ""
+                    approval.decided_at = None
+                    if reason:
+                        approval.reason = reason
+                    approval.save(
+                        update_fields=[
+                            "status",
+                            "maker",
+                            "checker",
+                            "checker_note",
+                            "decided_at",
+                            "reason",
+                            "updated_at",
+                        ]
+                    )
+                _audit(
+                    request,
+                    "accounting.journal.submit",
+                    target_type="JournalEntryApproval",
+                    target_id=str(approval.id),
+                    metadata={"entry_no": entry.entry_no, "request_type": approval.request_type},
+                )
+                messages.success(request, f"Entry {entry.entry_no} submitted for checker approval.")
+                return redirect("accounting_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Unable to submit entry: {exc}")
+
+        if form_type == "journal_approval_decision":
+            try:
+                _require_role_or_perm(request.user, roles=ACCOUNTING_CHECKER_ROLES)
+                approval = JournalEntryApproval.objects.select_related("entry", "maker").get(
+                    id=request.POST.get("approval_id")
+                )
+                if approval.status != JournalEntryApproval.STATUS_PENDING:
+                    raise ValidationError("Approval request already decided.")
+                if approval.maker_id == request.user.id:
+                    raise ValidationError("Maker cannot approve/reject own request.")
+                decision = (request.POST.get("decision") or "").strip().lower()
+                checker_note = (request.POST.get("checker_note") or "").strip()
+                if decision not in {"approve", "reject"}:
+                    raise ValidationError("Invalid approval decision.")
+                if decision == "approve":
+                    approval.entry.post(request.user)
+                    approval.status = JournalEntryApproval.STATUS_APPROVED
+                else:
+                    approval.status = JournalEntryApproval.STATUS_REJECTED
+                approval.checker = request.user
+                approval.checker_note = checker_note
+                approval.decided_at = timezone.now()
+                approval.save(
+                    update_fields=["status", "checker", "checker_note", "decided_at", "updated_at"]
+                )
+                _audit(
+                    request,
+                    "accounting.journal.approval_decision",
+                    target_type="JournalEntryApproval",
+                    target_id=str(approval.id),
+                    metadata={"entry_no": approval.entry.entry_no, "status": approval.status},
+                )
+                messages.success(
+                    request,
+                    f"Approval for {approval.entry.entry_no} marked as {approval.status}.",
+                )
+                return redirect("accounting_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Unable to process approval decision: {exc}")
+
+        if form_type == "journal_reversal_request":
+            try:
+                _require_role_or_perm(request.user, roles=("finance", "treasury", "admin", "super_admin"))
+                source_entry = JournalEntry.objects.prefetch_related("lines__account").get(
+                    id=request.POST.get("source_entry_id")
+                )
+                if source_entry.status != JournalEntry.STATUS_POSTED:
+                    raise ValidationError("Only posted entries can be reversed.")
+                reason = (request.POST.get("reason") or "").strip()
+                if not reason:
+                    raise ValidationError("Reversal reason is required.")
+                with transaction.atomic():
+                    entry = _create_reversal_entry(
+                        source_entry=source_entry,
+                        actor=request.user,
+                        reason=reason,
+                    )
+                    approval = JournalEntryApproval.objects.create(
+                        entry=entry,
+                        request_type=JournalEntryApproval.TYPE_REVERSAL,
+                        source_entry=source_entry,
+                        maker=request.user,
+                        reason=reason,
+                    )
+                messages.success(
+                    request,
+                    f"Reversal draft {entry.entry_no} created and submitted (approval #{approval.id}).",
+                )
+                return redirect("accounting_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Unable to create reversal: {exc}")
+
+        if form_type == "journal_reclass_request":
+            try:
+                _require_role_or_perm(request.user, roles=("finance", "treasury", "admin", "super_admin"))
+                source_entry = JournalEntry.objects.get(id=request.POST.get("source_entry_id"))
+                if source_entry.status != JournalEntry.STATUS_POSTED:
+                    raise ValidationError("Only posted entries can be reclassified.")
+                amount = _parse_amount(request.POST.get("amount"))
+                from_account = ChartOfAccount.objects.get(
+                    id=request.POST.get("from_account_id"),
+                    is_active=True,
+                    currency=source_entry.currency,
+                )
+                to_account = ChartOfAccount.objects.get(
+                    id=request.POST.get("to_account_id"),
+                    is_active=True,
+                    currency=source_entry.currency,
+                )
+                if from_account.id == to_account.id:
+                    raise ValidationError("From and To account cannot be the same.")
+                reason = (request.POST.get("reason") or "").strip()
+                if not reason:
+                    raise ValidationError("Reclass reason is required.")
+                memo = (request.POST.get("memo") or "").strip()
+                with transaction.atomic():
+                    entry = _create_reclass_entry(
+                        source_entry=source_entry,
+                        from_account=from_account,
+                        to_account=to_account,
+                        amount=amount,
+                        actor=request.user,
+                        memo=memo,
+                    )
+                    approval = JournalEntryApproval.objects.create(
+                        entry=entry,
+                        request_type=JournalEntryApproval.TYPE_RECLASS,
+                        source_entry=source_entry,
+                        maker=request.user,
+                        reason=reason,
+                    )
+                messages.success(
+                    request,
+                    f"Reclass draft {entry.entry_no} created and submitted (approval #{approval.id}).",
+                )
+                return redirect("accounting_dashboard")
+            except Exception as exc:
+                messages.error(request, f"Unable to create reclass: {exc}")
+
+        if form_type == "journal_export":
+            try:
+                export_type = (request.POST.get("export_type") or "").strip().lower()
+                if export_type not in {"trial_balance", "journal_register", "approval_queue"}:
+                    raise ValidationError("Invalid export type.")
+                output = io.StringIO()
+                writer = csv.writer(output)
+                if export_type == "trial_balance":
+                    writer.writerow(["account_code", "account_name", "currency", "total_debit", "total_credit", "net"])
+                    rows = (
+                        JournalLine.objects.filter(entry__status=JournalEntry.STATUS_POSTED)
+                        .values("account__code", "account__name", "account__currency")
+                        .annotate(
+                            total_debit=models.Sum("debit"),
+                            total_credit=models.Sum("credit"),
+                        )
+                        .order_by("account__code")
+                    )
+                    for row in rows:
+                        debit = row["total_debit"] or Decimal("0")
+                        credit = row["total_credit"] or Decimal("0")
+                        writer.writerow(
+                            [
+                                row["account__code"],
+                                row["account__name"],
+                                row["account__currency"],
+                                debit,
+                                credit,
+                                debit - credit,
+                            ]
+                        )
+                elif export_type == "journal_register":
+                    writer.writerow(
+                        [
+                            "entry_no",
+                            "status",
+                            "currency",
+                            "reference",
+                            "description",
+                            "created_by",
+                            "created_at",
+                            "posted_by",
+                            "posted_at",
+                            "total_debit",
+                            "total_credit",
+                        ]
+                    )
+                    entries = JournalEntry.objects.select_related("created_by", "posted_by").order_by("-created_at")
+                    for entry in entries:
+                        writer.writerow(
+                            [
+                                entry.entry_no,
+                                entry.status,
+                                entry.currency,
+                                entry.reference,
+                                entry.description,
+                                entry.created_by.username,
+                                entry.created_at.isoformat(),
+                                entry.posted_by.username if entry.posted_by else "",
+                                entry.posted_at.isoformat() if entry.posted_at else "",
+                                entry.total_debit,
+                                entry.total_credit,
+                            ]
+                        )
+                else:
+                    writer.writerow(
+                        [
+                            "id",
+                            "entry_no",
+                            "request_type",
+                            "status",
+                            "maker",
+                            "checker",
+                            "reason",
+                            "created_at",
+                            "decided_at",
+                        ]
+                    )
+                    approvals = JournalEntryApproval.objects.select_related("entry", "maker", "checker").order_by("-created_at")
+                    for approval in approvals:
+                        writer.writerow(
+                            [
+                                approval.id,
+                                approval.entry.entry_no,
+                                approval.request_type,
+                                approval.status,
+                                approval.maker.username,
+                                approval.checker.username if approval.checker else "",
+                                approval.reason,
+                                approval.created_at.isoformat(),
+                                approval.decided_at.isoformat() if approval.decided_at else "",
+                            ]
+                        )
+                response = HttpResponse(output.getvalue(), content_type="text/csv")
+                response["Content-Disposition"] = (
+                    f'attachment; filename="accounting_{export_type}_{timezone.now().strftime("%Y%m%d_%H%M%S")}.csv"'
+                )
+                return response
+            except Exception as exc:
+                messages.error(request, f"Unable to export data: {exc}")
+
     accounts = ChartOfAccount.objects.order_by("code")
-    drafts = JournalEntry.objects.filter(status=JournalEntry.STATUS_DRAFT).order_by("-created_at")[:30]
-    posted_entries = JournalEntry.objects.filter(status=JournalEntry.STATUS_POSTED).order_by("-posted_at")[:30]
+    drafts = (
+        JournalEntry.objects.filter(status=JournalEntry.STATUS_DRAFT)
+        .select_related("created_by", "approval_request")
+        .order_by("-created_at")[:60]
+    )
+    posted_entries = (
+        JournalEntry.objects.filter(status=JournalEntry.STATUS_POSTED)
+        .select_related("created_by", "posted_by")
+        .order_by("-posted_at")[:120]
+    )
+    approval_queue = (
+        JournalEntryApproval.objects.filter(status=JournalEntryApproval.STATUS_PENDING)
+        .select_related("entry", "maker", "source_entry")
+        .order_by("-created_at")[:80]
+    )
+    approval_history = (
+        JournalEntryApproval.objects.select_related("entry", "maker", "checker", "source_entry")
+        .order_by("-created_at")[:120]
+    )
 
     totals: dict[int, dict[str, Decimal]] = {}
     for line in JournalLine.objects.filter(entry__status=JournalEntry.STATUS_POSTED).select_related("account"):
@@ -1695,6 +2046,9 @@ def accounting_dashboard(request):
             "posted_entries": posted_entries,
             "trial_balance": trial_balance,
             "can_post_entries": user_has_any_role(request.user, ACCOUNTING_CHECKER_ROLES),
+            "can_create_ops_request": user_has_any_role(request.user, ("finance", "treasury", "admin", "super_admin")),
+            "approval_queue": approval_queue,
+            "approval_history": approval_history,
             "supported_currencies": _supported_currencies(),
             "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:50],
             "accounting_periods": AccountingPeriodClose.objects.select_related("closed_by").order_by("-period_start")[:60],
@@ -4434,6 +4788,18 @@ def accounting_post_entry(request, entry_id: int):
     entry = get_object_or_404(JournalEntry, id=entry_id)
     try:
         entry.post(request.user)
+        approval = JournalEntryApproval.objects.filter(
+            entry=entry,
+            status=JournalEntryApproval.STATUS_PENDING,
+        ).first()
+        if approval is not None:
+            approval.status = JournalEntryApproval.STATUS_APPROVED
+            approval.checker = request.user
+            approval.checker_note = "Posted from accounting console."
+            approval.decided_at = timezone.now()
+            approval.save(
+                update_fields=["status", "checker", "checker_note", "decided_at", "updated_at"]
+            )
         messages.success(request, f"Entry {entry.entry_no} posted.")
     except Exception as exc:
         messages.error(request, f"Unable to post entry: {exc}")
@@ -4718,6 +5084,29 @@ def ops_work_queue(request):
             }
         )
 
+    journal_approvals_pending = JournalEntryApproval.objects.select_related(
+        "entry",
+        "maker",
+        "source_entry",
+    ).filter(status=JournalEntryApproval.STATUS_PENDING)
+    for req in journal_approvals_pending[:150]:
+        items.append(
+            {
+                "queue_type": "journal_posting",
+                "ref": f"JAP-{req.id}",
+                "created_at": req.created_at,
+                "subject": f"{req.entry.entry_no} ({req.request_type})",
+                "amount": req.entry.total_debit,
+                "currency": req.entry.currency,
+                "maker": req.maker.username,
+                "required_role": "/".join(ACCOUNTING_CHECKER_ROLES),
+                "action_url": reverse("accounting_dashboard"),
+                "action_form_type": "journal_approval_decision",
+                "action_id_field": "approval_id",
+                "action_id": req.id,
+            }
+        )
+
     if queue_type != "all":
         items = [item for item in items if item["queue_type"] == queue_type]
     items.sort(key=lambda item: item["created_at"], reverse=True)
@@ -4735,6 +5124,7 @@ def ops_work_queue(request):
                 ("dispute_refund", "Dispute Refund"),
                 ("settlement_payout", "Settlement Payout"),
                 ("journal_backdate", "Journal Backdate"),
+                ("journal_posting", "Journal Posting"),
             ],
         },
     )

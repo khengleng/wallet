@@ -14,6 +14,7 @@ from .models import (
     DisputeRefundRequest,
     FxRate,
     JournalEntry,
+    JournalEntryApproval,
     JournalBackdateApproval,
     JournalLine,
     LoginLockout,
@@ -446,6 +447,22 @@ class JournalBackdateApprovalAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "requested_date", "created_at")
     search_fields = ("entry__entry_no", "reason", "maker__username", "checker__username")
+
+
+@admin.register(JournalEntryApproval)
+class JournalEntryApprovalAdmin(admin.ModelAdmin):
+    list_display = (
+        "entry",
+        "request_type",
+        "status",
+        "maker",
+        "checker",
+        "source_entry",
+        "decided_at",
+        "created_at",
+    )
+    list_filter = ("request_type", "status", "created_at")
+    search_fields = ("entry__entry_no", "source_entry__entry_no", "reason", "maker__username", "checker__username")
 
 
 @admin.register(SanctionScreeningRecord)

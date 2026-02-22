@@ -1814,6 +1814,73 @@ class JournalBackdateApproval(models.Model):
         return f"{self.entry.entry_no}:{self.status}"
 
 
+class JournalEntryApproval(models.Model):
+    TYPE_POST = "post"
+    TYPE_REVERSAL = "reversal"
+    TYPE_RECLASS = "reclass"
+    TYPE_CHOICES = (
+        (TYPE_POST, "Post Draft Entry"),
+        (TYPE_REVERSAL, "Reversal"),
+        (TYPE_RECLASS, "Reclassification"),
+    )
+
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    )
+
+    entry = models.OneToOneField(
+        JournalEntry,
+        on_delete=models.CASCADE,
+        related_name="approval_request",
+    )
+    request_type = models.CharField(max_length=16, choices=TYPE_CHOICES, default=TYPE_POST)
+    source_entry = models.ForeignKey(
+        JournalEntry,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="derived_approval_requests",
+    )
+    reason = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    maker = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="made_journal_entry_approvals",
+    )
+    checker = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="checked_journal_entry_approvals",
+    )
+    checker_note = models.CharField(max_length=255, blank=True, default="")
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def clean(self):
+        if self.request_type in {self.TYPE_REVERSAL, self.TYPE_RECLASS} and not self.source_entry_id:
+            raise ValidationError("Reversal/Reclass request must reference source entry.")
+
+    def __str__(self):
+        return f"{self.entry.entry_no}:{self.request_type}:{self.status}"
+
+
 class SanctionScreeningRecord(models.Model):
     STATUS_CLEAR = "clear"
     STATUS_POTENTIAL_MATCH = "potential_match"
