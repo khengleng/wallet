@@ -71,6 +71,7 @@ jobs:
       - name: Post-deploy smoke checks
         run: |
           python3 scripts/ops/post_deploy_smoke_check.py \
-            --retries 8 \
-            --retry-delay-seconds 10 \
-            --timeout-seconds 5
+            --retries 3 \
+            --retry-delay-seconds 4 \
+            --timeout-seconds 3 \
+            --stop-on-first-failure

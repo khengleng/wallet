@@ -117,6 +117,11 @@ def main() -> int:
     parser.add_argument("--retries", type=int, default=6)
     parser.add_argument("--retry-delay-seconds", type=float, default=10.0)
     parser.add_argument("--timeout-seconds", type=float, default=5.0)
+    parser.add_argument(
+        "--stop-on-first-failure",
+        action="store_true",
+        help="Stop checking remaining endpoints after first failure.",
+    )
     args = parser.parse_args()
 
     checks = list(_build_checks())
@@ -133,6 +138,9 @@ def main() -> int:
         print(f"[{status}] {item.service}: {item.url} -> {reason}")
         if not ok:
             failed = True
+            if args.stop_on_first_failure:
+                print("Stopping early due to --stop-on-first-failure")
+                break
 
     if failed:
         print("Post-deploy smoke checks FAILED")
