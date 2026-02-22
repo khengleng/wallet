@@ -70,6 +70,26 @@ bash scripts/loadtest/run_gateway_suite.sh
 - error rate < 1%
 - no sustained growth in dead-letter metrics
 
+## Automated Release Gate
+Use the summary validator to enforce deploy blocking thresholds:
+
+```bash
+python3 scripts/loadtest/validate_slo_gate.py \
+  --baseline-summary scripts/loadtest/results/<timestamp>/baseline-summary.json \
+  --spike-summary scripts/loadtest/results/<timestamp>/spike-summary.json
+```
+
+Defaults:
+- baseline: `p95<400ms`, `p99<900ms`, `error_rate<0.01`
+- spike: `p95<500ms`, `p99<1200ms`, `error_rate<0.02`
+
+GitHub Actions workflow:
+- `.github/workflows/performance-release-gate.yml`
+- requires repository secrets:
+  - `PERF_BASE_URL`
+  - `PERF_BEARER_TOKEN`
+  - `PERF_ACCOUNT_ID`
+
 ## Capacity Planning Notes
 - 1,000,000 transactions/day is roughly 11.6 tx/s average.
 - Design for burst at least 20x average (>230 tx/s) plus safety headroom.

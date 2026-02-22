@@ -1,0 +1,58 @@
+name: Performance Release Gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  slo-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BASE_URL: ${{ secrets.PERF_BASE_URL }}
+      BEARER_TOKEN: ${{ secrets.PERF_BEARER_TOKEN }}
+      ACCOUNT_ID: ${{ secrets.PERF_ACCOUNT_ID }}
+      IDEMPOTENCY_PREFIX: gha
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Validate test credentials
+        run: |
+          missing=0
+          for var in BASE_URL BEARER_TOKEN ACCOUNT_ID; do
+            if [ -z "${!var}" ]; then
+              echo "Missing required secret: ${var}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Run load test suite
+        run: bash scripts/loadtest/run_gateway_suite.sh
+
+      - name: Evaluate SLO release gate
+        run: |
+          latest_dir="$(ls -1dt scripts/loadtest/results/* | head -n1)"
+          python3 scripts/loadtest/validate_slo_gate.py \
+            --baseline-summary "${latest_dir}/baseline-summary.json" \
+            --spike-summary "${latest_dir}/spike-summary.json"
+
+      - name: Upload load test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-results
+          path: scripts/loadtest/results/**
