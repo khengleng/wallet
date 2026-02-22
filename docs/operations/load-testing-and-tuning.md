@@ -89,6 +89,12 @@ GitHub Actions workflow:
   - `PERF_BASE_URL`
   - `PERF_BEARER_TOKEN`
   - `PERF_ACCOUNT_ID`
+- optional evidence metrics secrets:
+  - `EVIDENCE_GATEWAY_METRICS_URL`
+  - `EVIDENCE_LEDGER_METRICS_URL`
+  - `EVIDENCE_OPS_RISK_METRICS_URL`
+  - `EVIDENCE_AUDIT_EXPORT_METRICS_URL`
+  - `EVIDENCE_METRICS_TOKEN`
 
 ## Post-Deploy Smoke Checks
 Run health/readiness checks across core services after every deployment:
@@ -106,6 +112,30 @@ GitHub Actions workflow:
   - `SMOKE_IDENTITY_BASE_URL`
   - `SMOKE_OPS_RISK_BASE_URL`
   - `SMOKE_AUDIT_EXPORT_BASE_URL`
+
+## Failover Drill Automation
+Manual failover drill workflow:
+- `.github/workflows/failover-drill.yml`
+
+Behavior:
+- Runs pre-failover smoke checks.
+- Runs pre-failover transaction probe (`scripts/ops/transaction_probe.py`).
+- Executes `FAILOVER_DRILL_COMMAND` if configured.
+- Runs post-failover smoke checks and post-failover transaction probe.
+- Uploads evidence artifacts.
+
+Required secrets:
+- `SMOKE_WEB_BASE_URL`
+- `SMOKE_GATEWAY_BASE_URL`
+- `SMOKE_LEDGER_BASE_URL`
+- `SMOKE_IDENTITY_BASE_URL`
+- `SMOKE_OPS_RISK_BASE_URL`
+- `SMOKE_AUDIT_EXPORT_BASE_URL`
+- `PERF_BEARER_TOKEN`
+- `PERF_ACCOUNT_ID`
+
+Optional secret:
+- `FAILOVER_DRILL_COMMAND` (service restart/failover command in staging)
 
 ## Capacity Planning Notes
 - 1,000,000 transactions/day is roughly 11.6 tx/s average.

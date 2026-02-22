@@ -1,0 +1,96 @@
+name: Failover Drill
+
+on:
+  workflow_dispatch:
+
+jobs:
+  failover-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SMOKE_WEB_BASE_URL: ${{ secrets.SMOKE_WEB_BASE_URL }}
+      SMOKE_GATEWAY_BASE_URL: ${{ secrets.SMOKE_GATEWAY_BASE_URL }}
+      SMOKE_LEDGER_BASE_URL: ${{ secrets.SMOKE_LEDGER_BASE_URL }}
+      SMOKE_IDENTITY_BASE_URL: ${{ secrets.SMOKE_IDENTITY_BASE_URL }}
+      SMOKE_OPS_RISK_BASE_URL: ${{ secrets.SMOKE_OPS_RISK_BASE_URL }}
+      SMOKE_AUDIT_EXPORT_BASE_URL: ${{ secrets.SMOKE_AUDIT_EXPORT_BASE_URL }}
+      DRILL_BEARER_TOKEN: ${{ secrets.PERF_BEARER_TOKEN }}
+      DRILL_ACCOUNT_ID: ${{ secrets.PERF_ACCOUNT_ID }}
+      FAILOVER_DRILL_COMMAND: ${{ secrets.FAILOVER_DRILL_COMMAND }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate required secrets
+        run: |
+          missing=0
+          for var in \
+            SMOKE_WEB_BASE_URL \
+            SMOKE_GATEWAY_BASE_URL \
+            SMOKE_LEDGER_BASE_URL \
+            SMOKE_IDENTITY_BASE_URL \
+            SMOKE_OPS_RISK_BASE_URL \
+            SMOKE_AUDIT_EXPORT_BASE_URL \
+            DRILL_BEARER_TOKEN \
+            DRILL_ACCOUNT_ID; do
+            if [ -z "${!var}" ]; then
+              echo "Missing required secret: ${var}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Pre-failover smoke checks
+        run: |
+          python3 scripts/ops/post_deploy_smoke_check.py \
+            --retries 4 \
+            --retry-delay-seconds 5 \
+            --timeout-seconds 5
+
+      - name: Pre-failover transaction probe
+        run: |
+          mkdir -p scripts/ops/results
+          python3 scripts/ops/transaction_probe.py \
+            --base-url "${SMOKE_GATEWAY_BASE_URL}" \
+            --bearer-token "${DRILL_BEARER_TOKEN}" \
+            --account-id "${DRILL_ACCOUNT_ID}" \
+            --output-json scripts/ops/results/pre-failover-probe.json
+
+      - name: Execute failover action
+        run: |
+          if [ -n "${FAILOVER_DRILL_COMMAND}" ]; then
+            echo "Executing failover drill command"
+            bash -lc "${FAILOVER_DRILL_COMMAND}"
+          else
+            echo "No FAILOVER_DRILL_COMMAND configured, running passive drill wait"
+            sleep 20
+          fi
+
+      - name: Post-failover smoke checks
+        run: |
+          python3 scripts/ops/post_deploy_smoke_check.py \
+            --retries 8 \
+            --retry-delay-seconds 10 \
+            --timeout-seconds 5
+
+      - name: Post-failover transaction probe
+        run: |
+          python3 scripts/ops/transaction_probe.py \
+            --base-url "${SMOKE_GATEWAY_BASE_URL}" \
+            --bearer-token "${DRILL_BEARER_TOKEN}" \
+            --account-id "${DRILL_ACCOUNT_ID}" \
+            --output-json scripts/ops/results/post-failover-probe.json
+
+      - name: Upload failover evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failover-drill-evidence
+          path: scripts/ops/results/**

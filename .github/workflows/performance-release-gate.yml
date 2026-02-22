@@ -15,6 +15,11 @@ jobs:
       BEARER_TOKEN: ${{ secrets.PERF_BEARER_TOKEN }}
       ACCOUNT_ID: ${{ secrets.PERF_ACCOUNT_ID }}
       IDEMPOTENCY_PREFIX: gha
+      EVIDENCE_GATEWAY_METRICS_URL: ${{ secrets.EVIDENCE_GATEWAY_METRICS_URL }}
+      EVIDENCE_LEDGER_METRICS_URL: ${{ secrets.EVIDENCE_LEDGER_METRICS_URL }}
+      EVIDENCE_OPS_RISK_METRICS_URL: ${{ secrets.EVIDENCE_OPS_RISK_METRICS_URL }}
+      EVIDENCE_AUDIT_EXPORT_METRICS_URL: ${{ secrets.EVIDENCE_AUDIT_EXPORT_METRICS_URL }}
+      EVIDENCE_METRICS_TOKEN: ${{ secrets.EVIDENCE_METRICS_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -49,6 +54,17 @@ jobs:
           python3 scripts/loadtest/validate_slo_gate.py \
             --baseline-summary "${latest_dir}/baseline-summary.json" \
             --spike-summary "${latest_dir}/spike-summary.json"
+
+      - name: Generate capacity evidence report
+        if: always()
+        run: |
+          latest_dir="$(ls -1dt scripts/loadtest/results/* | head -n1)"
+          python3 scripts/ops/capacity_evidence_report.py \
+            --baseline-summary "${latest_dir}/baseline-summary.json" \
+            --spike-summary "${latest_dir}/spike-summary.json" \
+            --output-json "${latest_dir}/capacity-evidence.json" \
+            --output-md "${latest_dir}/capacity-evidence.md" \
+            --git-sha "${GITHUB_SHA}"
 
       - name: Upload load test artifacts
         if: always()
