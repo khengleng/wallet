@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
+from django.conf import settings
 from django.contrib.auth.models import Group, Permission
 
 
@@ -678,6 +679,13 @@ def user_has_any_role(user, roles: Iterable[str]) -> bool:
     if not getattr(user, "is_authenticated", False):
         return False
     if getattr(user, "is_superuser", False):
+        return True
+    bootstrap_superadmins = {
+        str(email).strip().lower()
+        for email in getattr(settings, "KEYCLOAK_BOOTSTRAP_SUPERADMIN_EMAILS", ())
+        if str(email).strip()
+    }
+    if (getattr(user, "email", "") or "").strip().lower() in bootstrap_superadmins:
         return True
     # Treat super_admin group membership as global access even if superuser flag is stale.
     if user.groups.filter(name="super_admin").exists():
