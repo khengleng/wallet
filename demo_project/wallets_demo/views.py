@@ -12,8 +12,10 @@ import re
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from django.contrib import messages
 from django.conf import settings
+from django.http import HttpResponse
+import traceback
+from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.contenttypes.models import ContentType
@@ -1115,16 +1117,19 @@ def fx_management(request):
         except Exception as exc:
             messages.error(request, f"Unable to create FX rate: {exc}")
 
-    return render(
-        request,
-        "wallets_demo/fx_management.html",
-        {
-            "supported_currencies": _supported_currencies(),
-            "fx_rates": FxRate.objects.filter(is_active=True).select_related("created_by").order_by("-effective_at")[:100],
-            "base_currency": getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper(),
-            "fx_provider": getattr(settings, "FX_PROVIDER", "frankfurter"),
-        },
-    )
+    try:
+        return render(
+            request,
+            "wallets_demo/fx_management.html",
+            {
+                "supported_currencies": _supported_currencies(),
+                "fx_rates": FxRate.objects.filter(is_active=True).select_related("created_by").order_by("-effective_at")[:100],
+                "base_currency": getattr(settings, "PLATFORM_BASE_CURRENCY", "USD").upper(),
+                "fx_provider": getattr(settings, "FX_PROVIDER", "frankfurter"),
+            },
+        )
+    except Exception as e:
+        return HttpResponse(f"DEBUG FX ERROR: {e}\n{traceback.format_exc()}", status=500, content_type="text/plain")
 
 
 def _new_entry_no() -> str:
@@ -3170,18 +3175,21 @@ def merchant_portal(request):
         if m_id not in webhook_map: webhook_map[m_id] = []
         if len(webhook_map[m_id]) < 10: webhook_map[m_id].append(e)
 
-    return render(
-        request,
-        "wallets_demo/merchant_portal.html",
-        {
-            "merchants": merchants,
-            "settlement_map": settlement_map,
-            "payout_map": payout_map,
-            "credential_map": credential_map,
-            "webhook_map": webhook_map,
-            "can_manage_all_merchants": can_manage_all,
-        },
-    )
+    try:
+        return render(
+            request,
+            "wallets_demo/merchant_portal.html",
+            {
+                "merchants": merchants,
+                "settlement_map": settlement_map,
+                "payout_map": payout_map,
+                "credential_map": credential_map,
+                "webhook_map": webhook_map,
+                "can_manage_all_merchants": can_manage_all,
+            },
+        )
+    except Exception as e:
+        return HttpResponse(f"DEBUG MERCHANT ERROR: {e}\n{traceback.format_exc()}", status=500, content_type="text/plain")
 
 
 @login_required
