@@ -90,6 +90,23 @@ GitHub Actions workflow:
   - `PERF_BEARER_TOKEN`
   - `PERF_ACCOUNT_ID`
 
+## Post-Deploy Smoke Checks
+Run health/readiness checks across core services after every deployment:
+
+```bash
+python3 scripts/ops/post_deploy_smoke_check.py
+```
+
+GitHub Actions workflow:
+- `.github/workflows/post-deploy-smoke-check.yml`
+- required repository secrets:
+  - `SMOKE_WEB_BASE_URL`
+  - `SMOKE_GATEWAY_BASE_URL`
+  - `SMOKE_LEDGER_BASE_URL`
+  - `SMOKE_IDENTITY_BASE_URL`
+  - `SMOKE_OPS_RISK_BASE_URL`
+  - `SMOKE_AUDIT_EXPORT_BASE_URL`
+
 ## Capacity Planning Notes
 - 1,000,000 transactions/day is roughly 11.6 tx/s average.
 - Design for burst at least 20x average (>230 tx/s) plus safety headroom.

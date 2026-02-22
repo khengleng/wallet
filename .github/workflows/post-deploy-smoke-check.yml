@@ -1,0 +1,53 @@
+name: Post-Deploy Smoke Check
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  smoke-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SMOKE_WEB_BASE_URL: ${{ secrets.SMOKE_WEB_BASE_URL }}
+      SMOKE_GATEWAY_BASE_URL: ${{ secrets.SMOKE_GATEWAY_BASE_URL }}
+      SMOKE_LEDGER_BASE_URL: ${{ secrets.SMOKE_LEDGER_BASE_URL }}
+      SMOKE_IDENTITY_BASE_URL: ${{ secrets.SMOKE_IDENTITY_BASE_URL }}
+      SMOKE_OPS_RISK_BASE_URL: ${{ secrets.SMOKE_OPS_RISK_BASE_URL }}
+      SMOKE_AUDIT_EXPORT_BASE_URL: ${{ secrets.SMOKE_AUDIT_EXPORT_BASE_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate required smoke-check secrets
+        run: |
+          missing=0
+          for var in \
+            SMOKE_WEB_BASE_URL \
+            SMOKE_GATEWAY_BASE_URL \
+            SMOKE_LEDGER_BASE_URL \
+            SMOKE_IDENTITY_BASE_URL \
+            SMOKE_OPS_RISK_BASE_URL \
+            SMOKE_AUDIT_EXPORT_BASE_URL; do
+            if [ -z "${!var}" ]; then
+              echo "Missing required secret: ${var}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Run post-deploy smoke checks
+        run: |
+          python3 scripts/ops/post_deploy_smoke_check.py \
+            --retries 6 \
+            --retry-delay-seconds 10 \
+            --timeout-seconds 5
