@@ -237,6 +237,17 @@ This repository now includes deployment and architecture scaffolding for high-sc
   - Prometheus service root: `services/prometheus` (uses local `Dockerfile`)
   - Alertmanager service root: `services/alertmanager` (uses local `Dockerfile`)
   - Grafana service root: `services/grafana` (uses local `Dockerfile`)
+- Railway CI/CD workflow:
+  - `.github/workflows/railway-cicd.yml`
+  - required GitHub secret:
+    - `RAILWAY_DEPLOY_HOOK_WEB`
+  - optional service deploy hook secrets:
+    - `RAILWAY_DEPLOY_HOOK_LEDGER`
+    - `RAILWAY_DEPLOY_HOOK_GATEWAY`
+    - `RAILWAY_DEPLOY_HOOK_IDENTITY`
+    - `RAILWAY_DEPLOY_HOOK_OPS_RISK`
+    - `RAILWAY_DEPLOY_HOOK_AUDIT_EXPORT`
+  - post-deploy smoke checks use existing `SMOKE_*` secrets
 
 Production defaults enforce:
 - explicit `SECRET_KEY`
