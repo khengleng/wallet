@@ -18,6 +18,7 @@ import traceback
 from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.core.cache import cache
@@ -27,7 +28,7 @@ from django.core.files.base import ContentFile
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models, transaction
 from django.db.utils import OperationalError, ProgrammingError
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.text import get_valid_filename
 from django.http import HttpResponse
@@ -5051,14 +5052,35 @@ def rbac_management(request):
         )
         return redirect("rbac_management")
 
-    users = User.objects.order_by("username")
+    users = User.objects.prefetch_related("groups").order_by("username")
     role_items = sorted(ROLE_DEFINITIONS.items(), key=lambda item: item[0])
+    total_users = users.count()
+    users_with_roles = users.filter(groups__isnull=False).distinct().count()
+    users_without_roles = max(total_users - users_with_roles, 0)
+    role_user_counts = {
+        row["name"]: row["user_count"]
+        for row in Group.objects.filter(name__in=ROLE_DEFINITIONS.keys())
+        .annotate(user_count=Count("user"))
+        .values("name", "user_count")
+    }
+    role_metrics = [
+        {
+            "name": role_name,
+            "label": role_def.label,
+            "user_count": role_user_counts.get(role_name, 0),
+        }
+        for role_name, role_def in role_items
+    ]
     return render(
         request,
         "wallets_demo/rbac_management.html",
         {
             "users": users,
             "role_items": role_items,
+            "total_users": total_users,
+            "users_with_roles": users_with_roles,
+            "users_without_roles": users_without_roles,
+            "role_metrics": role_metrics,
         },
     )
 
