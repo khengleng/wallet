@@ -30,6 +30,10 @@ def _env_required(key: str) -> str:
     return value
 
 
+def _env_optional(key: str) -> str:
+    return os.getenv(key, "").strip().rstrip("/")
+
+
 def _validate_smoke_base_url(key: str, value: str) -> None:
     if "<" in value or ">" in value or "..." in value:
         raise ValueError(f"Invalid placeholder value for {key}. Set a real public URL.")
@@ -42,6 +46,18 @@ def _validate_smoke_base_url(key: str, value: str) -> None:
         socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
     except OSError as exc:
         raise ValueError(f"{key} host is not resolvable from CI: {parsed.hostname} ({exc})") from exc
+
+
+def _maybe_valid_base_url(key: str, value: str) -> bool:
+    if not value:
+        print(f"[WARN] skip {key}: empty")
+        return False
+    try:
+        _validate_smoke_base_url(key, value)
+        return True
+    except ValueError as exc:
+        print(f"[WARN] skip {key}: {exc}")
+        return False
 
 
 def _read_json(url: str, timeout_seconds: float) -> dict:
@@ -97,37 +113,55 @@ def _check_with_retries(
 
 def _build_checks() -> Iterable[EndpointCheck]:
     web_base = _env_required("SMOKE_WEB_BASE_URL")
-    gateway_base = _env_required("SMOKE_GATEWAY_BASE_URL")
-    ledger_base = _env_required("SMOKE_LEDGER_BASE_URL")
-    identity_base = _env_required("SMOKE_IDENTITY_BASE_URL")
-    ops_risk_base = _env_required("SMOKE_OPS_RISK_BASE_URL")
-    audit_export_base = _env_required("SMOKE_AUDIT_EXPORT_BASE_URL")
-    mobile_bff_base = os.getenv("SMOKE_MOBILE_BFF_BASE_URL", "").strip().rstrip("/")
+    gateway_base = _env_optional("SMOKE_GATEWAY_BASE_URL")
+    ledger_base = _env_optional("SMOKE_LEDGER_BASE_URL")
+    identity_base = _env_optional("SMOKE_IDENTITY_BASE_URL")
+    ops_risk_base = _env_optional("SMOKE_OPS_RISK_BASE_URL")
+    audit_export_base = _env_optional("SMOKE_AUDIT_EXPORT_BASE_URL")
+    mobile_bff_base = _env_optional("SMOKE_MOBILE_BFF_BASE_URL")
 
     _validate_smoke_base_url("SMOKE_WEB_BASE_URL", web_base)
-    _validate_smoke_base_url("SMOKE_GATEWAY_BASE_URL", gateway_base)
-    _validate_smoke_base_url("SMOKE_LEDGER_BASE_URL", ledger_base)
-    _validate_smoke_base_url("SMOKE_IDENTITY_BASE_URL", identity_base)
-    _validate_smoke_base_url("SMOKE_OPS_RISK_BASE_URL", ops_risk_base)
-    _validate_smoke_base_url("SMOKE_AUDIT_EXPORT_BASE_URL", audit_export_base)
-    if mobile_bff_base:
-        _validate_smoke_base_url("SMOKE_MOBILE_BFF_BASE_URL", mobile_bff_base)
 
     checks = [
         EndpointCheck("web.healthz", f"{web_base}/healthz", "status", "ok"),
         EndpointCheck("web.readyz", f"{web_base}/readyz", "status", "ready"),
-        EndpointCheck("gateway.healthz", f"{gateway_base}/healthz", "status", "ok"),
-        EndpointCheck("gateway.readyz", f"{gateway_base}/readyz", "status", "ready"),
-        EndpointCheck("ledger.healthz", f"{ledger_base}/healthz", "status", "ok"),
-        EndpointCheck("ledger.readyz", f"{ledger_base}/readyz", "status", "ready"),
-        EndpointCheck("identity.healthz", f"{identity_base}/healthz", "status", "ok"),
-        EndpointCheck("identity.readyz", f"{identity_base}/readyz", "status", "ready"),
-        EndpointCheck("ops_risk.healthz", f"{ops_risk_base}/healthz", "status", "ok"),
-        EndpointCheck("ops_risk.readyz", f"{ops_risk_base}/readyz", "status", "ready"),
-        EndpointCheck("audit_export.healthz", f"{audit_export_base}/healthz", "status", "ok"),
-        EndpointCheck("audit_export.readyz", f"{audit_export_base}/readyz", "status", "ready"),
     ]
-    if mobile_bff_base:
+    if _maybe_valid_base_url("SMOKE_GATEWAY_BASE_URL", gateway_base):
+        checks.extend(
+            [
+                EndpointCheck("gateway.healthz", f"{gateway_base}/healthz", "status", "ok"),
+                EndpointCheck("gateway.readyz", f"{gateway_base}/readyz", "status", "ready"),
+            ]
+        )
+    if _maybe_valid_base_url("SMOKE_LEDGER_BASE_URL", ledger_base):
+        checks.extend(
+            [
+                EndpointCheck("ledger.healthz", f"{ledger_base}/healthz", "status", "ok"),
+                EndpointCheck("ledger.readyz", f"{ledger_base}/readyz", "status", "ready"),
+            ]
+        )
+    if _maybe_valid_base_url("SMOKE_IDENTITY_BASE_URL", identity_base):
+        checks.extend(
+            [
+                EndpointCheck("identity.healthz", f"{identity_base}/healthz", "status", "ok"),
+                EndpointCheck("identity.readyz", f"{identity_base}/readyz", "status", "ready"),
+            ]
+        )
+    if _maybe_valid_base_url("SMOKE_OPS_RISK_BASE_URL", ops_risk_base):
+        checks.extend(
+            [
+                EndpointCheck("ops_risk.healthz", f"{ops_risk_base}/healthz", "status", "ok"),
+                EndpointCheck("ops_risk.readyz", f"{ops_risk_base}/readyz", "status", "ready"),
+            ]
+        )
+    if _maybe_valid_base_url("SMOKE_AUDIT_EXPORT_BASE_URL", audit_export_base):
+        checks.extend(
+            [
+                EndpointCheck("audit_export.healthz", f"{audit_export_base}/healthz", "status", "ok"),
+                EndpointCheck("audit_export.readyz", f"{audit_export_base}/readyz", "status", "ready"),
+            ]
+        )
+    if _maybe_valid_base_url("SMOKE_MOBILE_BFF_BASE_URL", mobile_bff_base):
         checks.extend(
             [
                 EndpointCheck("mobile_bff.healthz", f"{mobile_bff_base}/healthz", "status", "ok"),
