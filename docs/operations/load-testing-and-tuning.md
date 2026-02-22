@@ -38,6 +38,16 @@ k6 run \
 ## Tuning Knobs
 Tune in this order while re-running the same tests:
 
+## One-Command Suite
+Run baseline + spike and store summaries under `scripts/loadtest/results/<timestamp>/`:
+
+```bash
+BASE_URL=https://<gateway-domain> \
+BEARER_TOKEN=<jwt> \
+ACCOUNT_ID=<uuid> \
+bash scripts/loadtest/run_gateway_suite.sh
+```
+
 1. API gateway
    - `RATE_LIMIT_*` values per endpoint tier
    - `LEDGER_MAX_RETRIES`
