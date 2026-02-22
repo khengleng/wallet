@@ -40,3 +40,5 @@ class MobileProfileUpdateRequest(BaseModel):
     last_name: str = Field(default="", max_length=150)
     legal_name: str = Field(default="", max_length=128)
     mobile_no: str = Field(default="", max_length=40)
+    profile_picture_url: str = Field(default="", max_length=500)
+    preferences: dict = Field(default_factory=dict)

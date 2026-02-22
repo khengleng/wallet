@@ -985,6 +985,7 @@ def _serialize_wallet_for_mobile(wallet: Wallet) -> dict:
 
 
 def _serialize_mobile_profile(user: User, customer_cif: CustomerCIF | None) -> dict:
+    mobile_preferences = user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {}
     return {
         "user": {
             "username": user.username,
@@ -992,6 +993,8 @@ def _serialize_mobile_profile(user: User, customer_cif: CustomerCIF | None) -> d
             "first_name": user.first_name,
             "last_name": user.last_name,
             "wallet_type": user.wallet_type,
+            "profile_picture_url": user.profile_picture_url,
+            "preferences": mobile_preferences,
         },
         "cif": {
             "cif_no": customer_cif.cif_no,
@@ -1005,6 +1008,47 @@ def _serialize_mobile_profile(user: User, customer_cif: CustomerCIF | None) -> d
         }
         if customer_cif
         else None,
+    }
+
+
+def _sanitize_mobile_preferences(current: dict, incoming: dict) -> dict:
+    allowed_themes = {"light", "dark", "system"}
+    prefs = dict(current or {})
+
+    language = str(incoming.get("language", prefs.get("language", "en"))).strip()
+    timezone_value = str(incoming.get("timezone", prefs.get("timezone", "UTC"))).strip()
+    theme = str(incoming.get("theme", prefs.get("theme", "system"))).strip().lower()
+    preferred_currency = str(
+        incoming.get("preferred_currency", prefs.get("preferred_currency", "USD"))
+    ).strip().upper()
+
+    if not language:
+        language = "en"
+    if not timezone_value:
+        timezone_value = "UTC"
+    if theme not in allowed_themes:
+        theme = "system"
+    if not preferred_currency:
+        preferred_currency = "USD"
+
+    current_notifications = prefs.get("notifications")
+    if not isinstance(current_notifications, dict):
+        current_notifications = {}
+    incoming_notifications = incoming.get("notifications")
+    if not isinstance(incoming_notifications, dict):
+        incoming_notifications = {}
+    notifications = {
+        "push": bool(incoming_notifications.get("push", current_notifications.get("push", True))),
+        "email": bool(incoming_notifications.get("email", current_notifications.get("email", True))),
+        "sms": bool(incoming_notifications.get("sms", current_notifications.get("sms", False))),
+    }
+
+    return {
+        "language": language[:16],
+        "timezone": timezone_value[:64],
+        "theme": theme,
+        "preferred_currency": preferred_currency[:12],
+        "notifications": notifications,
     }
 
 
@@ -1078,6 +1122,14 @@ def mobile_profile(request):
     last_name = str(payload.get("last_name", user.last_name) or "").strip()
     legal_name = str(payload.get("legal_name", customer_cif.legal_name) or "").strip()
     mobile_no = str(payload.get("mobile_no", customer_cif.mobile_no) or "").strip()
+    profile_picture_url = str(
+        payload.get("profile_picture_url", user.profile_picture_url) or ""
+    ).strip()
+    incoming_preferences = payload.get("preferences")
+    if incoming_preferences is None:
+        incoming_preferences = {}
+    if not isinstance(incoming_preferences, dict):
+        return _mobile_json_error("preferences must be an object.", code="invalid_preferences")
 
     if len(first_name) > 150 or len(last_name) > 150:
         return _mobile_json_error("Invalid first_name or last_name length.", code="invalid_name")
@@ -1087,10 +1139,36 @@ def mobile_profile(request):
         return _mobile_json_error("legal_name is too long.", code="invalid_legal_name")
     if len(mobile_no) > 40:
         return _mobile_json_error("mobile_no is too long.", code="invalid_mobile_no")
+    if profile_picture_url and len(profile_picture_url) > 500:
+        return _mobile_json_error(
+            "profile_picture_url is too long.",
+            code="invalid_profile_picture_url",
+        )
+    if profile_picture_url and not (
+        profile_picture_url.startswith("https://") or profile_picture_url.startswith("http://")
+    ):
+        return _mobile_json_error(
+            "profile_picture_url must be a valid HTTP/HTTPS URL.",
+            code="invalid_profile_picture_url",
+        )
+    if incoming_preferences:
+        try:
+            normalized_preferences = _sanitize_mobile_preferences(
+                user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {},
+                incoming_preferences,
+            )
+        except Exception:
+            return _mobile_json_error("Invalid preferences payload.", code="invalid_preferences")
+    else:
+        normalized_preferences = (
+            user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {}
+        )
 
     user.first_name = first_name
     user.last_name = last_name
-    user.save(update_fields=["first_name", "last_name"])
+    user.profile_picture_url = profile_picture_url
+    user.mobile_preferences = normalized_preferences
+    user.save(update_fields=["first_name", "last_name", "profile_picture_url", "mobile_preferences"])
 
     customer_cif.legal_name = legal_name
     customer_cif.mobile_no = mobile_no
@@ -1236,6 +1314,14 @@ def mobile_self_onboard(request):
     if user.wallet_type != WALLET_TYPE_CUSTOMER:
         user.wallet_type = WALLET_TYPE_CUSTOMER
         user.save(update_fields=["wallet_type"])
+    preferred_currency = (payload.get("preferred_currency") or "").strip().upper()
+    if preferred_currency:
+        current_prefs = user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {}
+        if str(current_prefs.get("preferred_currency", "")).upper() != preferred_currency:
+            current_prefs = dict(current_prefs)
+            current_prefs["preferred_currency"] = preferred_currency
+            user.mobile_preferences = current_prefs
+            user.save(update_fields=["mobile_preferences"])
 
     wallets: list[dict] = []
     for currency in _mobile_wallet_currencies(payload):

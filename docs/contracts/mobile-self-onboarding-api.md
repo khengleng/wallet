@@ -140,7 +140,19 @@ This document defines the mobile-app-facing onboarding endpoints currently avail
   "first_name": "John",
   "last_name": "Doe",
   "legal_name": "John Doe",
-  "mobile_no": "+85512345678"
+  "mobile_no": "+85512345678",
+  "profile_picture_url": "https://cdn.example.com/profiles/john.png",
+  "preferences": {
+    "language": "en",
+    "timezone": "Asia/Phnom_Penh",
+    "theme": "system",
+    "preferred_currency": "USD",
+    "notifications": {
+      "push": true,
+      "email": true,
+      "sms": false
+    }
+  }
 }
 ```
 
@@ -148,6 +160,8 @@ This document defines the mobile-app-facing onboarding endpoints currently avail
 
 - Requires existing CIF (onboarding must be completed first).
 - Does not allow changing username/email through this endpoint.
+- `profile_picture_url` supports HTTP/HTTPS URL.
+- Preferences are stored per user and returned in bootstrap/profile payloads.
 
 ## Security Notes
 

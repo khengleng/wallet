@@ -66,6 +66,20 @@ def default_sensitive_visibility_rules() -> dict:
     return {}
 
 
+def default_mobile_user_preferences() -> dict:
+    return {
+        "language": "en",
+        "timezone": "UTC",
+        "theme": "system",
+        "preferred_currency": "USD",
+        "notifications": {
+            "push": True,
+            "email": True,
+            "sms": False,
+        },
+    }
+
+
 WALLET_TYPE_PERSONAL = "P"
 WALLET_TYPE_BUSINESS = "B"
 WALLET_TYPE_CUSTOMER = "C"
@@ -81,6 +95,8 @@ class User(WalletMixin, AbstractUser):
     wallet_type = models.CharField(
         max_length=1, choices=WALLET_TYPE_CHOICES, default=WALLET_TYPE_CUSTOMER
     )
+    profile_picture_url = models.URLField(blank=True, default="")
+    mobile_preferences = models.JSONField(default=default_mobile_user_preferences, blank=True)
 
     @property
     def role_names(self) -> list[str]:

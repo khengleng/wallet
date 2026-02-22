@@ -835,17 +835,23 @@ class MobileSelfOnboardingApiTests(TestCase):
 
         profile_update = self.client.post(
             reverse("mobile_profile"),
-            data='{"first_name":"Mobile","last_name":"Tester","legal_name":"Mobile Tester","mobile_no":"+855999000"}',
+            data='{"first_name":"Mobile","last_name":"Tester","legal_name":"Mobile Tester","mobile_no":"+855999000","profile_picture_url":"https://cdn.example.com/avatar.png","preferences":{"language":"km","timezone":"Asia/Phnom_Penh","theme":"dark","preferred_currency":"KHR","notifications":{"push":true,"email":false,"sms":true}}}',
             content_type="application/json",
         )
         self.assertEqual(profile_update.status_code, 200)
         update_payload = profile_update.json()
         self.assertTrue(update_payload["ok"])
         self.assertEqual(update_payload["data"]["user"]["first_name"], "Mobile")
+        self.assertEqual(
+            update_payload["data"]["user"]["profile_picture_url"],
+            "https://cdn.example.com/avatar.png",
+        )
+        self.assertEqual(update_payload["data"]["user"]["preferences"]["language"], "km")
         self.assertEqual(update_payload["data"]["cif"]["legal_name"], "Mobile Tester")
 
         self.user.refresh_from_db()
         self.assertEqual(self.user.first_name, "Mobile")
+        self.assertEqual(self.user.mobile_preferences["preferred_currency"], "KHR")
         cif = CustomerCIF.objects.get(user=self.user)
         self.assertEqual(cif.mobile_no, "+855999000")
 

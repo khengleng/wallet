@@ -40,6 +40,24 @@ Returns authenticated user and CIF profile data.
 ### `POST /v1/profile`
 Updates profile fields for the authenticated user.
 
+Body example:
+```json
+{
+  "first_name": "John",
+  "last_name": "Doe",
+  "legal_name": "John Doe",
+  "mobile_no": "+85512345678",
+  "profile_picture_url": "https://cdn.example.com/profiles/john.png",
+  "preferences": {
+    "language": "en",
+    "timezone": "Asia/Phnom_Penh",
+    "theme": "dark",
+    "preferred_currency": "USD",
+    "notifications": { "push": true, "email": true, "sms": false }
+  }
+}
+```
+
 ### `POST /v1/onboarding/self`
 Body:
 ```json
