@@ -30,3 +30,18 @@
 - Forward admin and auth events to SIEM pipeline.
 - Alert on repeated login failures, admin role changes, and token errors.
 - Periodically review role mappings and dormant privileged accounts.
+
+## Automated Validation
+- Run baseline checks from web service context:
+  - `python manage.py check_keycloak_hardening`
+  - `python manage.py check_keycloak_hardening --json`
+- Fail policy:
+  - command exits non-zero when baseline hardening issues are present,
+  - use `--no-fail-on-issues` only for advisory/reporting mode.
+
+## Suggested Assertion Environment Flags
+To attest controls that cannot be inferred from application runtime config alone, set:
+- `KEYCLOAK_ASSERT_BRUTE_FORCE_DETECTION=true`
+- `KEYCLOAK_ASSERT_EMAIL_VERIFICATION=true`
+- `KEYCLOAK_ASSERT_OTP_REQUIRED_FOR_PRIVILEGED=true`
+- `KEYCLOAK_ASSERT_STRICT_REDIRECTS=true`

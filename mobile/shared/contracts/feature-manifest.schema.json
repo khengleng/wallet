@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mobile Feature Manifest",
+  "type": "object",
+  "required": ["manifest_version", "issued_at", "expires_at", "modules"],
+  "properties": {
+    "manifest_version": { "type": "string" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "signature": { "type": "string" },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "enabled"],
+        "properties": {
+          "name": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "min_app_version": { "type": "string" },
+          "required_roles": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "kill_switch": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

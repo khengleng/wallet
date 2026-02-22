@@ -15,9 +15,11 @@ This runbook defines the release gate for business operations services.
    - Automation equivalent:
      - `python manage.py release_readiness_gate` (fails with non-zero exit when gate fails)
      - `python manage.py release_readiness_gate --json` (machine-readable output)
-5. Metrics endpoint healthy and scraped:
+5. Keycloak hardening check passes:
+   - `python manage.py check_keycloak_hardening`
+6. Metrics endpoint healthy and scraped:
    - `wallet_ops_*` metrics present.
-6. Smoke tests pass:
+7. Smoke tests pass:
    - `wallets_demo.tests.CustomerCIFWalletManagementTests`
    - `wallets_demo.tests.MerchantEnterpriseOperationsTests`
    - `wallets_demo.tests.MerchantOpsWorkflowTests`
