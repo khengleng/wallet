@@ -56,6 +56,7 @@ from .identity_client import (
 )
 from .keycloak_auth import (
     decode_access_token_claims,
+    introspect_access_token,
     merge_keycloak_claims,
     next_introspection_deadline,
     sync_user_roles_from_keycloak_claims,
@@ -719,7 +720,18 @@ def keycloak_callback(request):
         user = _find_or_create_user_from_claims(claims)
         access_claims = decode_access_token_claims(access_token)
         id_claims = decode_access_token_claims(token_payload.get("id_token", ""))
-        merged_claims = merge_keycloak_claims(access_claims, id_claims, claims)
+        introspection_claims: dict = {}
+        try:
+            introspection_claims = introspect_access_token(access_token)
+        except Exception:
+            # Best-effort only; login should not fail solely due to introspection jitter.
+            introspection_claims = {}
+        merged_claims = merge_keycloak_claims(
+            access_claims,
+            id_claims,
+            claims,
+            introspection_claims,
+        )
         sync_user_roles_from_keycloak_claims(user, merged_claims)
     except Exception as exc:
         logger.exception("Keycloak callback failed: %s", str(exc))
