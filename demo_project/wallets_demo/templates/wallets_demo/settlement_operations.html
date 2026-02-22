@@ -1,0 +1,186 @@
+{% extends 'wallets_demo/base.html' %}
+{% block title %}Settlement Ops - {{ org_name }}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Settlement Operations</h2>
+    <p class="text-muted">Batch payout file lifecycle, operational settlement controls, and settlement exceptions workbench.</p>
+</div>
+
+<div class="tab-bar">
+    <button class="tab-btn active" data-tab="so-batch" onclick="switchTab(this,'so-batch')">Batch Files</button>
+    <button class="tab-btn" data-tab="so-payouts" onclick="switchTab(this,'so-payouts')">Payout Queue</button>
+    <button class="tab-btn" data-tab="so-exceptions" onclick="switchTab(this,'so-exceptions')">Exceptions</button>
+</div>
+
+<div class="tab-pane active" id="so-batch">
+    <div class="card">
+        <h3>Generate Settlement Batch File</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="batch_generate" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group"><label>Currency</label><select name="currency">{% for c in supported_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Note</label><input type="text" name="note" /></div>
+                <div class="form-group"><label>Period Start</label><input type="date" name="period_start" /></div>
+                <div class="form-group"><label>Period End</label><input type="date" name="period_end" /></div>
+            </div>
+            <button class="btn btn-primary" type="submit">Generate Batch</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Batch File Lifecycle</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Batch No</th>
+                        <th>Period</th>
+                        <th>Currency</th>
+                        <th>Settlements</th>
+                        <th>Payouts</th>
+                        <th>Total</th>
+                        <th>Status</th>
+                        <th>File</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for batch in batches %}
+                    <tr>
+                        <td>{{ batch.batch_no }}</td>
+                        <td style="font-size:0.78rem;">{{ batch.period_start }} → {{ batch.period_end }}</td>
+                        <td>{{ batch.currency }}</td>
+                        <td>{{ batch.settlement_count }}</td>
+                        <td>{{ batch.payout_count }}</td>
+                        <td>{{ batch.total_amount }} {{ batch.currency }}</td>
+                        <td>{{ batch.status }}</td>
+                        <td>{% if batch.file %}<a href="{{ batch.file.url }}" target="_blank" rel="noopener">CSV</a>{% else %}-{% endif %}</td>
+                        <td>
+                            <form method="post" style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="batch_status_update" />
+                                <input type="hidden" name="batch_id" value="{{ batch.id }}" />
+                                <input type="text" name="note" placeholder="Note" style="max-width:120px;" />
+                                <button class="btn btn-outline" type="submit" name="action" value="approve">Approve</button>
+                                <button class="btn btn-outline" type="submit" name="action" value="upload">Uploaded</button>
+                                <button class="btn btn-primary" type="submit" name="action" value="process">Process</button>
+                                <button class="btn btn-outline" type="submit" name="action" value="fail">Fail</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="9" class="text-muted" style="text-align:center;">No batch files yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="tab-pane" id="so-payouts">
+    <div class="card">
+        <h3>Payout Queue</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Payout Ref</th>
+                        <th>Settlement</th>
+                        <th>Merchant</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Destination</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in payouts %}
+                    <tr>
+                        <td>{{ p.payout_reference }}</td>
+                        <td>{{ p.settlement.settlement_no }}</td>
+                        <td>{{ p.settlement.merchant.code }}</td>
+                        <td>{{ p.amount }} {{ p.currency }}</td>
+                        <td>{{ p.status }}</td>
+                        <td>{{ p.destination_account|default:"-" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="6" class="text-muted" style="text-align:center;">No payouts found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="tab-pane" id="so-exceptions">
+    <div class="card">
+        <h3>Create Settlement Exception</h3>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="form_type" value="settlement_exception_create" />
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="form-group"><label>Settlement (optional)</label><select name="settlement_id"><option value="">-- none --</option>{% for s in settlements %}<option value="{{ s.id }}">{{ s.settlement_no }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Payout (optional)</label><select name="payout_id"><option value="">-- none --</option>{% for p in payouts %}<option value="{{ p.id }}">{{ p.payout_reference }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Batch (optional)</label><select name="batch_id"><option value="">-- none --</option>{% for b in batches %}<option value="{{ b.id }}">{{ b.batch_no }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>Reason Code</label><input type="text" name="reason_code" value="bank_reject" required /></div>
+                <div class="form-group"><label>Severity</label><select name="severity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></div>
+                <div class="form-group"><label>Assign To</label><select name="assigned_to"><option value="">-- unassigned --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
+                <div class="form-group" style="grid-column:1/-1;"><label>Detail</label><input type="text" name="detail" /></div>
+            </div>
+            <button class="btn btn-primary" type="submit">Create Exception</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Exception Workbench</h3>
+        <div style="overflow-x:auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Settlement</th>
+                        <th>Payout</th>
+                        <th>Batch</th>
+                        <th>Reason</th>
+                        <th>Severity</th>
+                        <th>Status</th>
+                        <th>Assigned</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ex in exceptions %}
+                    <tr>
+                        <td>#{{ ex.id }}</td>
+                        <td>{% if ex.settlement %}{{ ex.settlement.settlement_no }}{% else %}-{% endif %}</td>
+                        <td>{% if ex.payout %}{{ ex.payout.payout_reference }}{% else %}-{% endif %}</td>
+                        <td>{% if ex.batch_file %}{{ ex.batch_file.batch_no }}{% else %}-{% endif %}</td>
+                        <td>{{ ex.reason_code }}</td>
+                        <td>{{ ex.severity }}</td>
+                        <td>{{ ex.status }}</td>
+                        <td>{% if ex.assigned_to %}{{ ex.assigned_to.username }}{% else %}-{% endif %}</td>
+                        <td>
+                            <form method="post" style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+                                {% csrf_token %}
+                                <input type="hidden" name="form_type" value="settlement_exception_update" />
+                                <input type="hidden" name="exception_id" value="{{ ex.id }}" />
+                                <select name="status">
+                                    <option value="open" {% if ex.status == 'open' %}selected{% endif %}>Open</option>
+                                    <option value="in_review" {% if ex.status == 'in_review' %}selected{% endif %}>In Review</option>
+                                    <option value="resolved" {% if ex.status == 'resolved' %}selected{% endif %}>Resolved</option>
+                                </select>
+                                <select name="assigned_to"><option value="">-- unassigned --</option>{% for u in users %}<option value="{{ u.id }}" {% if ex.assigned_to and ex.assigned_to.id == u.id %}selected{% endif %}>{{ u.username }}</option>{% endfor %}</select>
+                                <input type="text" name="detail" value="{{ ex.detail }}" style="max-width:150px;" />
+                                <button class="btn btn-outline" type="submit">Save</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="9" class="text-muted" style="text-align:center;">No settlement exceptions.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

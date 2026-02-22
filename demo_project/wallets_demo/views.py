@@ -23,6 +23,7 @@ from django.core.paginator import Paginator
 from django.core.cache import cache
 from django.core.management import call_command
 from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import models, transaction
 from django.db.utils import OperationalError, ProgrammingError
@@ -86,6 +87,8 @@ from .models import (
     ReconciliationRun,
     SanctionScreeningRecord,
     SettlementPayout,
+    SettlementBatchFile,
+    SettlementException,
     TreasuryAccount,
     TreasuryPolicy,
     TreasuryTransferRequest,
@@ -1313,6 +1316,10 @@ def _new_chargeback_no() -> str:
 def _new_access_review_no() -> str:
     settings_row = _operation_settings()
     return _new_prefixed_ref(_clean_prefix(settings_row.access_review_no_prefix, "AR"))
+
+
+def _new_batch_no() -> str:
+    return _new_prefixed_ref("BATCH")
 
 
 def _hash_api_secret(secret: str) -> str:
@@ -3430,6 +3437,247 @@ def operations_center(request):
             "case_priority_choices": OperationCase.PRIORITY_CHOICES,
             "case_status_choices": OperationCase.STATUS_CHOICES,
             "event_type_choices": MerchantLoyaltyEvent.TYPE_CHOICES,
+        },
+    )
+
+
+@login_required
+def settlement_operations(request):
+    roles = ("super_admin", "admin", "operation", "finance", "treasury", "risk")
+    if not user_has_any_role(request.user, roles):
+        raise PermissionDenied("You do not have access to settlement operations.")
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "").strip().lower()
+        try:
+            if form_type == "batch_generate":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "treasury", "operation"),
+                )
+                currency = _normalize_currency(request.POST.get("currency"))
+                period_start = _parse_iso_date(
+                    request.POST.get("period_start"),
+                    default=timezone.localdate() - timedelta(days=1),
+                )
+                period_end = _parse_iso_date(
+                    request.POST.get("period_end"),
+                    default=timezone.localdate(),
+                )
+                if period_start > period_end:
+                    raise ValidationError("Period start cannot be after period end.")
+
+                payouts = list(
+                    SettlementPayout.objects.select_related("settlement", "settlement__merchant").filter(
+                        currency=currency,
+                        status=SettlementPayout.STATUS_PENDING,
+                        settlement__status=MerchantSettlementRecord.STATUS_POSTED,
+                        settlement__period_start__gte=period_start,
+                        settlement__period_end__lte=period_end,
+                    ).order_by("settlement__merchant__code", "id")
+                )
+                if not payouts:
+                    raise ValidationError("No pending payouts found for selected period/currency.")
+
+                total_amount = sum((p.amount for p in payouts), Decimal("0.00"))
+                payload = {
+                    "currency": currency,
+                    "period_start": period_start.isoformat(),
+                    "period_end": period_end.isoformat(),
+                    "rows": [
+                        {
+                            "payout_reference": p.payout_reference,
+                            "settlement_no": p.settlement.settlement_no,
+                            "merchant_code": p.settlement.merchant.code,
+                            "destination_account": p.destination_account,
+                            "amount": str(p.amount),
+                            "currency": p.currency,
+                            "channel": p.payout_channel,
+                        }
+                        for p in payouts
+                    ],
+                }
+
+                batch = SettlementBatchFile.objects.create(
+                    batch_no=_new_batch_no(),
+                    currency=currency,
+                    period_start=period_start,
+                    period_end=period_end,
+                    settlement_count=len({p.settlement_id for p in payouts}),
+                    payout_count=len(payouts),
+                    total_amount=total_amount,
+                    status=SettlementBatchFile.STATUS_GENERATED,
+                    payload_json=payload,
+                    created_by=request.user,
+                    note=(request.POST.get("note") or "").strip(),
+                )
+
+                csv_buffer = io.StringIO()
+                writer = csv.writer(csv_buffer)
+                writer.writerow(
+                    [
+                        "batch_no",
+                        "payout_reference",
+                        "settlement_no",
+                        "merchant_code",
+                        "destination_account",
+                        "amount",
+                        "currency",
+                        "channel",
+                    ]
+                )
+                for row in payload["rows"]:
+                    writer.writerow(
+                        [
+                            batch.batch_no,
+                            row["payout_reference"],
+                            row["settlement_no"],
+                            row["merchant_code"],
+                            row["destination_account"],
+                            row["amount"],
+                            row["currency"],
+                            row["channel"],
+                        ]
+                    )
+                file_name = f"settlement_batch_{batch.batch_no}.csv"
+                batch.file.save(file_name, ContentFile(csv_buffer.getvalue().encode("utf-8")), save=True)
+
+                messages.success(request, f"Batch {batch.batch_no} generated with {len(payouts)} payouts.")
+                return redirect("settlement_operations")
+
+            if form_type == "batch_status_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "treasury", "risk", "operation"),
+                )
+                batch = SettlementBatchFile.objects.get(id=request.POST.get("batch_id"))
+                action = (request.POST.get("action") or "").strip().lower()
+                now = timezone.now()
+                if action == "approve":
+                    batch.status = SettlementBatchFile.STATUS_APPROVED
+                    batch.approved_by = request.user
+                    batch.approved_at = now
+                elif action == "upload":
+                    batch.status = SettlementBatchFile.STATUS_UPLOADED
+                elif action == "process":
+                    batch.status = SettlementBatchFile.STATUS_PROCESSED
+                    payout_ids = list(
+                        SettlementPayout.objects.filter(
+                            payout_reference__in=[
+                                row["payout_reference"] for row in batch.payload_json.get("rows", [])
+                            ]
+                        ).values_list("id", flat=True)
+                    )
+                    for payout in SettlementPayout.objects.select_related("settlement").filter(id__in=payout_ids):
+                        payout.status = SettlementPayout.STATUS_SETTLED
+                        payout.settled_at = now
+                        payout.sent_at = payout.sent_at or now
+                        payout.approved_by = payout.approved_by or request.user
+                        payout.approved_at = payout.approved_at or now
+                        payout.provider_response = {"status": "settled_by_batch", "batch_no": batch.batch_no}
+                        payout.save(
+                            update_fields=[
+                                "status",
+                                "settled_at",
+                                "sent_at",
+                                "approved_by",
+                                "approved_at",
+                                "provider_response",
+                                "updated_at",
+                            ]
+                        )
+                        settlement = payout.settlement
+                        settlement.status = MerchantSettlementRecord.STATUS_PAID
+                        settlement.approved_by = request.user
+                        settlement.approved_at = now
+                        settlement.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+                elif action == "fail":
+                    batch.status = SettlementBatchFile.STATUS_FAILED
+                else:
+                    raise ValidationError("Invalid batch action.")
+                batch.note = (request.POST.get("note") or batch.note).strip()
+                batch.save(
+                    update_fields=[
+                        "status",
+                        "approved_by",
+                        "approved_at",
+                        "note",
+                        "updated_at",
+                    ]
+                )
+                messages.success(request, f"Batch {batch.batch_no} updated to {batch.status}.")
+                return redirect("settlement_operations")
+
+            if form_type == "settlement_exception_create":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "treasury", "risk", "operation"),
+                )
+                settlement = MerchantSettlementRecord.objects.filter(
+                    id=request.POST.get("settlement_id")
+                ).first()
+                payout = SettlementPayout.objects.filter(id=request.POST.get("payout_id")).first()
+                batch = SettlementBatchFile.objects.filter(id=request.POST.get("batch_id")).first()
+                exception = SettlementException.objects.create(
+                    settlement=settlement,
+                    payout=payout,
+                    batch_file=batch,
+                    reason_code=(request.POST.get("reason_code") or "unknown").strip(),
+                    severity=(request.POST.get("severity") or "medium").strip(),
+                    status=SettlementException.STATUS_OPEN,
+                    detail=(request.POST.get("detail") or "").strip(),
+                    assigned_to=User.objects.filter(id=request.POST.get("assigned_to")).first(),
+                    created_by=request.user,
+                )
+                messages.success(request, f"Settlement exception #{exception.id} created.")
+                return redirect("settlement_operations")
+
+            if form_type == "settlement_exception_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "finance", "treasury", "risk", "operation"),
+                )
+                exception = SettlementException.objects.get(id=request.POST.get("exception_id"))
+                status = (request.POST.get("status") or "").strip().lower()
+                if status not in {
+                    SettlementException.STATUS_OPEN,
+                    SettlementException.STATUS_IN_REVIEW,
+                    SettlementException.STATUS_RESOLVED,
+                }:
+                    raise ValidationError("Invalid exception status.")
+                exception.status = status
+                exception.assigned_to = User.objects.filter(id=request.POST.get("assigned_to")).first()
+                exception.detail = (request.POST.get("detail") or exception.detail).strip()
+                if status == SettlementException.STATUS_RESOLVED:
+                    exception.resolved_by = request.user
+                    exception.resolved_at = timezone.now()
+                exception.save(
+                    update_fields=[
+                        "status",
+                        "assigned_to",
+                        "detail",
+                        "resolved_by",
+                        "resolved_at",
+                        "updated_at",
+                    ]
+                )
+                messages.success(request, f"Exception #{exception.id} updated.")
+                return redirect("settlement_operations")
+        except Exception as exc:
+            messages.error(request, f"Settlement operations failed: {exc}")
+
+    return render(
+        request,
+        "wallets_demo/settlement_operations.html",
+        {
+            "supported_currencies": _supported_currencies(),
+            "settlements": MerchantSettlementRecord.objects.select_related("merchant").order_by("-created_at")[:200],
+            "payouts": SettlementPayout.objects.select_related("settlement", "settlement__merchant").order_by("-created_at")[:200],
+            "batches": SettlementBatchFile.objects.select_related("created_by", "approved_by").order_by("-created_at")[:200],
+            "exceptions": SettlementException.objects.select_related(
+                "settlement", "payout", "batch_file", "assigned_to", "created_by", "resolved_by"
+            ).order_by("-created_at")[:200],
+            "users": User.objects.order_by("username")[:300],
         },
     )
 

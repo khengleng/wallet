@@ -1253,6 +1253,120 @@ class SettlementPayout(models.Model):
         return f"{self.payout_reference}:{self.status}"
 
 
+class SettlementBatchFile(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_GENERATED = "generated"
+    STATUS_APPROVED = "approved"
+    STATUS_UPLOADED = "uploaded"
+    STATUS_PROCESSED = "processed"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_GENERATED, "Generated"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_UPLOADED, "Uploaded"),
+        (STATUS_PROCESSED, "Processed"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    batch_no = models.CharField(max_length=40, unique=True)
+    currency = models.CharField(max_length=12, default="USD")
+    period_start = models.DateField()
+    period_end = models.DateField()
+    settlement_count = models.PositiveIntegerField(default=0)
+    payout_count = models.PositiveIntegerField(default=0)
+    total_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0"))
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    payload_json = models.JSONField(default=dict, blank=True)
+    file = models.FileField(upload_to="settlement_batches/", null=True, blank=True)
+    external_url = models.URLField(blank=True, default="")
+    note = models.CharField(max_length=255, blank=True, default="")
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_settlement_batches"
+    )
+    approved_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="approved_settlement_batches",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"{self.batch_no}:{self.status}"
+
+
+class SettlementException(models.Model):
+    STATUS_OPEN = "open"
+    STATUS_IN_REVIEW = "in_review"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CHOICES = (
+        (STATUS_OPEN, "Open"),
+        (STATUS_IN_REVIEW, "In Review"),
+        (STATUS_RESOLVED, "Resolved"),
+    )
+
+    settlement = models.ForeignKey(
+        MerchantSettlementRecord,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="exceptions",
+    )
+    payout = models.ForeignKey(
+        SettlementPayout,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="exceptions",
+    )
+    batch_file = models.ForeignKey(
+        SettlementBatchFile,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="exceptions",
+    )
+    reason_code = models.CharField(max_length=64, default="unknown")
+    severity = models.CharField(max_length=16, default="medium")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
+    detail = models.CharField(max_length=255, blank=True, default="")
+    assigned_to = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="assigned_settlement_exceptions",
+    )
+    resolved_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="resolved_settlement_exceptions",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="created_settlement_exceptions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def __str__(self):
+        return f"SETTLE-EX-{self.id}:{self.status}"
+
+
 class ReconciliationRun(models.Model):
     STATUS_DRAFT = "draft"
     STATUS_COMPLETED = "completed"

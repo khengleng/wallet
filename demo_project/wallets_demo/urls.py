@@ -12,6 +12,7 @@ urlpatterns = [
     path('backoffice/work-queue/', views.ops_work_queue, name='ops_work_queue'),
     path('backoffice/approval-matrix/', views.approval_matrix, name='approval_matrix'),
     path('backoffice/documents/', views.documents_center, name='documents_center'),
+    path('backoffice/settlements/', views.settlement_operations, name='settlement_operations'),
     path('backoffice/settings/', views.operations_settings, name='operations_settings'),
     path('backoffice/operations/', views.operations_center, name='operations_center'),
     path('backoffice/cases/<int:case_id>/', views.case_detail, name='case_detail'),
