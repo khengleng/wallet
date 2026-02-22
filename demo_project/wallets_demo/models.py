@@ -22,6 +22,19 @@ FLOW_CHOICES = (
     (FLOW_G2P, "G2P"),
 )
 
+APPROVAL_WORKFLOW_TREASURY = "treasury_transfer"
+APPROVAL_WORKFLOW_KYB = "merchant_kyb"
+APPROVAL_WORKFLOW_REFUND = "dispute_refund"
+APPROVAL_WORKFLOW_PAYOUT = "settlement_payout"
+APPROVAL_WORKFLOW_BACKDATE = "journal_backdate"
+APPROVAL_WORKFLOW_CHOICES = (
+    (APPROVAL_WORKFLOW_TREASURY, "Treasury Transfer"),
+    (APPROVAL_WORKFLOW_KYB, "Merchant KYB"),
+    (APPROVAL_WORKFLOW_REFUND, "Dispute Refund"),
+    (APPROVAL_WORKFLOW_PAYOUT, "Settlement Payout"),
+    (APPROVAL_WORKFLOW_BACKDATE, "Journal Backdate"),
+)
+
 
 def default_service_transaction_prefixes() -> dict:
     return {
@@ -1404,6 +1417,126 @@ class ChargebackEvidence(models.Model):
 
     def __str__(self):
         return f"{self.chargeback.chargeback_no}:{self.document_type}"
+
+
+class ApprovalMatrixRule(models.Model):
+    workflow_type = models.CharField(max_length=32, choices=APPROVAL_WORKFLOW_CHOICES, db_index=True)
+    currency = models.CharField(max_length=12, blank=True, default="", help_text="Blank means all currencies")
+    min_amount = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+    max_amount = models.DecimalField(max_digits=20, decimal_places=2, null=True, blank=True)
+    required_checker_role = models.CharField(max_length=64)
+    is_active = models.BooleanField(default=True, db_index=True)
+    description = models.CharField(max_length=255, blank=True, default="")
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="updated_approval_matrix_rules",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("workflow_type", "currency", "min_amount", "max_amount", "id")
+
+    def clean(self):
+        if self.min_amount is not None and self.min_amount < Decimal("0"):
+            raise ValidationError("Minimum amount cannot be negative.")
+        if self.max_amount is not None and self.max_amount < Decimal("0"):
+            raise ValidationError("Maximum amount cannot be negative.")
+        if (
+            self.min_amount is not None
+            and self.max_amount is not None
+            and self.min_amount > self.max_amount
+        ):
+            raise ValidationError("Minimum amount cannot be greater than maximum amount.")
+
+    def __str__(self):
+        ccy = self.currency or "ANY"
+        return f"{self.workflow_type}:{ccy}:{self.required_checker_role}"
+
+
+class BusinessDocument(models.Model):
+    SOURCE_GENERAL = "general"
+    SOURCE_CASE = "case"
+    SOURCE_KYB = "kyb"
+    SOURCE_CHARGEBACK = "chargeback"
+    SOURCE_REFUND = "refund"
+    SOURCE_RECONCILIATION = "reconciliation"
+    SOURCE_CHOICES = (
+        (SOURCE_GENERAL, "General"),
+        (SOURCE_CASE, "Case"),
+        (SOURCE_KYB, "KYB"),
+        (SOURCE_CHARGEBACK, "Chargeback"),
+        (SOURCE_REFUND, "Refund"),
+        (SOURCE_RECONCILIATION, "Reconciliation"),
+    )
+
+    source_module = models.CharField(max_length=32, choices=SOURCE_CHOICES, default=SOURCE_GENERAL, db_index=True)
+    title = models.CharField(max_length=255)
+    document_type = models.CharField(max_length=64, default="generic")
+    file = models.FileField(upload_to="business_documents/", null=True, blank=True)
+    external_url = models.URLField(blank=True, default="")
+    is_internal = models.BooleanField(default=True)
+    metadata_json = models.JSONField(default=dict, blank=True)
+    case = models.ForeignKey(
+        "OperationCase",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+    customer = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="business_documents",
+    )
+    chargeback = models.ForeignKey(
+        ChargebackCase,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+    refund_request = models.ForeignKey(
+        DisputeRefundRequest,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+    kyb_request = models.ForeignKey(
+        MerchantKYBRequest,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="documents",
+    )
+    uploaded_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        related_name="uploaded_business_documents",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+
+    def clean(self):
+        if not self.file and not self.external_url:
+            raise ValidationError("Either file upload or external URL is required.")
+
+    def __str__(self):
+        return f"{self.source_module}:{self.title}"
 
 
 class AccountingPeriodClose(models.Model):

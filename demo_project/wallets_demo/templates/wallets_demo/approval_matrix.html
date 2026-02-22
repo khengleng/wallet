@@ -1,0 +1,76 @@
+{% extends 'wallets_demo/base.html' %}
+{% block title %}Approval Matrix - {{ org_name }}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Approval Matrix</h2>
+    <p class="text-muted">Configure required checker roles by workflow, currency, and amount range.</p>
+</div>
+
+<div class="card">
+    <h3>Create / Update Rule</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="upsert" />
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div class="form-group"><label>Rule ID (optional)</label><input type="number" name="rule_id" min="1" placeholder="Leave blank to create" /></div>
+            <div class="form-group"><label>Workflow</label><select name="workflow_type" required>{% for value, label in workflow_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Currency (blank = all)</label><select name="currency"><option value="">All</option>{% for c in supported_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Required Checker Role</label><select name="required_checker_role" required>{% for role in role_choices %}<option value="{{ role }}">{{ role }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Min Amount</label><input type="number" step="0.01" min="0" name="min_amount" /></div>
+            <div class="form-group"><label>Max Amount</label><input type="number" step="0.01" min="0" name="max_amount" /></div>
+            <div class="form-group" style="grid-column:1/-1;"><label>Description</label><input type="text" name="description" /></div>
+        </div>
+        <label style="display:flex;gap:0.5rem;margin-bottom:1rem;"><input type="checkbox" name="is_active" checked />Active</label>
+        <button class="btn btn-primary" type="submit">Save Rule</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Current Rules</h3>
+    <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Workflow</th>
+                    <th>Currency</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Description</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rule in rules %}
+                <tr>
+                    <td>#{{ rule.id }}</td>
+                    <td>{{ rule.workflow_type }}</td>
+                    <td>{{ rule.currency|default:"ALL" }}</td>
+                    <td>{% if rule.min_amount is not None %}{{ rule.min_amount }}{% else %}-{% endif %}</td>
+                    <td>{% if rule.max_amount is not None %}{{ rule.max_amount }}{% else %}-{% endif %}</td>
+                    <td>{{ rule.required_checker_role }}</td>
+                    <td>{% if rule.is_active %}<span class="badge-active">Active</span>{% else %}<span class="badge-closed">Inactive</span>{% endif %}</td>
+                    <td>{{ rule.description|default:"-" }}</td>
+                    <td>
+                        <form method="post" style="display:flex;gap:0.4rem;">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_type" value="toggle" />
+                            <input type="hidden" name="rule_id" value="{{ rule.id }}" />
+                            {% if rule.is_active %}
+                            <button class="btn btn-outline" type="submit" name="action" value="deactivate">Deactivate</button>
+                            {% else %}
+                            <button class="btn btn-primary" type="submit" name="action" value="activate">Activate</button>
+                            {% endif %}
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="9" class="text-muted" style="text-align:center;">No approval matrix rules yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -497,10 +497,16 @@
                     href="{% url 'backoffice' %}">Back Office Home</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'operations_center' %} active{% endif %}"
                     href="{% url 'operations_center' %}">Merchant & Case Ops</a>
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'ops_work_queue' %} active{% endif %}"
+                    href="{% url 'ops_work_queue' %}">Ops Work Queue</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'treasury_dashboard' %} active{% endif %}"
                     href="{% url 'treasury_dashboard' %}">Company Funds</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'accounting_dashboard' %} active{% endif %}"
                     href="{% url 'accounting_dashboard' %}">Finance & Ledger</a>
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'approval_matrix' %} active{% endif %}"
+                    href="{% url 'approval_matrix' %}">Approval Matrix</a>
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'documents_center' %} active{% endif %}"
+                    href="{% url 'documents_center' %}">Documents Center</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'fx_management' %} active{% endif %}"
                     href="{% url 'fx_management' %}">Exchange Rate Admin</a>
                 {% if user|has_any_role:"admin,super_admin" %}

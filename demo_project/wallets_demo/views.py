@@ -31,6 +31,7 @@ from django.utils import timezone
 from django.utils.text import get_valid_filename
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 
 from dj_wallet.models import Transaction, Wallet
 from dj_wallet.utils import get_exchange_service, get_wallet_service
@@ -53,8 +54,10 @@ from .keycloak_auth import (
 from .models import (
     ApprovalRequest,
     AccessReviewRecord,
+    ApprovalMatrixRule,
     AccountingPeriodClose,
     BackofficeAuditLog,
+    BusinessDocument,
     ChartOfAccount,
     ChargebackCase,
     ChargebackEvidence,
@@ -91,6 +94,12 @@ from .models import (
     default_service_transaction_prefixes,
     FLOW_B2B,
     FLOW_B2C,
+    APPROVAL_WORKFLOW_BACKDATE,
+    APPROVAL_WORKFLOW_CHOICES,
+    APPROVAL_WORKFLOW_KYB,
+    APPROVAL_WORKFLOW_PAYOUT,
+    APPROVAL_WORKFLOW_REFUND,
+    APPROVAL_WORKFLOW_TREASURY,
     FLOW_C2B,
     FLOW_G2P,
     FLOW_P2G,
@@ -1121,6 +1130,13 @@ def treasury_dashboard(request):
             required_checker_role = ""
             if amount >= policy.require_super_admin_above:
                 required_checker_role = "super_admin"
+            matrix_required_role = _approval_required_checker_role(
+                APPROVAL_WORKFLOW_TREASURY,
+                currency=from_account.currency,
+                amount=amount,
+            )
+            if matrix_required_role:
+                required_checker_role = matrix_required_role
             req = TreasuryTransferRequest.objects.create(
                 maker=request.user,
                 from_account=from_account,
@@ -1168,9 +1184,15 @@ def treasury_decision(request, request_id: int):
         raise PermissionDenied("You do not have checker role.")
 
     req = get_object_or_404(TreasuryTransferRequest, id=request_id)
-    if req.required_checker_role and not user_has_any_role(request.user, (req.required_checker_role,)):
+    dynamic_required_role = _approval_required_checker_role(
+        APPROVAL_WORKFLOW_TREASURY,
+        currency=req.from_account.currency,
+        amount=req.amount,
+    )
+    required_checker_role = req.required_checker_role or dynamic_required_role
+    if required_checker_role and not user_has_any_role(request.user, (required_checker_role,)):
         raise PermissionDenied(
-            f"Checker must have role {req.required_checker_role} for this treasury request."
+            f"Checker must have role {required_checker_role} for this treasury request."
         )
     decision = request.POST.get("decision")
     checker_note = request.POST.get("checker_note", "")
@@ -1368,6 +1390,46 @@ def _parse_iso_date(raw: str | None, *, default: date) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise ValidationError("Invalid date format. Use YYYY-MM-DD.") from exc
+
+
+def _approval_required_checker_role(
+    workflow_type: str,
+    *,
+    currency: str = "",
+    amount: Decimal | None = None,
+) -> str:
+    currency_norm = (currency or "").strip().upper()
+    rules = ApprovalMatrixRule.objects.filter(
+        workflow_type=workflow_type,
+        is_active=True,
+    ).order_by("currency", "min_amount", "id")
+    for rule in rules:
+        if rule.currency and rule.currency.upper() != currency_norm:
+            continue
+        if amount is not None and rule.min_amount is not None and amount < rule.min_amount:
+            continue
+        if amount is not None and rule.max_amount is not None and amount > rule.max_amount:
+            continue
+        return (rule.required_checker_role or "").strip()
+    return ""
+
+
+def _enforce_approval_matrix_checker(
+    checker: User,
+    workflow_type: str,
+    *,
+    currency: str = "",
+    amount: Decimal | None = None,
+):
+    required_role = _approval_required_checker_role(
+        workflow_type,
+        currency=currency,
+        amount=amount,
+    )
+    if required_role and not user_has_any_role(checker, (required_role,)):
+        raise PermissionDenied(
+            f"Checker must have role {required_role} for workflow {workflow_type}."
+        )
 
 
 def _mask_email(value: str) -> str:
@@ -1811,6 +1873,10 @@ def operations_center(request):
                 kyb = MerchantKYBRequest.objects.select_related("merchant").get(
                     id=request.POST.get("kyb_request_id")
                 )
+                _enforce_approval_matrix_checker(
+                    request.user,
+                    APPROVAL_WORKFLOW_KYB,
+                )
                 decision = (request.POST.get("decision") or "").strip().lower()
                 if kyb.status != MerchantKYBRequest.STATUS_PENDING:
                     raise ValidationError("KYB request is not pending.")
@@ -2131,6 +2197,12 @@ def operations_center(request):
                 refund = DisputeRefundRequest.objects.select_related(
                     "merchant", "customer", "case"
                 ).get(id=request.POST.get("refund_request_id"))
+                _enforce_approval_matrix_checker(
+                    request.user,
+                    APPROVAL_WORKFLOW_REFUND,
+                    currency=refund.currency,
+                    amount=refund.amount,
+                )
                 if refund.status != DisputeRefundRequest.STATUS_PENDING:
                     raise ValidationError("Refund request is not pending.")
                 decision = (request.POST.get("decision") or "").strip().lower()
@@ -2298,6 +2370,12 @@ def operations_center(request):
                 )
                 payout = SettlementPayout.objects.select_related("settlement").get(
                     id=request.POST.get("payout_id")
+                )
+                _enforce_approval_matrix_checker(
+                    request.user,
+                    APPROVAL_WORKFLOW_PAYOUT,
+                    currency=payout.currency,
+                    amount=payout.amount,
                 )
                 decision = (request.POST.get("decision") or "").strip().lower()
                 if payout.status not in {
@@ -2567,6 +2645,18 @@ def operations_center(request):
                     note=(request.POST.get("note") or "").strip(),
                     uploaded_by=request.user,
                 )
+                BusinessDocument.objects.create(
+                    source_module=BusinessDocument.SOURCE_CHARGEBACK,
+                    title=f"{chargeback.chargeback_no} evidence",
+                    document_type=(request.POST.get("document_type") or "receipt").strip(),
+                    external_url=doc_url,
+                    merchant=chargeback.merchant,
+                    customer=chargeback.customer,
+                    chargeback=chargeback,
+                    uploaded_by=request.user,
+                    is_internal=True,
+                    metadata_json={"note": (request.POST.get("note") or "").strip()},
+                )
                 messages.success(request, f"Evidence uploaded for {chargeback.chargeback_no}.")
                 return redirect("operations_center")
 
@@ -2640,6 +2730,11 @@ def operations_center(request):
                 )
                 approval = JournalBackdateApproval.objects.select_related("entry").get(
                     id=request.POST.get("approval_id")
+                )
+                _enforce_approval_matrix_checker(
+                    request.user,
+                    APPROVAL_WORKFLOW_BACKDATE,
+                    currency=approval.entry.currency,
                 )
                 if approval.status != JournalBackdateApproval.STATUS_PENDING:
                     raise ValidationError("Backdate request already decided.")
@@ -3988,6 +4083,293 @@ def operations_settings(request):
             "preview_service_txn": preview_service_txn,
             "all_currencies": all_currencies,
             "active_currencies": active_currencies,
+        },
+    )
+
+
+@login_required
+def ops_work_queue(request):
+    operation_roles = ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "treasury")
+    if not user_has_any_role(request.user, operation_roles):
+        raise PermissionDenied("You do not have access to operation work queue.")
+
+    queue_type = (request.GET.get("type") or "all").strip().lower()
+    items: list[dict] = []
+
+    treasury_pending = TreasuryTransferRequest.objects.select_related(
+        "maker", "from_account", "to_account"
+    ).filter(status=TreasuryTransferRequest.STATUS_PENDING)
+    for req in treasury_pending[:150]:
+        required_role = req.required_checker_role or _approval_required_checker_role(
+            APPROVAL_WORKFLOW_TREASURY,
+            currency=req.from_account.currency,
+            amount=req.amount,
+        )
+        items.append(
+            {
+                "queue_type": "treasury_transfer",
+                "ref": f"TR-{req.id}",
+                "created_at": req.created_at,
+                "subject": f"{req.from_account.name} -> {req.to_account.name}",
+                "amount": req.amount,
+                "currency": req.from_account.currency,
+                "maker": req.maker.username,
+                "required_role": required_role,
+                "action_url": reverse("treasury_decision", kwargs={"request_id": req.id}),
+            }
+        )
+
+    kyb_pending = MerchantKYBRequest.objects.select_related("merchant", "maker").filter(
+        status=MerchantKYBRequest.STATUS_PENDING
+    )
+    for req in kyb_pending[:150]:
+        items.append(
+            {
+                "queue_type": "merchant_kyb",
+                "ref": f"KYB-{req.id}",
+                "created_at": req.created_at,
+                "subject": f"{req.merchant.code} / {req.legal_name}",
+                "amount": None,
+                "currency": "",
+                "maker": req.maker.username,
+                "required_role": _approval_required_checker_role(APPROVAL_WORKFLOW_KYB),
+                "action_url": reverse("operations_center"),
+                "action_form_type": "merchant_kyb_decision",
+                "action_id_field": "kyb_request_id",
+                "action_id": req.id,
+            }
+        )
+
+    refund_pending = DisputeRefundRequest.objects.select_related("case", "merchant", "maker").filter(
+        status=DisputeRefundRequest.STATUS_PENDING
+    )
+    now_ts = timezone.now()
+    for req in refund_pending[:150]:
+        items.append(
+            {
+                "queue_type": "dispute_refund",
+                "ref": f"RFD-{req.id}",
+                "created_at": req.created_at,
+                "subject": f"{req.case.case_no} / {req.merchant.code}",
+                "amount": req.amount,
+                "currency": req.currency,
+                "maker": req.maker.username,
+                "required_role": _approval_required_checker_role(
+                    APPROVAL_WORKFLOW_REFUND,
+                    currency=req.currency,
+                    amount=req.amount,
+                ),
+                "sla_due_at": req.sla_due_at,
+                "is_overdue": bool(req.sla_due_at and req.sla_due_at < now_ts),
+                "action_url": reverse("operations_center"),
+                "action_form_type": "dispute_refund_decision",
+                "action_id_field": "refund_request_id",
+                "action_id": req.id,
+            }
+        )
+
+    payout_pending = SettlementPayout.objects.select_related("settlement", "settlement__merchant", "initiated_by").filter(
+        status__in=(SettlementPayout.STATUS_PENDING, SettlementPayout.STATUS_SENT)
+    )
+    for req in payout_pending[:150]:
+        items.append(
+            {
+                "queue_type": "settlement_payout",
+                "ref": req.payout_reference,
+                "created_at": req.created_at,
+                "subject": f"{req.settlement.settlement_no} / {req.settlement.merchant.code}",
+                "amount": req.amount,
+                "currency": req.currency,
+                "maker": req.initiated_by.username,
+                "required_role": _approval_required_checker_role(
+                    APPROVAL_WORKFLOW_PAYOUT,
+                    currency=req.currency,
+                    amount=req.amount,
+                ),
+                "action_url": reverse("operations_center"),
+                "action_form_type": "settlement_payout_decision",
+                "action_id_field": "payout_id",
+                "action_id": req.id,
+            }
+        )
+
+    backdate_pending = JournalBackdateApproval.objects.select_related("entry", "maker").filter(
+        status=JournalBackdateApproval.STATUS_PENDING
+    )
+    for req in backdate_pending[:150]:
+        items.append(
+            {
+                "queue_type": "journal_backdate",
+                "ref": f"BD-{req.id}",
+                "created_at": req.created_at,
+                "subject": req.entry.entry_no,
+                "amount": None,
+                "currency": req.entry.currency,
+                "maker": req.maker.username,
+                "required_role": _approval_required_checker_role(
+                    APPROVAL_WORKFLOW_BACKDATE,
+                    currency=req.entry.currency,
+                ),
+                "action_url": reverse("operations_center"),
+                "action_form_type": "journal_backdate_decision",
+                "action_id_field": "approval_id",
+                "action_id": req.id,
+            }
+        )
+
+    if queue_type != "all":
+        items = [item for item in items if item["queue_type"] == queue_type]
+    items.sort(key=lambda item: item["created_at"], reverse=True)
+
+    return render(
+        request,
+        "wallets_demo/ops_work_queue.html",
+        {
+            "queue_items": items[:300],
+            "queue_type": queue_type,
+            "queue_type_choices": [
+                ("all", "All"),
+                ("treasury_transfer", "Treasury Transfer"),
+                ("merchant_kyb", "Merchant KYB"),
+                ("dispute_refund", "Dispute Refund"),
+                ("settlement_payout", "Settlement Payout"),
+                ("journal_backdate", "Journal Backdate"),
+            ],
+        },
+    )
+
+
+@login_required
+def approval_matrix(request):
+    if not user_has_any_role(request.user, ("super_admin", "admin", "risk", "finance", "operation", "treasury")):
+        raise PermissionDenied("You do not have access to approval matrix.")
+
+    if request.method == "POST":
+        form_type = (request.POST.get("form_type") or "upsert").strip().lower()
+        try:
+            if form_type == "toggle":
+                rule = ApprovalMatrixRule.objects.get(id=request.POST.get("rule_id"))
+                rule.is_active = request.POST.get("action") == "activate"
+                rule.updated_by = request.user
+                rule.save(update_fields=["is_active", "updated_by", "updated_at"])
+                messages.success(request, f"Approval rule {rule.id} updated.")
+                return redirect("approval_matrix")
+
+            rule_id = (request.POST.get("rule_id") or "").strip()
+            workflow_type = (request.POST.get("workflow_type") or "").strip()
+            currency = (request.POST.get("currency") or "").strip().upper()
+            min_amount_raw = (request.POST.get("min_amount") or "").strip()
+            max_amount_raw = (request.POST.get("max_amount") or "").strip()
+            min_amount = Decimal(min_amount_raw) if min_amount_raw else None
+            max_amount = Decimal(max_amount_raw) if max_amount_raw else None
+            required_checker_role = (request.POST.get("required_checker_role") or "").strip()
+            if not required_checker_role:
+                raise ValidationError("Required checker role is required.")
+            if rule_id:
+                rule = ApprovalMatrixRule.objects.get(id=rule_id)
+            else:
+                rule = ApprovalMatrixRule(updated_by=request.user)
+            rule.workflow_type = workflow_type
+            rule.currency = currency
+            rule.min_amount = min_amount
+            rule.max_amount = max_amount
+            rule.required_checker_role = required_checker_role
+            rule.description = (request.POST.get("description") or "").strip()
+            rule.is_active = request.POST.get("is_active") == "on"
+            rule.updated_by = request.user
+            rule.full_clean()
+            rule.save()
+            messages.success(request, f"Approval rule {'updated' if rule_id else 'created'}: #{rule.id}.")
+            return redirect("approval_matrix")
+        except Exception as exc:
+            messages.error(request, f"Unable to save approval matrix rule: {exc}")
+
+    return render(
+        request,
+        "wallets_demo/approval_matrix.html",
+        {
+            "rules": ApprovalMatrixRule.objects.order_by("workflow_type", "currency", "min_amount", "id"),
+            "workflow_choices": APPROVAL_WORKFLOW_CHOICES,
+            "role_choices": sorted(ROLE_DEFINITIONS.keys()),
+            "supported_currencies": _supported_currencies(),
+        },
+    )
+
+
+@login_required
+def documents_center(request):
+    if not user_has_any_role(request.user, ("super_admin", "admin", "operation", "risk", "finance", "customer_service", "sales", "treasury")):
+        raise PermissionDenied("You do not have access to documents center.")
+
+    if request.method == "POST":
+        try:
+            form_type = (request.POST.get("form_type") or "document_upload").strip().lower()
+            if form_type == "document_upload":
+                title = (request.POST.get("title") or "").strip()
+                if not title:
+                    raise ValidationError("Document title is required.")
+                doc = BusinessDocument(
+                    source_module=(request.POST.get("source_module") or BusinessDocument.SOURCE_GENERAL).strip(),
+                    title=title,
+                    document_type=(request.POST.get("document_type") or "generic").strip(),
+                    external_url=(request.POST.get("external_url") or "").strip(),
+                    is_internal=request.POST.get("is_internal") == "on",
+                    uploaded_by=request.user,
+                )
+                upload = request.FILES.get("document_file")
+                if upload:
+                    doc.file = upload
+
+                case_id = (request.POST.get("case_id") or "").strip()
+                merchant_id = (request.POST.get("merchant_id") or "").strip()
+                customer_id = (request.POST.get("customer_id") or "").strip()
+                chargeback_id = (request.POST.get("chargeback_id") or "").strip()
+                refund_id = (request.POST.get("refund_request_id") or "").strip()
+                kyb_id = (request.POST.get("kyb_request_id") or "").strip()
+                doc.case = OperationCase.objects.filter(id=case_id).first() if case_id else None
+                doc.merchant = Merchant.objects.filter(id=merchant_id).first() if merchant_id else None
+                doc.customer = User.objects.filter(id=customer_id).first() if customer_id else None
+                doc.chargeback = ChargebackCase.objects.filter(id=chargeback_id).first() if chargeback_id else None
+                doc.refund_request = DisputeRefundRequest.objects.filter(id=refund_id).first() if refund_id else None
+                doc.kyb_request = MerchantKYBRequest.objects.filter(id=kyb_id).first() if kyb_id else None
+                doc.metadata_json = {
+                    "note": (request.POST.get("note") or "").strip(),
+                }
+                doc.full_clean()
+                doc.save()
+                messages.success(request, f"Document uploaded: {doc.title}.")
+                return redirect("documents_center")
+        except Exception as exc:
+            messages.error(request, f"Unable to upload document: {exc}")
+
+    module_filter = (request.GET.get("module") or "").strip()
+    query = (request.GET.get("q") or "").strip()
+    docs = BusinessDocument.objects.select_related(
+        "uploaded_by", "merchant", "customer", "case", "chargeback", "refund_request", "kyb_request"
+    ).order_by("-created_at")
+    if module_filter:
+        docs = docs.filter(source_module=module_filter)
+    if query:
+        docs = docs.filter(
+            Q(title__icontains=query)
+            | Q(document_type__icontains=query)
+            | Q(merchant__code__icontains=query)
+            | Q(case__case_no__icontains=query)
+        )
+    return render(
+        request,
+        "wallets_demo/documents_center.html",
+        {
+            "documents": docs[:300],
+            "module_filter": module_filter,
+            "query": query,
+            "source_choices": BusinessDocument.SOURCE_CHOICES,
+            "merchants": Merchant.objects.order_by("code")[:200],
+            "users": User.objects.order_by("username")[:300],
+            "cases": OperationCase.objects.order_by("-created_at")[:200],
+            "chargebacks": ChargebackCase.objects.order_by("-created_at")[:200],
+            "refund_requests": DisputeRefundRequest.objects.order_by("-created_at")[:200],
+            "kyb_requests": MerchantKYBRequest.objects.order_by("-created_at")[:200],
         },
     )
 

@@ -1,0 +1,89 @@
+{% extends 'wallets_demo/base.html' %}
+{% block title %}Ops Work Queue - {{ org_name }}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Ops Work Queue</h2>
+    <p class="text-muted">Unified pending queue for maker-checker decisions across treasury, KYB, refunds, payouts, and backdate approvals.</p>
+    <form method="get" style="display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:end;">
+        <div class="form-group" style="margin-bottom:0;">
+            <label>Queue Type</label>
+            <select name="type">
+                {% for value, label in queue_type_choices %}
+                <option value="{{ value }}" {% if queue_type == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Apply Filter</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Pending Items</h3>
+    <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Created</th>
+                    <th>Type</th>
+                    <th>Reference</th>
+                    <th>Subject</th>
+                    <th>Amount</th>
+                    <th>Maker</th>
+                    <th>Required Role</th>
+                    <th>SLA</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in queue_items %}
+                <tr>
+                    <td style="font-size:0.78rem;">{{ item.created_at|date:"d M Y H:i" }}</td>
+                    <td>{{ item.queue_type }}</td>
+                    <td>{{ item.ref }}</td>
+                    <td>{{ item.subject }}</td>
+                    <td>{% if item.amount %}{{ item.amount }} {{ item.currency }}{% else %}-{% endif %}</td>
+                    <td>{{ item.maker }}</td>
+                    <td>{% if item.required_role %}<span class="badge-pending">{{ item.required_role }}</span>{% else %}-{% endif %}</td>
+                    <td>
+                        {% if item.sla_due_at %}
+                        {% if item.is_overdue %}<span class="badge-blocked">Overdue</span>{% else %}<span class="badge-active">Due {{ item.sla_due_at|date:"d M H:i" }}</span>{% endif %}
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.action_form_type %}
+                        <form method="post" action="{{ item.action_url }}" style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+                            {% csrf_token %}
+                            <input type="hidden" name="form_type" value="{{ item.action_form_type }}" />
+                            <input type="hidden" name="{{ item.action_id_field }}" value="{{ item.action_id }}" />
+                            {% if item.queue_type == 'settlement_payout' %}
+                            <button class="btn btn-outline" type="submit" name="decision" value="send">Send</button>
+                            <button class="btn btn-primary" type="submit" name="decision" value="settle">Settle</button>
+                            <button class="btn btn-outline" type="submit" name="decision" value="fail">Fail</button>
+                            {% else %}
+                            <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve</button>
+                            <button class="btn btn-outline" type="submit" name="decision" value="reject">Reject</button>
+                            {% endif %}
+                            <input type="text" name="checker_note" placeholder="Note" style="max-width:120px;" />
+                        </form>
+                        {% else %}
+                        <form method="post" action="{{ item.action_url }}" style="display:flex;gap:0.35rem;flex-wrap:wrap;">
+                            {% csrf_token %}
+                            <input type="text" name="checker_note" placeholder="Note" style="max-width:120px;" />
+                            <button class="btn btn-primary" type="submit" name="decision" value="approve">Approve</button>
+                            <button class="btn btn-outline" type="submit" name="decision" value="reject">Reject</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="9" class="text-muted" style="text-align:center;">No pending queue items.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

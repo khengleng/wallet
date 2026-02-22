@@ -1,0 +1,83 @@
+{% extends 'wallets_demo/base.html' %}
+{% block title %}Documents Center - {{ org_name }}{% endblock %}
+{% block content %}
+<div class="card">
+    <h2>Documents Center</h2>
+    <p class="text-muted">Central repository for case, KYB, refund, chargeback, and operational evidence documents.</p>
+</div>
+
+<div class="card">
+    <h3>Upload Document</h3>
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="document_upload" />
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+            <div class="form-group"><label>Source Module</label><select name="source_module">{% for value, label in source_choices %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Title</label><input type="text" name="title" required /></div>
+            <div class="form-group"><label>Document Type</label><input type="text" name="document_type" value="generic" /></div>
+            <div class="form-group"><label>Upload File (optional)</label><input type="file" name="document_file" /></div>
+            <div class="form-group"><label>External URL (optional)</label><input type="url" name="external_url" /></div>
+            <div class="form-group"><label>Merchant (optional)</label><select name="merchant_id"><option value="">-- none --</option>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code }} - {{ m.name }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Customer (optional)</label><select name="customer_id"><option value="">-- none --</option>{% for u in users %}<option value="{{ u.id }}">{{ u.username }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Case (optional)</label><select name="case_id"><option value="">-- none --</option>{% for c in cases %}<option value="{{ c.id }}">{{ c.case_no }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Chargeback (optional)</label><select name="chargeback_id"><option value="">-- none --</option>{% for c in chargebacks %}<option value="{{ c.id }}">{{ c.chargeback_no }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>Refund Request (optional)</label><select name="refund_request_id"><option value="">-- none --</option>{% for r in refund_requests %}<option value="{{ r.id }}">#{{ r.id }}</option>{% endfor %}</select></div>
+            <div class="form-group"><label>KYB Request (optional)</label><select name="kyb_request_id"><option value="">-- none --</option>{% for k in kyb_requests %}<option value="{{ k.id }}">#{{ k.id }} - {{ k.merchant.code }}</option>{% endfor %}</select></div>
+            <div class="form-group" style="grid-column:1/-1;"><label>Note</label><input type="text" name="note" /></div>
+        </div>
+        <label style="display:flex;gap:0.5rem;margin-bottom:1rem;"><input type="checkbox" name="is_internal" checked />Internal document</label>
+        <button class="btn btn-primary" type="submit">Upload</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Search Documents</h3>
+    <form method="get" style="display:grid;grid-template-columns:1fr 1fr auto;gap:1rem;align-items:end;">
+        <div class="form-group" style="margin-bottom:0;"><label>Keyword</label><input type="text" name="q" value="{{ query }}" placeholder="title, type, case no, merchant" /></div>
+        <div class="form-group" style="margin-bottom:0;"><label>Module</label><select name="module"><option value="">All</option>{% for value, label in source_choices %}<option value="{{ value }}" {% if module_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <button class="btn btn-primary" type="submit">Search</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Document Registry</h3>
+    <div style="overflow-x:auto;">
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Module</th>
+                    <th>Title</th>
+                    <th>Type</th>
+                    <th>Linked Ref</th>
+                    <th>Source</th>
+                    <th>Uploader</th>
+                    <th>Internal</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for doc in documents %}
+                <tr>
+                    <td style="font-size:0.78rem;">{{ doc.created_at|date:"d M Y H:i" }}</td>
+                    <td>{{ doc.source_module }}</td>
+                    <td>{{ doc.title }}</td>
+                    <td>{{ doc.document_type }}</td>
+                    <td>
+                        {% if doc.case %}{{ doc.case.case_no }}{% elif doc.chargeback %}{{ doc.chargeback.chargeback_no }}{% elif doc.refund_request %}RFD-{{ doc.refund_request.id }}{% elif doc.kyb_request %}KYB-{{ doc.kyb_request.id }}{% elif doc.merchant %}{{ doc.merchant.code }}{% else %}-{% endif %}
+                    </td>
+                    <td>
+                        {% if doc.file %}<a href="{{ doc.file.url }}" target="_blank" rel="noopener">File</a>{% endif %}
+                        {% if doc.file and doc.external_url %} / {% endif %}
+                        {% if doc.external_url %}<a href="{{ doc.external_url }}" target="_blank" rel="noopener">URL</a>{% endif %}
+                    </td>
+                    <td>{{ doc.uploaded_by.username }}</td>
+                    <td>{% if doc.is_internal %}<span class="badge-pending">Internal</span>{% else %}Public{% endif %}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="8" class="text-muted" style="text-align:center;">No documents found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
