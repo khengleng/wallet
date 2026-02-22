@@ -1417,3 +1417,54 @@ class OpsWorkflowEscalationCommandTests(TestCase):
             TransactionMonitoringAlert.objects.filter(alert_type="reconciliation_break_sla").count(),
             1,
         )
+
+
+class MetricsOpsVisibilityTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.actor = User.objects.create_user(username="metrics_actor", password="pass12345")
+        assign_roles(self.actor, ["admin"])
+        self.finance = User.objects.create_user(username="metrics_finance", password="pass12345")
+        assign_roles(self.finance, ["finance"])
+        self.cash = ChartOfAccount.objects.create(
+            code="9030",
+            name="Metrics Cash",
+            account_type=ChartOfAccount.TYPE_ASSET,
+            currency="USD",
+        )
+        self.liability = ChartOfAccount.objects.create(
+            code="9040",
+            name="Metrics Liability",
+            account_type=ChartOfAccount.TYPE_LIABILITY,
+            currency="USD",
+        )
+        entry = JournalEntry.objects.create(entry_no="JE-MET-1", created_by=self.finance, currency="USD")
+        JournalLine.objects.create(entry=entry, account=self.cash, debit="11.00", credit="0")
+        JournalLine.objects.create(entry=entry, account=self.liability, debit="0", credit="11.00")
+        approval = JournalEntryApproval.objects.create(
+            entry=entry,
+            request_type=JournalEntryApproval.TYPE_POST,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="metrics pending",
+        )
+        JournalEntryApproval.objects.filter(id=approval.id).update(
+            created_at=timezone.now() - timezone.timedelta(hours=24)
+        )
+        SettlementException.objects.create(
+            reason_code="ops_metrics",
+            severity="medium",
+            status=SettlementException.STATUS_OPEN,
+            detail="metrics exception",
+            created_by=self.actor,
+        )
+
+    @override_settings(JOURNAL_APPROVAL_SLA_HOURS=8)
+    def test_metrics_contains_accounting_ops_gauges(self):
+        response = self.client.get(reverse("metrics"))
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("wallet_ops_settlement_exceptions_open_count", body)
+        self.assertIn("wallet_ops_journal_approvals_pending_count", body)
+        self.assertIn("wallet_ops_journal_approvals_sla_breach_count", body)
