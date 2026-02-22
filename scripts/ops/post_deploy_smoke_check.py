@@ -6,10 +6,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
 import time
 from dataclasses import dataclass
 from typing import Iterable
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
@@ -26,6 +28,20 @@ def _env_required(key: str) -> str:
     if not value:
         raise ValueError(f"Missing required environment variable: {key}")
     return value
+
+
+def _validate_smoke_base_url(key: str, value: str) -> None:
+    if "<" in value or ">" in value or "..." in value:
+        raise ValueError(f"Invalid placeholder value for {key}. Set a real public URL.")
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"{key} must start with http:// or https://")
+    if not parsed.netloc:
+        raise ValueError(f"{key} must include a valid host")
+    try:
+        socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except OSError as exc:
+        raise ValueError(f"{key} host is not resolvable from CI: {parsed.hostname} ({exc})") from exc
 
 
 def _read_json(url: str, timeout_seconds: float) -> dict:
@@ -87,6 +103,15 @@ def _build_checks() -> Iterable[EndpointCheck]:
     ops_risk_base = _env_required("SMOKE_OPS_RISK_BASE_URL")
     audit_export_base = _env_required("SMOKE_AUDIT_EXPORT_BASE_URL")
     mobile_bff_base = os.getenv("SMOKE_MOBILE_BFF_BASE_URL", "").strip().rstrip("/")
+
+    _validate_smoke_base_url("SMOKE_WEB_BASE_URL", web_base)
+    _validate_smoke_base_url("SMOKE_GATEWAY_BASE_URL", gateway_base)
+    _validate_smoke_base_url("SMOKE_LEDGER_BASE_URL", ledger_base)
+    _validate_smoke_base_url("SMOKE_IDENTITY_BASE_URL", identity_base)
+    _validate_smoke_base_url("SMOKE_OPS_RISK_BASE_URL", ops_risk_base)
+    _validate_smoke_base_url("SMOKE_AUDIT_EXPORT_BASE_URL", audit_export_base)
+    if mobile_bff_base:
+        _validate_smoke_base_url("SMOKE_MOBILE_BFF_BASE_URL", mobile_bff_base)
 
     checks = [
         EndpointCheck("web.healthz", f"{web_base}/healthz", "status", "ok"),
