@@ -33,3 +33,10 @@ class MobileSessionRegisterRequest(BaseModel):
 class MobileSessionRevokeRequest(BaseModel):
     session_id: str | None = Field(default=None, max_length=128)
     device_id: str | None = Field(default=None, max_length=128)
+
+
+class MobileProfileUpdateRequest(BaseModel):
+    first_name: str = Field(default="", max_length=150)
+    last_name: str = Field(default="", max_length=150)
+    legal_name: str = Field(default="", max_length=128)
+    mobile_no: str = Field(default="", max_length=40)

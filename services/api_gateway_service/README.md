@@ -72,6 +72,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8082
 - `POST /mobile/v1/auth/oidc/token`
 - `POST /mobile/v1/auth/recovery/password-reset-url`
 - `GET /mobile/v1/bootstrap`
+- `GET /mobile/v1/profile`
+- `POST /mobile/v1/profile`
 - `POST /mobile/v1/onboarding/self`
 - `GET /mobile/v1/wallets/balance`
 - `GET /mobile/v1/wallets/statement`

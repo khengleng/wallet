@@ -34,6 +34,12 @@ Body:
 ### `GET /v1/bootstrap`
 Returns authenticated user bootstrap payload (CIF + wallets + onboarding status).
 
+### `GET /v1/profile`
+Returns authenticated user and CIF profile data.
+
+### `POST /v1/profile`
+Updates profile fields for the authenticated user.
+
 ### `POST /v1/onboarding/self`
 Body:
 ```json

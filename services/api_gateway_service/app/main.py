@@ -745,6 +745,36 @@ async def mobile_bootstrap_gateway(
     )
 
 
+@app.get("/mobile/v1/profile")
+async def mobile_profile_gateway(
+    request: Request,
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_profile", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="GET",
+        path="/v1/profile",
+    )
+
+
+@app.post("/mobile/v1/profile")
+async def mobile_update_profile_gateway(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_profile_update", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="POST",
+        path="/v1/profile",
+        payload=payload,
+    )
+
+
 @app.post("/mobile/v1/auth/oidc/token")
 async def mobile_oidc_token_gateway(
     request: Request,

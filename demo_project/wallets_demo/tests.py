@@ -819,6 +819,48 @@ class MobileSelfOnboardingApiTests(TestCase):
         self.assertIn("USD", wallet_currencies)
         self.assertIn("EUR", wallet_currencies)
 
+    def test_mobile_profile_get_and_update(self):
+        self.client.login(username="mobile_user", password="pass12345")
+        self.client.post(
+            reverse("mobile_self_onboard"),
+            data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"USD"}',
+            content_type="application/json",
+        )
+
+        profile_get = self.client.get(reverse("mobile_profile"))
+        self.assertEqual(profile_get.status_code, 200)
+        profile_payload = profile_get.json()
+        self.assertTrue(profile_payload["ok"])
+        self.assertEqual(profile_payload["data"]["cif"]["legal_name"], "Mobile User")
+
+        profile_update = self.client.post(
+            reverse("mobile_profile"),
+            data='{"first_name":"Mobile","last_name":"Tester","legal_name":"Mobile Tester","mobile_no":"+855999000"}',
+            content_type="application/json",
+        )
+        self.assertEqual(profile_update.status_code, 200)
+        update_payload = profile_update.json()
+        self.assertTrue(update_payload["ok"])
+        self.assertEqual(update_payload["data"]["user"]["first_name"], "Mobile")
+        self.assertEqual(update_payload["data"]["cif"]["legal_name"], "Mobile Tester")
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Mobile")
+        cif = CustomerCIF.objects.get(user=self.user)
+        self.assertEqual(cif.mobile_no, "+855999000")
+
+    def test_mobile_profile_update_requires_onboarding(self):
+        self.client.login(username="mobile_user", password="pass12345")
+        response = self.client.post(
+            reverse("mobile_profile"),
+            data='{"first_name":"No","last_name":"CIF","legal_name":"No CIF"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["error"]["code"], "onboarding_required")
+
 
 class PolicyHubUpgradeWorkflowTests(TestCase):
     def setUp(self):

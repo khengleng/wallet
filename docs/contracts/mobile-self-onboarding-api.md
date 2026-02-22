@@ -121,6 +121,34 @@ This document defines the mobile-app-facing onboarding endpoints currently avail
 }
 ```
 
+## 3) Profile
+
+- Method: `GET`
+- Path: `/api/mobile/profile/`
+- Purpose: return current user profile and CIF profile for mobile self-service.
+
+### Update Profile
+
+- Method: `POST`
+- Path: `/api/mobile/profile/`
+- Purpose: update non-sensitive profile attributes for current user.
+
+### Request body
+
+```json
+{
+  "first_name": "John",
+  "last_name": "Doe",
+  "legal_name": "John Doe",
+  "mobile_no": "+85512345678"
+}
+```
+
+### Notes
+
+- Requires existing CIF (onboarding must be completed first).
+- Does not allow changing username/email through this endpoint.
+
 ## Security Notes
 
 - If CIF status is blocked/closed, self-onboard is rejected with `403`.

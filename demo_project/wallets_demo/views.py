@@ -984,6 +984,30 @@ def _serialize_wallet_for_mobile(wallet: Wallet) -> dict:
     }
 
 
+def _serialize_mobile_profile(user: User, customer_cif: CustomerCIF | None) -> dict:
+    return {
+        "user": {
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "wallet_type": user.wallet_type,
+        },
+        "cif": {
+            "cif_no": customer_cif.cif_no,
+            "status": customer_cif.status,
+            "legal_name": customer_cif.legal_name,
+            "mobile_no": customer_cif.mobile_no,
+            "email": customer_cif.email,
+            "service_class": customer_cif.service_class.code
+            if customer_cif and customer_cif.service_class
+            else "",
+        }
+        if customer_cif
+        else None,
+    }
+
+
 def mobile_bootstrap(request):
     user = _mobile_current_user(request)
     if user is None:
@@ -1006,32 +1030,83 @@ def mobile_bootstrap(request):
         {
             "ok": True,
             "data": {
-                "user": {
-                    "username": user.username,
-                    "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "wallet_type": user.wallet_type,
-                },
+                "user": _serialize_mobile_profile(user, customer_cif)["user"],
                 "onboarding": {
                     "is_completed": customer_cif is not None,
                     "status": customer_cif.status if customer_cif else "pending_cif",
                 },
-                "cif": {
-                    "cif_no": customer_cif.cif_no,
-                    "legal_name": customer_cif.legal_name,
-                    "mobile_no": customer_cif.mobile_no,
-                    "email": customer_cif.email,
-                    "service_class": customer_cif.service_class.code
-                    if customer_cif and customer_cif.service_class
-                    else "",
-                }
-                if customer_cif
-                else None,
+                "cif": _serialize_mobile_profile(user, customer_cif)["cif"],
                 "wallets": wallets,
             },
         }
     )
+
+
+@transaction.atomic
+def mobile_profile(request):
+    user = _mobile_current_user(request)
+    if user is None:
+        return _mobile_json_error(
+            "Authentication required.",
+            status=401,
+            code="unauthorized",
+        )
+
+    customer_cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
+
+    if request.method == "GET":
+        return JsonResponse({"ok": True, "data": _serialize_mobile_profile(user, customer_cif)})
+
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    if customer_cif is None:
+        return _mobile_json_error(
+            "Onboarding is required before profile update.",
+            status=409,
+            code="onboarding_required",
+        )
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return _mobile_json_error("Invalid payload.", code="invalid_payload")
+
+    first_name = str(payload.get("first_name", user.first_name) or "").strip()
+    last_name = str(payload.get("last_name", user.last_name) or "").strip()
+    legal_name = str(payload.get("legal_name", customer_cif.legal_name) or "").strip()
+    mobile_no = str(payload.get("mobile_no", customer_cif.mobile_no) or "").strip()
+
+    if len(first_name) > 150 or len(last_name) > 150:
+        return _mobile_json_error("Invalid first_name or last_name length.", code="invalid_name")
+    if not legal_name:
+        return _mobile_json_error("legal_name is required.", code="legal_name_required")
+    if len(legal_name) > 128:
+        return _mobile_json_error("legal_name is too long.", code="invalid_legal_name")
+    if len(mobile_no) > 40:
+        return _mobile_json_error("mobile_no is too long.", code="invalid_mobile_no")
+
+    user.first_name = first_name
+    user.last_name = last_name
+    user.save(update_fields=["first_name", "last_name"])
+
+    customer_cif.legal_name = legal_name
+    customer_cif.mobile_no = mobile_no
+    customer_cif.save(update_fields=["legal_name", "mobile_no", "updated_at"])
+
+    log_audit_event(
+        actor=user,
+        event_type="mobile.profile.update",
+        target_type="CustomerCIF",
+        target_id=str(customer_cif.id),
+        context={
+            "cif_no": customer_cif.cif_no,
+        },
+    )
+
+    return JsonResponse({"ok": True, "data": _serialize_mobile_profile(user, customer_cif)})
 
 
 def mobile_statement(request):

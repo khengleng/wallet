@@ -11,6 +11,8 @@ Dedicated backend-for-frontend service for the mobile app channel.
 - `POST /v1/auth/oidc/token` -> PKCE code exchange via identity-service
 - `POST /v1/auth/recovery/password-reset-url` -> password reset kickoff URL
 - `GET /v1/bootstrap` -> mobile bootstrap data (user, CIF, wallets)
+- `GET /v1/profile` -> current mobile profile (user + CIF)
+- `POST /v1/profile` -> update mobile profile (non-sensitive fields)
 - `POST /v1/onboarding/self` -> self onboarding (CIF-first)
 - `GET /v1/wallets/balance` -> wallet balances summary
 - `GET /v1/wallets/statement` -> wallet transaction statement
@@ -22,6 +24,7 @@ Dedicated backend-for-frontend service for the mobile app channel.
 - `identity-service` for access token introspection.
 - `web` service mobile endpoints:
   - `/api/mobile/bootstrap/`
+  - `/api/mobile/profile/`
   - `/api/mobile/onboarding/self/`
   - `/api/mobile/statement/`
 

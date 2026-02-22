@@ -15,6 +15,7 @@ from .config import settings
 from .schemas import (
     MobileOidcTokenExchangeRequest,
     MobilePasswordResetRequest,
+    MobileProfileUpdateRequest,
     MobileSelfOnboardRequest,
     MobileSessionRegisterRequest,
     MobileSessionRevokeRequest,
@@ -273,6 +274,28 @@ async def mobile_bootstrap(
 ):
     _inc_counter("requests_total")
     return await _proxy_web("GET", "/api/mobile/bootstrap/", token=auth_ctx["token"])
+
+
+@app.get("/v1/profile")
+async def mobile_profile(
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    return await _proxy_web("GET", "/api/mobile/profile/", token=auth_ctx["token"])
+
+
+@app.post("/v1/profile")
+async def mobile_update_profile(
+    payload: MobileProfileUpdateRequest,
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    return await _proxy_web(
+        "POST",
+        "/api/mobile/profile/",
+        token=auth_ctx["token"],
+        payload=payload.model_dump(mode="json"),
+    )
 
 
 @app.post("/v1/auth/oidc/token")
