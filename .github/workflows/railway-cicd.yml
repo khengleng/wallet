@@ -34,13 +34,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Validate required deploy hook
-        run: |
-          if [ -z "${RAILWAY_DEPLOY_HOOK_WEB}" ]; then
-            echo "Missing required secret: RAILWAY_DEPLOY_HOOK_WEB"
-            exit 1
-          fi
-
       - name: Trigger Railway deploy hooks
         run: |
           set -euo pipefail
@@ -49,6 +42,14 @@ jobs:
             local hook="$2"
             if [ -z "$hook" ]; then
               echo "skip ${name} (no hook configured)"
+              return 0
+            fi
+            if [[ "$hook" == *"<"* ]] || [[ "$hook" == *">"* ]] || [[ "$hook" == *"..."* ]]; then
+              echo "skip ${name} (placeholder hook value)"
+              return 0
+            fi
+            if [[ "$hook" != https://backboard.railway.app/hooks/* ]]; then
+              echo "skip ${name} (invalid hook format)"
               return 0
             fi
             echo "trigger ${name}"
