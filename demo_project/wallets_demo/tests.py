@@ -867,6 +867,43 @@ class MobileSelfOnboardingApiTests(TestCase):
         self.assertFalse(body["ok"])
         self.assertEqual(body["error"]["code"], "onboarding_required")
 
+    def test_mobile_personalization_data_points(self):
+        self.client.login(username="mobile_user", password="pass12345")
+        self.client.post(
+            reverse("mobile_self_onboard"),
+            data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"USD"}',
+            content_type="application/json",
+        )
+        update_profile = self.client.post(
+            reverse("mobile_profile"),
+            data='{"profile_picture_url":"https://cdn.example.com/u.png","preferences":{"language":"en","timezone":"Asia/Phnom_Penh","theme":"system","preferred_currency":"USD"}}',
+            content_type="application/json",
+        )
+        self.assertEqual(update_profile.status_code, 200)
+
+        signal_response = self.client.post(
+            reverse("mobile_personalization_signals"),
+            data='{"data_points":{"last_screen":"wallet_home","preferred_entry_point":"scan_pay"}}',
+            content_type="application/json",
+        )
+        self.assertEqual(signal_response.status_code, 200)
+        self.assertTrue(signal_response.json()["ok"])
+        self.assertEqual(
+            signal_response.json()["data"]["data_points"]["last_screen"],
+            "wallet_home",
+        )
+
+        personalization_response = self.client.get(reverse("mobile_personalization"))
+        self.assertEqual(personalization_response.status_code, 200)
+        payload = personalization_response.json()
+        self.assertTrue(payload["ok"])
+        self.assertIn("native_mfe", payload["data"])
+        self.assertIn("segments", payload["data"])
+        self.assertEqual(
+            payload["data"]["data_points"]["preferred_entry_point"],
+            "scan_pay",
+        )
+
 
 class PolicyHubUpgradeWorkflowTests(TestCase):
     def setUp(self):

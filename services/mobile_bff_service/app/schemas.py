@@ -42,3 +42,7 @@ class MobileProfileUpdateRequest(BaseModel):
     mobile_no: str = Field(default="", max_length=40)
     profile_picture_url: str = Field(default="", max_length=500)
     preferences: dict = Field(default_factory=dict)
+
+
+class MobilePersonalizationSignalsRequest(BaseModel):
+    data_points: dict = Field(default_factory=dict)

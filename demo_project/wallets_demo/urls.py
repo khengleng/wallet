@@ -5,6 +5,12 @@ urlpatterns = [
     path('', views.dashboard, name='dashboard'),
     path('api/mobile/bootstrap/', views.mobile_bootstrap, name='mobile_bootstrap'),
     path('api/mobile/profile/', views.mobile_profile, name='mobile_profile'),
+    path('api/mobile/personalization/', views.mobile_personalization, name='mobile_personalization'),
+    path(
+        'api/mobile/personalization/signals/',
+        views.mobile_personalization_signals,
+        name='mobile_personalization_signals',
+    ),
     path('api/mobile/statement/', views.mobile_statement, name='mobile_statement'),
     path('api/mobile/onboarding/self/', views.mobile_self_onboard, name='mobile_self_onboard'),
     path('metrics', views.metrics, name='metrics'),

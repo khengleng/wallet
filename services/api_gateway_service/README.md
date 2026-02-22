@@ -74,6 +74,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8082
 - `GET /mobile/v1/bootstrap`
 - `GET /mobile/v1/profile`
 - `POST /mobile/v1/profile`
+- `GET /mobile/v1/personalization`
+- `POST /mobile/v1/personalization/signals`
+- `GET /mobile/v1/personalization/ai`
 - `POST /mobile/v1/onboarding/self`
 - `GET /mobile/v1/wallets/balance`
 - `GET /mobile/v1/wallets/statement`

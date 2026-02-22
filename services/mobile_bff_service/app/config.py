@@ -58,6 +58,10 @@ class Settings:
     web_service_timeout_seconds: float = float(os.getenv("WEB_SERVICE_TIMEOUT_SECONDS", "8.0"))
     mobile_rate_limit_per_token: str = os.getenv("MOBILE_RATE_LIMIT_PER_TOKEN", "240/minute")
     mobile_rate_limit_per_ip: str = os.getenv("MOBILE_RATE_LIMIT_PER_IP", "180/minute")
+    openai_api_key: str = _env("OPENAI_API_KEY", "")
+    openai_base_url: str = _env("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+    openai_model: str = _env("OPENAI_MODEL", "gpt-5-mini")
+    openai_timeout_seconds: float = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "10.0"))
 
     @property
     def is_production(self) -> bool:

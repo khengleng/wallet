@@ -58,6 +58,26 @@ Body example:
 }
 ```
 
+### `GET /v1/personalization`
+Returns personalization payload for native modules (segments, widgets, feature flags, preferences).
+
+### `POST /v1/personalization/signals`
+Stores mobile behavior/context data points used for personalization.
+
+Body example:
+```json
+{
+  "data_points": {
+    "last_screen": "wallet_home",
+    "preferred_entry_point": "scan_pay",
+    "avg_session_seconds": 420
+  }
+}
+```
+
+### `GET /v1/personalization/ai`
+Returns OpenAI-augmented recommendations for native screen/widget personalization.
+
 ### `POST /v1/onboarding/self`
 Body:
 ```json

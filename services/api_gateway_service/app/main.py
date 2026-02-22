@@ -775,6 +775,50 @@ async def mobile_update_profile_gateway(
     )
 
 
+@app.get("/mobile/v1/personalization")
+async def mobile_personalization_gateway(
+    request: Request,
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_personalization", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="GET",
+        path="/v1/personalization",
+    )
+
+
+@app.post("/mobile/v1/personalization/signals")
+async def mobile_personalization_signals_gateway(
+    request: Request,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_personalization_signals", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="POST",
+        path="/v1/personalization/signals",
+        payload=payload,
+    )
+
+
+@app.get("/mobile/v1/personalization/ai")
+async def mobile_personalization_ai_gateway(
+    request: Request,
+    claims: dict[str, Any] = Depends(enforce_rate_limits),
+):
+    _inc_counter("requests_total")
+    _audit("mobile_personalization_ai", subject=claims["sub"])
+    return await _proxy_mobile_bff(
+        request,
+        method="GET",
+        path="/v1/personalization/ai",
+    )
+
+
 @app.post("/mobile/v1/auth/oidc/token")
 async def mobile_oidc_token_gateway(
     request: Request,

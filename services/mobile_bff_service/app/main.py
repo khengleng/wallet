@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import defaultdict, deque
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from .config import settings
 from .schemas import (
     MobileOidcTokenExchangeRequest,
     MobilePasswordResetRequest,
+    MobilePersonalizationSignalsRequest,
     MobileProfileUpdateRequest,
     MobileSelfOnboardRequest,
     MobileSessionRegisterRequest,
@@ -202,6 +204,109 @@ async def _proxy_identity(
     return body
 
 
+def _extract_json_object(raw_text: str) -> dict[str, Any] | None:
+    text = (raw_text or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+async def _openai_personalization(
+    *,
+    base_payload: dict[str, Any],
+    subject: str,
+) -> dict[str, Any]:
+    if not settings.openai_api_key:
+        return {
+            "enabled": False,
+            "reason": "OPENAI_API_KEY not configured",
+            "suggestions": {},
+        }
+
+    personalization = base_payload.get("data", {})
+    native_mfe = personalization.get("native_mfe", {})
+    data_points = personalization.get("data_points", {})
+    segments = personalization.get("segments", [])
+
+    # Avoid sending direct user PII to model input.
+    model_input = {
+        "subject_hash": hash(subject),
+        "segments": segments,
+        "native_mfe": native_mfe,
+        "data_points": data_points,
+    }
+    instructions = (
+        "You optimize a native wallet app home screen. "
+        "Return strict JSON with keys: home_widgets (array of strings), "
+        "campaigns (array of objects with id,title,priority), "
+        "next_best_action (string), tone (string). "
+        "Use concise, risk-aware recommendations."
+    )
+
+    request_payload = {
+        "model": settings.openai_model,
+        "input": [
+            {"role": "system", "content": instructions},
+            {
+                "role": "user",
+                "content": f"Optimize based on: {json.dumps(model_input, separators=(',', ':'))}",
+            },
+        ],
+        "max_output_tokens": 300,
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+    }
+    endpoint = f"{settings.openai_base_url}/responses"
+    try:
+        async with httpx.AsyncClient(timeout=settings.openai_timeout_seconds) as client:
+            response = await client.post(endpoint, headers=headers, json=request_payload)
+        response.raise_for_status()
+        body = response.json()
+    except Exception:
+        _inc_counter("upstream_errors_total")
+        return {
+            "enabled": True,
+            "status": "fallback",
+            "reason": "OpenAI request failed",
+            "suggestions": {},
+        }
+
+    output_text = ""
+    for item in body.get("output", []) or []:
+        for content in item.get("content", []) or []:
+            if content.get("type") in {"output_text", "text"}:
+                output_text += str(content.get("text", ""))
+    parsed = _extract_json_object(output_text)
+    if not parsed:
+        return {
+            "enabled": True,
+            "status": "fallback",
+            "reason": "OpenAI output parse failed",
+            "suggestions": {},
+        }
+    return {
+        "enabled": True,
+        "status": "ok",
+        "model": settings.openai_model,
+        "suggestions": parsed,
+    }
+
+
 def _subject_from_auth(auth_ctx: dict[str, Any]) -> str:
     if auth_ctx.get("service"):
         raise HTTPException(status_code=403, detail="Service token cannot perform this operation")
@@ -296,6 +401,47 @@ async def mobile_update_profile(
         token=auth_ctx["token"],
         payload=payload.model_dump(mode="json"),
     )
+
+
+@app.get("/v1/personalization")
+async def mobile_personalization(
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    return await _proxy_web("GET", "/api/mobile/personalization/", token=auth_ctx["token"])
+
+
+@app.post("/v1/personalization/signals")
+async def mobile_personalization_signals(
+    payload: MobilePersonalizationSignalsRequest,
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    return await _proxy_web(
+        "POST",
+        "/api/mobile/personalization/signals/",
+        token=auth_ctx["token"],
+        payload=payload.model_dump(mode="json"),
+    )
+
+
+@app.get("/v1/personalization/ai")
+async def mobile_personalization_ai(
+    auth_ctx: dict[str, Any] = Depends(_auth_context),
+):
+    _inc_counter("requests_total")
+    base_payload = await _proxy_web("GET", "/api/mobile/personalization/", token=auth_ctx["token"])
+    ai_result = await _openai_personalization(
+        base_payload=base_payload,
+        subject=str(auth_ctx.get("sub") or ""),
+    )
+    return {
+        "ok": True,
+        "data": {
+            "personalization": base_payload.get("data", {}),
+            "ai": ai_result,
+        },
+    }
 
 
 @app.post("/v1/auth/oidc/token")

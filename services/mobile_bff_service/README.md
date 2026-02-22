@@ -13,6 +13,9 @@ Dedicated backend-for-frontend service for the mobile app channel.
 - `GET /v1/bootstrap` -> mobile bootstrap data (user, CIF, wallets)
 - `GET /v1/profile` -> current mobile profile (user + CIF + preferences)
 - `POST /v1/profile` -> update mobile profile (non-sensitive fields, avatar URL, preferences)
+- `GET /v1/personalization` -> personalized native MFE layout payload
+- `POST /v1/personalization/signals` -> collect user data points for personalization
+- `GET /v1/personalization/ai` -> OpenAI-augmented personalization suggestions
 - `POST /v1/onboarding/self` -> self onboarding (CIF-first)
 - `GET /v1/wallets/balance` -> wallet balances summary
 - `GET /v1/wallets/statement` -> wallet transaction statement
@@ -40,6 +43,10 @@ Dedicated backend-for-frontend service for the mobile app channel.
 - `WEB_SERVICE_TIMEOUT_SECONDS` (default `8.0`)
 - `MOBILE_RATE_LIMIT_PER_TOKEN` (default `240/minute`)
 - `MOBILE_RATE_LIMIT_PER_IP` (default `180/minute`)
+- `OPENAI_API_KEY` (optional; enables `/v1/personalization/ai`)
+- `OPENAI_MODEL` (default `gpt-5-mini`)
+- `OPENAI_BASE_URL` (default `https://api.openai.com/v1`)
+- `OPENAI_TIMEOUT_SECONDS` (default `10.0`)
 
 ## Railway Deployment
 1. Create a Railway service named `mobile-bff-service`.

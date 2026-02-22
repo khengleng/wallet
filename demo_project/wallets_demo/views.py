@@ -1052,6 +1052,62 @@ def _sanitize_mobile_preferences(current: dict, incoming: dict) -> dict:
     }
 
 
+def _build_mobile_personalization_payload(
+    *,
+    user: User,
+    customer_cif: CustomerCIF | None,
+    wallets: list[Wallet],
+) -> dict:
+    prefs = user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {}
+    data_points = prefs.get("data_points")
+    if not isinstance(data_points, dict):
+        data_points = {}
+
+    total_balance = Decimal("0")
+    for wallet in wallets:
+        total_balance += wallet.balance
+
+    segments: list[str] = ["new_user"] if not customer_cif else []
+    if customer_cif and customer_cif.service_class:
+        segments.append(f"class_{customer_cif.service_class.code.lower()}")
+    if total_balance >= Decimal("10000000"):
+        segments.append("high_value")
+    if any(w.balance > Decimal("0") for w in wallets):
+        segments.append("active_balance")
+    if user.wallet_type == WALLET_TYPE_BUSINESS:
+        segments.append("business")
+    elif user.wallet_type == WALLET_TYPE_CUSTOMER:
+        segments.append("consumer")
+
+    home_widgets = ["balance_overview", "recent_activity", "quick_actions", "offers"]
+    if "high_value" in segments:
+        home_widgets = ["balance_overview", "wealth_insights", "recent_activity", "quick_actions"]
+    if customer_cif and customer_cif.status == CustomerCIF.STATUS_PENDING_KYC:
+        home_widgets.insert(0, "kyc_progress")
+
+    feature_flags = {
+        "fx": bool(customer_cif and customer_cif.service_class and customer_cif.service_class.allow_fx),
+        "p2g": bool(customer_cif and customer_cif.service_class and customer_cif.service_class.allow_p2g),
+        "g2p": bool(customer_cif and customer_cif.service_class and customer_cif.service_class.allow_g2p),
+        "loyalty": True,
+        "merchant_scan_pay": True,
+    }
+
+    return {
+        "segments": sorted(set(segments)),
+        "total_balance": str(total_balance),
+        "native_mfe": {
+            "home_widgets": home_widgets,
+            "feature_flags": feature_flags,
+            "theme": prefs.get("theme", "system"),
+            "language": prefs.get("language", "en"),
+            "timezone": prefs.get("timezone", "UTC"),
+            "preferred_currency": prefs.get("preferred_currency", "USD"),
+        },
+        "data_points": data_points,
+    }
+
+
 def mobile_bootstrap(request):
     user = _mobile_current_user(request)
     if user is None:
@@ -1248,6 +1304,90 @@ def mobile_statement(request):
             "data": {
                 "count": len(payload_items),
                 "items": payload_items,
+            },
+        }
+    )
+
+
+@transaction.atomic
+def mobile_personalization(request):
+    user = _mobile_current_user(request)
+    if user is None:
+        return _mobile_json_error(
+            "Authentication required.",
+            status=401,
+            code="unauthorized",
+        )
+    if request.method != "GET":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    customer_cif = CustomerCIF.objects.select_related("service_class").filter(user=user).first()
+    user_ct = ContentType.objects.get_for_model(User)
+    wallets = list(Wallet.objects.filter(holder_type=user_ct, holder_id=user.id))
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": _build_mobile_personalization_payload(
+                user=user,
+                customer_cif=customer_cif,
+                wallets=wallets,
+            ),
+        }
+    )
+
+
+@transaction.atomic
+def mobile_personalization_signals(request):
+    user = _mobile_current_user(request)
+    if user is None:
+        return _mobile_json_error(
+            "Authentication required.",
+            status=401,
+            code="unauthorized",
+        )
+    if request.method != "POST":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        return _mobile_json_error("Invalid payload.", code="invalid_payload")
+
+    incoming_data_points = payload.get("data_points")
+    if not isinstance(incoming_data_points, dict):
+        return _mobile_json_error("data_points must be an object.", code="invalid_data_points")
+
+    prefs = user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {}
+    prefs = dict(prefs)
+    current_points = prefs.get("data_points")
+    if not isinstance(current_points, dict):
+        current_points = {}
+    merged_points = dict(current_points)
+    for key, value in incoming_data_points.items():
+        if isinstance(key, str) and key:
+            merged_points[key[:64]] = value
+    prefs["data_points"] = merged_points
+    prefs["data_points_updated_at"] = timezone.now().isoformat()
+    user.mobile_preferences = prefs
+    user.save(update_fields=["mobile_preferences"])
+
+    log_audit_event(
+        actor=user,
+        event_type="mobile.personalization.signals.update",
+        target_type="User",
+        target_id=str(user.id),
+        context={"keys": sorted(list(merged_points.keys()))[:30]},
+    )
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "data_points": merged_points,
+                "updated_at": prefs["data_points_updated_at"],
             },
         }
     )

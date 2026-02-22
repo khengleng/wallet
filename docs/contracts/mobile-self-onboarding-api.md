@@ -163,6 +163,28 @@ This document defines the mobile-app-facing onboarding endpoints currently avail
 - `profile_picture_url` supports HTTP/HTTPS URL.
 - Preferences are stored per user and returned in bootstrap/profile payloads.
 
+## 4) Personalization Data Points
+
+- Method: `GET`
+- Path: `/api/mobile/personalization/`
+- Purpose: returns native personalization payload (segments, widgets, feature flags, preferences).
+
+- Method: `POST`
+- Path: `/api/mobile/personalization/signals/`
+- Purpose: stores data points collected from mobile usage for personalization.
+
+### Request body
+
+```json
+{
+  "data_points": {
+    "last_screen": "wallet_home",
+    "preferred_entry_point": "scan_pay",
+    "avg_session_seconds": 420
+  }
+}
+```
+
 ## Security Notes
 
 - If CIF status is blocked/closed, self-onboard is rejected with `403`.
