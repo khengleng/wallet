@@ -29,6 +29,7 @@
             <div><strong>Assigned To:</strong> {% if case_obj.assigned_to %}{{ case_obj.assigned_to.username }}{% else %}-{% endif %}</div>
             <div><strong>Created By:</strong> {{ case_obj.created_by.username }}</div>
             <div><strong>Created:</strong> {{ case_obj.created_at|date:"d M Y H:i" }}</div>
+            <div><strong>SLA Due:</strong> {% if case_obj.sla_due_at %}{{ case_obj.sla_due_at|date:"d M Y H:i" }}{% else %}-{% endif %}</div>
             <div><strong>Resolved:</strong> {% if case_obj.resolved_at %}{{ case_obj.resolved_at|date:"d M Y H:i" }}{% else %}-{% endif %}</div>
         </div>
     </div>
@@ -42,6 +43,7 @@
                 <div class="form-group"><label>Status</label><select name="status">{% for value,label in case_status_choices %}<option value="{{ value }}" {% if case_obj.status == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Priority</label><select name="priority">{% for value,label in case_priority_choices %}<option value="{{ value }}" {% if case_obj.priority == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>Assigned To</label><select name="assigned_to"><option value="">-- unassigned --</option>{% for u in users %}<option value="{{ u.id }}" {% if case_obj.assigned_to and case_obj.assigned_to.id == u.id %}selected{% endif %}>{{ u.username }}</option>{% endfor %}</select></div>
+                <div class="form-group"><label>SLA Due At</label><input type="datetime-local" name="sla_due_at" value="{% if case_obj.sla_due_at %}{{ case_obj.sla_due_at|date:'Y-m-d\\TH:i' }}{% endif %}" /></div>
                 <div class="form-group"><label>Title</label><input type="text" name="title" value="{{ case_obj.title }}" required /></div>
                 <div class="form-group" style="grid-column:1/-1;"><label>Description</label><textarea name="description" rows="3">{{ case_obj.description }}</textarea></div>
             </div>

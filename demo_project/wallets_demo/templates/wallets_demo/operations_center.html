@@ -967,6 +967,10 @@
                 <div class="form-group"><label>Merchant (optional)</label><select name="case_merchant_id">
                         <option value="">-- none --</option>{% for m in merchants %}<option value="{{ m.id }}">{{ m.code}} - {{ m.name }}</option>{% endfor %}
                     </select></div>
+                <div class="form-group"><label>SLA Hours (default if Due At empty)</label><input type="number"
+                        name="sla_hours" min="1" value="24" /></div>
+                <div class="form-group"><label>SLA Due At (optional)</label><input type="datetime-local"
+                        name="sla_due_at" /></div>
                 <div class="form-group" style="grid-column:1/-1;"><label>Title</label><input type="text"
                         name="case_title" required /></div>
             </div>
@@ -988,6 +992,7 @@
                         <th>Customer</th>
                         <th>Merchant</th>
                         <th>Assigned</th>
+                        <th>SLA</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -1002,6 +1007,19 @@
                         <td>{% if item.merchant %}{{ item.merchant.code }}{% else %}-{% endif %}</td>
                         <td>{% if item.assigned_to %}{{ item.assigned_to.username }}{% else %}-{% endif %}</td>
                         <td>
+                            {% if item.sla_due_at %}
+                            {% if item.status == "resolved" or item.status == "closed" %}
+                            <span class="badge-active">Closed</span>
+                            {% elif item.sla_due_at < now %}
+                            <span class="badge-blocked">Breach</span> {{ item.sla_due_at|date:"d M H:i" }}
+                            {% else %}
+                            <span class="badge-active">Due {{ item.sla_due_at|date:"d M H:i" }}</span>
+                            {% endif %}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>
                             <form method="post" style="display:flex;gap:0.3rem;">{% csrf_token %}<input type="hidden"
                                     name="form_type" value="case_update" /><input type="hidden" name="case_id"
                                     value="{{ item.id }}" /><select name="status">{% for value,label in case_status_choices %}<option value="{{ value }}" {% if item.status==value %}
@@ -1010,14 +1028,14 @@
                                     <option value="">-- unassigned --</option>{% for u in users %}<option
                                         value="{{ u.id }}" {% if item.assigned_to and item.assigned_to.id==u.id %}
                                         selected{% endif %}>{{ u.username }}</option>{% endfor %}
-                                </select><input type="text" name="note" placeholder="Note"
+                                </select><input type="datetime-local" name="sla_due_at" value="{% if item.sla_due_at %}{{ item.sla_due_at|date:'Y-m-d\\TH:i' }}{% endif %}" style="max-width:170px;" /><input type="text" name="note" placeholder="Note"
                                     style="max-width:100px;" /><button class="btn btn-outline"
                                     type="submit">Update</button></form>
                             <a class="btn btn-outline" href="{% url 'case_detail' item.id %}" style="margin-top:0.35rem;">Open 360</a>
                         </td>
                     </tr>
                     {% empty %}<tr>
-                        <td colspan="8" class="text-muted" style="text-align:center;">No cases yet.</td>
+                        <td colspan="9" class="text-muted" style="text-align:center;">No cases yet.</td>
                     </tr>{% endfor %}
                 </tbody>
             </table>

@@ -35,6 +35,7 @@ from .models import (
     MerchantWebhookEvent,
     MerchantWalletCapability,
     OperationCase,
+    OperationCaseNote,
     ReconciliationBreak,
     ReconciliationRun,
     SettlementException,
@@ -1468,3 +1469,88 @@ class MetricsOpsVisibilityTests(TestCase):
         self.assertIn("wallet_ops_settlement_exceptions_open_count", body)
         self.assertIn("wallet_ops_journal_approvals_pending_count", body)
         self.assertIn("wallet_ops_journal_approvals_sla_breach_count", body)
+
+
+class OperationCaseSLAWorkflowTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.ops = User.objects.create_user(username="case_ops", password="pass12345")
+        self.actor = User.objects.create_user(username="case_actor", password="pass12345")
+        self.customer = User.objects.create_user(username="case_customer", password="pass12345")
+        assign_roles(self.ops, ["operation"])
+        assign_roles(self.actor, ["admin"])
+
+    def test_case_create_sets_sla_due_at_from_hours(self):
+        self.client.login(username="case_ops", password="pass12345")
+        before = timezone.now()
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "case_create",
+                "case_type": OperationCase.TYPE_COMPLAINT,
+                "case_priority": OperationCase.PRIORITY_MEDIUM,
+                "case_customer_id": self.customer.id,
+                "case_title": "SLA create test",
+                "case_description": "check sla",
+                "sla_hours": "4",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        case = OperationCase.objects.latest("id")
+        self.assertIsNotNone(case.sla_due_at)
+        self.assertGreaterEqual(case.sla_due_at, before + timezone.timedelta(hours=3, minutes=59))
+
+    def test_escalate_operation_cases_command(self):
+        case = OperationCase.objects.create(
+            case_no="CASE-SLA-1",
+            case_type=OperationCase.TYPE_COMPLAINT,
+            priority=OperationCase.PRIORITY_HIGH,
+            status=OperationCase.STATUS_OPEN,
+            title="Overdue case",
+            customer=self.customer,
+            created_by=self.ops,
+            assigned_to=self.ops,
+            sla_due_at=timezone.now() - timezone.timedelta(hours=2),
+        )
+        out = io.StringIO()
+        call_command(
+            "escalate_operation_cases",
+            actor_username=self.actor.username,
+            stdout=out,
+        )
+        output = out.getvalue()
+        self.assertIn("Escalated operation cases: 1", output)
+        case.refresh_from_db()
+        self.assertEqual(case.status, OperationCase.STATUS_ESCALATED)
+        self.assertTrue(
+            OperationCaseNote.objects.filter(case=case, note__icontains="Auto-escalated case").exists()
+        )
+        self.assertTrue(
+            TransactionMonitoringAlert.objects.filter(alert_type="case_sla_breach", case=case).exists()
+        )
+
+    def test_escalate_operation_cases_dry_run(self):
+        case = OperationCase.objects.create(
+            case_no="CASE-SLA-2",
+            case_type=OperationCase.TYPE_COMPLAINT,
+            priority=OperationCase.PRIORITY_LOW,
+            status=OperationCase.STATUS_OPEN,
+            title="Dry run overdue",
+            customer=self.customer,
+            created_by=self.ops,
+            assigned_to=self.ops,
+            sla_due_at=timezone.now() - timezone.timedelta(hours=2),
+        )
+        out = io.StringIO()
+        call_command(
+            "escalate_operation_cases",
+            actor_username=self.actor.username,
+            dry_run=True,
+            stdout=out,
+        )
+        output = out.getvalue()
+        self.assertIn("dry_run=True", output)
+        case.refresh_from_db()
+        self.assertEqual(case.status, OperationCase.STATUS_OPEN)
+        self.assertFalse(TransactionMonitoringAlert.objects.filter(case=case).exists())

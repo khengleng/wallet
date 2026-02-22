@@ -36,7 +36,11 @@ This runbook defines the release gate for business operations services.
    - `python manage.py automate_settlements --actor-username <ops_user> --create-payouts`
 2. Dispute SLA escalation
    - `python manage.py escalate_refund_disputes --actor-username <ops_user>`
-3. Accounting period governance
+3. Case SLA escalation
+   - `python manage.py escalate_operation_cases --actor-username <ops_user>`
+   - Optional fallback SLA for legacy cases without `sla_due_at`:
+   - `python manage.py escalate_operation_cases --actor-username <ops_user> --fallback-sla-hours 24`
+4. Accounting period governance
    - Close:
    - `python manage.py manage_accounting_period --actor-username <finance_user> --period-start YYYY-MM-DD --period-end YYYY-MM-DD --currency USD --action close`
    - Re-open:

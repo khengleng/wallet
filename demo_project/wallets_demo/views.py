@@ -802,7 +802,7 @@ def metrics(request):
         f"wallet_ops_alerts_open_high_count {TransactionMonitoringAlert.objects.filter(status=TransactionMonitoringAlert.STATUS_OPEN, severity='high').count()}",
         "# HELP wallet_ops_cases_sla_breach_count Open operation cases older than SLA threshold.",
         "# TYPE wallet_ops_cases_sla_breach_count gauge",
-        f"wallet_ops_cases_sla_breach_count {OperationCase.objects.filter(status__in=[OperationCase.STATUS_OPEN, OperationCase.STATUS_IN_PROGRESS, OperationCase.STATUS_ESCALATED], created_at__lt=timezone.now()-timedelta(hours=int(getattr(settings, 'OPS_CASE_SLA_HOURS', 24)))).count()}",
+        f"wallet_ops_cases_sla_breach_count {OperationCase.objects.filter(status__in=[OperationCase.STATUS_OPEN, OperationCase.STATUS_IN_PROGRESS, OperationCase.STATUS_ESCALATED]).filter(Q(sla_due_at__isnull=False, sla_due_at__lt=timezone.now()) | Q(sla_due_at__isnull=True, created_at__lt=timezone.now()-timedelta(hours=int(getattr(settings, 'OPS_CASE_SLA_HOURS', 24))))).count()}",
     ]
     return HttpResponse("\n".join(lines) + "\n", content_type="text/plain; version=0.0.4")
 
@@ -1462,6 +1462,20 @@ def _parse_iso_date(raw: str | None, *, default: date) -> date:
         return date.fromisoformat(value)
     except ValueError as exc:
         raise ValidationError("Invalid date format. Use YYYY-MM-DD.") from exc
+
+
+def _parse_optional_datetime(raw: str | None):
+    value = (raw or "").strip()
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValidationError("Invalid datetime format. Use YYYY-MM-DDTHH:MM or ISO datetime.") from exc
+    if timezone.is_naive(parsed):
+        return timezone.make_aware(parsed)
+    return parsed.astimezone(timezone.get_current_timezone())
 
 
 def _approval_required_checker_role(
@@ -3519,6 +3533,11 @@ def operations_center(request):
                 title = (request.POST.get("case_title") or "").strip()
                 if title == "":
                     raise ValidationError("Case title is required.")
+                sla_due_at = _parse_optional_datetime(request.POST.get("sla_due_at"))
+                if sla_due_at is None:
+                    default_sla_hours = int(getattr(settings, "OPS_CASE_SLA_HOURS", 24))
+                    sla_hours = int(request.POST.get("sla_hours") or default_sla_hours)
+                    sla_due_at = timezone.now() + timedelta(hours=max(1, sla_hours))
                 case = OperationCase.objects.create(
                     case_no=_new_case_no(),
                     case_type=(request.POST.get("case_type") or OperationCase.TYPE_COMPLAINT).strip(),
@@ -3529,6 +3548,7 @@ def operations_center(request):
                     merchant=merchant,
                     assigned_to=request.user,
                     created_by=request.user,
+                    sla_due_at=sla_due_at,
                 )
                 _audit(
                     request,
@@ -3544,6 +3564,7 @@ def operations_center(request):
                         "case_no": case.case_no,
                         "case_type": case.case_type,
                         "priority": case.priority,
+                        "sla_due_at": case.sla_due_at.isoformat() if case.sla_due_at else "",
                     },
                 )
                 messages.success(request, f"Case {case.case_no} created.")
@@ -3589,9 +3610,14 @@ def operations_center(request):
                 case.status = (request.POST.get("status") or case.status).strip()
                 assigned_user_id = request.POST.get("assigned_to")
                 case.assigned_to = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
+                sla_due_at_raw = request.POST.get("sla_due_at")
+                if sla_due_at_raw is not None:
+                    case.sla_due_at = _parse_optional_datetime(sla_due_at_raw)
                 if case.status in (OperationCase.STATUS_RESOLVED, OperationCase.STATUS_CLOSED):
                     case.resolved_at = timezone.now()
-                case.save(update_fields=["status", "assigned_to", "resolved_at", "updated_at"])
+                case.save(
+                    update_fields=["status", "assigned_to", "sla_due_at", "resolved_at", "updated_at"]
+                )
                 note_text = (request.POST.get("note") or "").strip()
                 if note_text:
                     OperationCaseNote.objects.create(
@@ -3981,6 +4007,7 @@ def operations_center(request):
             "case_priority_choices": OperationCase.PRIORITY_CHOICES,
             "case_status_choices": OperationCase.STATUS_CHOICES,
             "event_type_choices": MerchantLoyaltyEvent.TYPE_CHOICES,
+            "now": timezone.now(),
         },
     )
 
@@ -5454,6 +5481,9 @@ def case_detail(request, case_id: int):
                 case.description = (request.POST.get("description") or case.description).strip()
                 assigned_user_id = request.POST.get("assigned_to")
                 case.assigned_to = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
+                sla_due_at_raw = request.POST.get("sla_due_at")
+                if sla_due_at_raw is not None:
+                    case.sla_due_at = _parse_optional_datetime(sla_due_at_raw)
                 if case.status in (OperationCase.STATUS_RESOLVED, OperationCase.STATUS_CLOSED):
                     case.resolved_at = timezone.now()
                 case.save(
@@ -5463,6 +5493,7 @@ def case_detail(request, case_id: int):
                         "title",
                         "description",
                         "assigned_to",
+                        "sla_due_at",
                         "resolved_at",
                         "updated_at",
                     ]
