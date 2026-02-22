@@ -332,6 +332,39 @@ LOGIN_LOCKOUT_DURATION_MINUTES = int(
 )
 LOGIN_LOCKOUT_USE_CACHE = os.getenv("LOGIN_LOCKOUT_USE_CACHE", "True").lower() == "true"
 
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+    },
+    "loggers": {
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+        "wallets_demo": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+}
+
 if IS_PRODUCTION and not CSRF_TRUSTED_ORIGINS and not IS_BUILD:
     raise ImproperlyConfigured(
         "CSRF_TRUSTED_ORIGINS must be set in production."

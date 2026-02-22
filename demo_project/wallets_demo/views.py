@@ -1032,170 +1032,177 @@ def treasury_dashboard(request):
     if not user_has_any_role(request.user, BACKOFFICE_ROLES):
         raise PermissionDenied("You do not have access to treasury.")
 
-    if request.method == "POST":
-        form_type = (request.POST.get("form_type") or "treasury_transfer_request").strip().lower()
-        if form_type == "treasury_account_upsert":
-            _require_role_or_perm(
-                request.user,
-                roles=("super_admin", "admin", "treasury"),
-            )
-            try:
-                account_id = (request.POST.get("account_id") or "").strip()
-                name = (request.POST.get("name") or "").strip()
-                if not name:
-                    raise ValidationError("Treasury account name is required.")
-                currency = _normalize_currency(request.POST.get("currency"))
-                balance_raw = (request.POST.get("balance") or "0").strip()
+    try:
+        if request.method == "POST":
+            form_type = (request.POST.get("form_type") or "treasury_transfer_request").strip().lower()
+            if form_type == "treasury_account_upsert":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "treasury"),
+                )
                 try:
-                    balance = Decimal(balance_raw)
-                except (InvalidOperation, TypeError):
-                    raise ValidationError("Invalid opening balance.")
-                if balance < 0:
-                    raise ValidationError("Opening balance cannot be negative.")
+                    account_id = (request.POST.get("account_id") or "").strip()
+                    name = (request.POST.get("name") or "").strip()
+                    if not name:
+                        raise ValidationError("Treasury account name is required.")
+                    currency = _normalize_currency(request.POST.get("currency"))
+                    balance_raw = (request.POST.get("balance") or "0").strip()
+                    try:
+                        balance = Decimal(balance_raw)
+                    except (InvalidOperation, TypeError):
+                        raise ValidationError("Invalid opening balance.")
+                    if balance < 0:
+                        raise ValidationError("Opening balance cannot be negative.")
 
-                if account_id:
-                    account = TreasuryAccount.objects.get(id=account_id)
-                    account.name = name
-                    account.currency = currency
-                    account.balance = balance
-                    account.save(update_fields=["name", "currency", "balance", "updated_at"])
-                    messages.success(request, f"Treasury account {account.name} updated.")
-                else:
-                    account = TreasuryAccount.objects.create(
-                        name=name,
-                        currency=currency,
-                        balance=balance,
-                        is_active=True,
+                    if account_id:
+                        account = TreasuryAccount.objects.get(id=account_id)
+                        account.name = name
+                        account.currency = currency
+                        account.balance = balance
+                        account.save(update_fields=["name", "currency", "balance", "updated_at"])
+                        messages.success(request, f"Treasury account {account.name} updated.")
+                    else:
+                        account = TreasuryAccount.objects.create(
+                            name=name,
+                            currency=currency,
+                            balance=balance,
+                            is_active=True,
+                        )
+                        messages.success(request, f"Treasury account {account.name} created.")
+                    return redirect("treasury_dashboard")
+                except Exception as exc:
+                    messages.error(request, f"Treasury account save failed: {exc}")
+
+            if form_type == "treasury_account_toggle":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "treasury"),
+                )
+                try:
+                    account = TreasuryAccount.objects.get(id=request.POST.get("account_id"))
+                    action = (request.POST.get("action") or "").strip().lower()
+                    if action == "activate":
+                        account.is_active = True
+                    elif action == "deactivate":
+                        account.is_active = False
+                    else:
+                        raise ValidationError("Invalid account action.")
+                    account.save(update_fields=["is_active", "updated_at"])
+                    messages.success(
+                        request,
+                        f"Treasury account {account.name} set to {'active' if account.is_active else 'inactive'}.",
                     )
-                    messages.success(request, f"Treasury account {account.name} created.")
-                return redirect("treasury_dashboard")
-            except Exception as exc:
-                messages.error(request, f"Treasury account save failed: {exc}")
+                    return redirect("treasury_dashboard")
+                except Exception as exc:
+                    messages.error(request, f"Treasury account status update failed: {exc}")
 
-        if form_type == "treasury_account_toggle":
-            _require_role_or_perm(
-                request.user,
-                roles=("super_admin", "admin", "treasury"),
-            )
-            try:
-                account = TreasuryAccount.objects.get(id=request.POST.get("account_id"))
-                action = (request.POST.get("action") or "").strip().lower()
-                if action == "activate":
-                    account.is_active = True
-                elif action == "deactivate":
-                    account.is_active = False
-                else:
-                    raise ValidationError("Invalid account action.")
-                account.save(update_fields=["is_active", "updated_at"])
-                messages.success(
-                    request,
-                    f"Treasury account {account.name} set to {'active' if account.is_active else 'inactive'}.",
+            if form_type == "treasury_policy_update":
+                _require_role_or_perm(
+                    request.user,
+                    roles=("super_admin", "admin", "treasury"),
                 )
-                return redirect("treasury_dashboard")
-            except Exception as exc:
-                messages.error(request, f"Treasury account status update failed: {exc}")
+                try:
+                    policy = TreasuryPolicy.get_solo()
+                    policy.single_txn_limit = _parse_amount(request.POST.get("single_txn_limit"))
+                    policy.daily_outflow_limit = _parse_amount(request.POST.get("daily_outflow_limit"))
+                    policy.require_super_admin_above = _parse_amount(
+                        request.POST.get("require_super_admin_above")
+                    )
+                    policy.currency = _normalize_currency(request.POST.get("currency"))
+                    policy.updated_by = request.user
+                    policy.full_clean()
+                    policy.save()
+                    messages.success(request, "Treasury policy updated.")
+                    return redirect("treasury_dashboard")
+                except Exception as exc:
+                    messages.error(request, f"Treasury policy update failed: {exc}")
 
-        if form_type == "treasury_policy_update":
-            _require_role_or_perm(
-                request.user,
-                roles=("super_admin", "admin", "treasury"),
-            )
+            if not user_has_any_role(request.user, MAKER_ROLES):
+                raise PermissionDenied("You do not have maker role for treasury requests.")
             try:
+                from_account = TreasuryAccount.objects.get(id=request.POST.get("from_account"))
+                to_account = TreasuryAccount.objects.get(id=request.POST.get("to_account"))
+                amount = _parse_amount(request.POST.get("amount"))
+                reason = request.POST.get("reason", "")
+                maker_note = request.POST.get("maker_note", "")
                 policy = TreasuryPolicy.get_solo()
-                policy.single_txn_limit = _parse_amount(request.POST.get("single_txn_limit"))
-                policy.daily_outflow_limit = _parse_amount(request.POST.get("daily_outflow_limit"))
-                policy.require_super_admin_above = _parse_amount(
-                    request.POST.get("require_super_admin_above")
+                if from_account.id == to_account.id:
+                    raise ValidationError("From and To treasury accounts must be different.")
+                if from_account.currency != to_account.currency:
+                    raise ValidationError("Cross-currency treasury transfer is not supported.")
+                if amount > policy.single_txn_limit:
+                    raise ValidationError(
+                        f"Amount exceeds treasury single transaction limit ({policy.single_txn_limit})."
+                    )
+                today = timezone.localdate()
+                day_outflow = (
+                    TreasuryTransferRequest.objects.filter(
+                        from_account=from_account,
+                        created_at__date=today,
+                        status__in=[
+                            TreasuryTransferRequest.STATUS_PENDING,
+                            TreasuryTransferRequest.STATUS_APPROVED,
+                        ],
+                    ).aggregate(total=models.Sum("amount")).get("total")
+                    or Decimal("0")
                 )
-                policy.currency = _normalize_currency(request.POST.get("currency"))
-                policy.updated_by = request.user
-                policy.full_clean()
-                policy.save()
-                messages.success(request, "Treasury policy updated.")
+                if day_outflow + amount > policy.daily_outflow_limit:
+                    raise ValidationError(
+                        f"Daily treasury outflow limit exceeded ({policy.daily_outflow_limit})."
+                    )
+                required_checker_role = ""
+                if amount >= policy.require_super_admin_above:
+                    required_checker_role = "super_admin"
+                matrix_required_role = _approval_required_checker_role(
+                    APPROVAL_WORKFLOW_TREASURY,
+                    currency=from_account.currency,
+                    amount=amount,
+                )
+                if matrix_required_role:
+                    required_checker_role = matrix_required_role
+                req = TreasuryTransferRequest.objects.create(
+                    maker=request.user,
+                    from_account=from_account,
+                    to_account=to_account,
+                    amount=amount,
+                    reason=reason,
+                    required_checker_role=required_checker_role,
+                    maker_note=maker_note,
+                )
+                messages.success(
+                    request, f"Treasury transfer request #{req.id} submitted for approval."
+                )
                 return redirect("treasury_dashboard")
             except Exception as exc:
-                messages.error(request, f"Treasury policy update failed: {exc}")
+                messages.error(request, f"Treasury request failed: {exc}")
 
-        if not user_has_any_role(request.user, MAKER_ROLES):
-            raise PermissionDenied("You do not have maker role for treasury requests.")
-        try:
-            from_account = TreasuryAccount.objects.get(id=request.POST.get("from_account"))
-            to_account = TreasuryAccount.objects.get(id=request.POST.get("to_account"))
-            amount = _parse_amount(request.POST.get("amount"))
-            reason = request.POST.get("reason", "")
-            maker_note = request.POST.get("maker_note", "")
-            policy = TreasuryPolicy.get_solo()
-            if from_account.id == to_account.id:
-                raise ValidationError("From and To treasury accounts must be different.")
-            if from_account.currency != to_account.currency:
-                raise ValidationError("Cross-currency treasury transfer is not supported.")
-            if amount > policy.single_txn_limit:
-                raise ValidationError(
-                    f"Amount exceeds treasury single transaction limit ({policy.single_txn_limit})."
-                )
-            today = timezone.localdate()
-            day_outflow = (
-                TreasuryTransferRequest.objects.filter(
-                    from_account=from_account,
-                    created_at__date=today,
-                    status__in=[
-                        TreasuryTransferRequest.STATUS_PENDING,
-                        TreasuryTransferRequest.STATUS_APPROVED,
-                    ],
-                ).aggregate(total=models.Sum("amount")).get("total")
-                or Decimal("0")
-            )
-            if day_outflow + amount > policy.daily_outflow_limit:
-                raise ValidationError(
-                    f"Daily treasury outflow limit exceeded ({policy.daily_outflow_limit})."
-                )
-            required_checker_role = ""
-            if amount >= policy.require_super_admin_above:
-                required_checker_role = "super_admin"
-            matrix_required_role = _approval_required_checker_role(
-                APPROVAL_WORKFLOW_TREASURY,
-                currency=from_account.currency,
-                amount=amount,
-            )
-            if matrix_required_role:
-                required_checker_role = matrix_required_role
-            req = TreasuryTransferRequest.objects.create(
-                maker=request.user,
-                from_account=from_account,
-                to_account=to_account,
-                amount=amount,
-                reason=reason,
-                required_checker_role=required_checker_role,
-                maker_note=maker_note,
-            )
-            messages.success(
-                request, f"Treasury transfer request #{req.id} submitted for approval."
-            )
-            return redirect("treasury_dashboard")
-        except Exception as exc:
-            messages.error(request, f"Treasury request failed: {exc}")
-
-    accounts = TreasuryAccount.objects.filter(is_active=True).order_by("name")
-    all_accounts = TreasuryAccount.objects.order_by("name")
-    treasury_policy = TreasuryPolicy.get_solo()
-    pending_requests = TreasuryTransferRequest.objects.filter(
-        status=TreasuryTransferRequest.STATUS_PENDING
-    )[:25]
-    my_requests = TreasuryTransferRequest.objects.filter(maker=request.user)[:25]
-    return render(
-        request,
-        "wallets_demo/treasury.html",
-        {
-            "accounts": accounts,
-            "all_accounts": all_accounts,
-            "pending_requests": pending_requests,
-            "my_requests": my_requests,
-            "can_make_treasury_request": user_has_any_role(request.user, MAKER_ROLES),
-            "can_check_treasury_request": user_has_any_role(request.user, CHECKER_ROLES),
-            "treasury_policy": treasury_policy,
-            "supported_currencies": _supported_currencies(),
-        },
-    )
+        accounts = TreasuryAccount.objects.filter(is_active=True).order_by("name")
+        all_accounts = TreasuryAccount.objects.order_by("name")
+        treasury_policy = TreasuryPolicy.get_solo()
+        pending_requests = TreasuryTransferRequest.objects.filter(
+            status=TreasuryTransferRequest.STATUS_PENDING
+        )[:25]
+        my_requests = TreasuryTransferRequest.objects.filter(maker=request.user)[:25]
+        return render(
+            request,
+            "wallets_demo/treasury.html",
+            {
+                "accounts": accounts,
+                "all_accounts": all_accounts,
+                "pending_requests": pending_requests,
+                "my_requests": my_requests,
+                "can_make_treasury_request": user_has_any_role(request.user, MAKER_ROLES),
+                "can_check_treasury_request": user_has_any_role(request.user, CHECKER_ROLES),
+                "treasury_policy": treasury_policy,
+                "supported_currencies": _supported_currencies(),
+            },
+        )
+    except PermissionDenied:
+        raise
+    except Exception:
+        logger.exception("Treasury dashboard render failed for user_id=%s", request.user.id)
+        messages.error(request, "Treasury page encountered an error. Please retry in a few seconds.")
+        return redirect("backoffice")
 
 
 @login_required
