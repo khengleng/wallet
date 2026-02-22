@@ -2,6 +2,7 @@
 
 ## Service Boundaries
 - `identity-service`: authentication, MFA, device/session management, account recovery.
+- `mobile-bff-service`: mobile channel backend-for-frontend (bootstrap/onboarding/balance/statement APIs).
 - `wallet-ledger-service`: immutable ledger, balances, transfers, refunds, idempotency.
 - `risk-service`: real-time risk scoring, velocity checks, anomaly flags, step-up requirements.
 - `notification-service`: email/SMS/push outbox delivery.

@@ -865,9 +865,48 @@ def _mobile_json_error(message: str, *, status: int = 400, code: str = "bad_requ
 
 def _mobile_current_user(request) -> User | None:
     user = getattr(request, "user", None)
-    if user is None or not user.is_authenticated:
+    if user is not None and user.is_authenticated:
+        return user
+
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
         return None
-    return user
+    access_token = authorization.split(" ", 1)[1].strip()
+    if not access_token:
+        return None
+    try:
+        claims = introspect_access_token(access_token)
+    except Exception:
+        claims = {}
+    if claims and claims.get("active") is False:
+        return None
+    if not claims:
+        try:
+            claims = decode_access_token_claims(access_token)
+        except Exception:
+            claims = {}
+    if not isinstance(claims, dict):
+        return None
+
+    email = str(claims.get("email", "")).strip().lower()
+    preferred = str(claims.get("preferred_username", "")).strip()
+    subject = str(claims.get("sub", "")).strip()
+
+    resolved_user = None
+    if email:
+        resolved_user = User.objects.filter(email__iexact=email).first()
+    if resolved_user is None and preferred:
+        resolved_user = User.objects.filter(username=preferred).first()
+    if resolved_user is None and subject:
+        resolved_user = User.objects.filter(username=subject).first()
+    if resolved_user is None:
+        try:
+            resolved_user = _find_or_create_user_from_claims(claims)
+        except Exception:
+            return None
+    if resolved_user is None or not resolved_user.is_active:
+        return None
+    return resolved_user
 
 
 def _default_mobile_customer_service_class() -> ServiceClassPolicy | None:
@@ -990,6 +1029,72 @@ def mobile_bootstrap(request):
                 if customer_cif
                 else None,
                 "wallets": wallets,
+            },
+        }
+    )
+
+
+def mobile_statement(request):
+    user = _mobile_current_user(request)
+    if user is None:
+        return _mobile_json_error(
+            "Authentication required.",
+            status=401,
+            code="unauthorized",
+        )
+    if request.method != "GET":
+        return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+    limit_raw = (request.GET.get("limit") or "50").strip()
+    try:
+        limit = int(limit_raw)
+    except Exception:
+        limit = 50
+    limit = max(1, min(limit, 200))
+    wallet_slug = (request.GET.get("wallet_slug") or "").strip()
+    currency = (request.GET.get("currency") or "").strip().upper()
+
+    user_ct = ContentType.objects.get_for_model(User)
+    wallets_qs = Wallet.objects.filter(holder_type=user_ct, holder_id=user.id)
+    if wallet_slug:
+        wallets_qs = wallets_qs.filter(slug=wallet_slug)
+    wallets = list(wallets_qs)
+    wallet_ids = [wallet.id for wallet in wallets]
+    wallet_by_id = {wallet.id: wallet for wallet in wallets}
+
+    txns_qs = Transaction.objects.filter(wallet_id__in=wallet_ids).order_by("-created_at")
+    payload_items: list[dict] = []
+    for txn in txns_qs[:limit]:
+        wallet = wallet_by_id.get(txn.wallet_id)
+        if wallet is None:
+            continue
+        wallet_meta = _wallet_meta(wallet)
+        txn_currency = str(wallet_meta.get("currency", "")).upper()
+        if currency and txn_currency != currency:
+            continue
+        txn_meta = txn.meta if isinstance(txn.meta, dict) else {}
+        payload_items.append(
+            {
+                "transaction_uuid": str(txn.uuid),
+                "wallet_slug": wallet.slug,
+                "wallet_id": wallet_meta.get("wallet_id", ""),
+                "currency": txn_currency,
+                "type": txn.type,
+                "status": txn.status,
+                "amount": str(txn.amount),
+                "confirmed": bool(txn.confirmed),
+                "transaction_id": str(txn_meta.get("transaction_id", "")),
+                "service_type": str(txn_meta.get("transaction_service_type", "")),
+                "created_at": txn.created_at.isoformat(),
+            }
+        )
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "count": len(payload_items),
+                "items": payload_items,
             },
         }
     )
