@@ -298,6 +298,150 @@ class AccountingOpsWorkbenchTests(TestCase):
         self.assertIsNotNone(approval)
         self.assertEqual(approval.status, JournalEntryApproval.STATUS_PENDING)
 
+    def test_checker_reject_requires_note(self):
+        entry = self._create_draft_entry()
+        approval = JournalEntryApproval.objects.create(
+            entry=entry,
+            request_type=JournalEntryApproval.TYPE_POST,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="review",
+        )
+        self.client.login(username="checker_ops", password="pass12345")
+        response = self.client.post(
+            reverse("accounting_dashboard"),
+            {
+                "form_type": "journal_approval_decision",
+                "approval_id": approval.id,
+                "decision": "reject",
+                "checker_note": "",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        approval.refresh_from_db()
+        self.assertEqual(approval.status, JournalEntryApproval.STATUS_PENDING)
+
+    def test_maker_cannot_decide_own_request(self):
+        entry = self._create_draft_entry()
+        approval = JournalEntryApproval.objects.create(
+            entry=entry,
+            request_type=JournalEntryApproval.TYPE_POST,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="maker cannot self approve",
+        )
+        self.client.login(username="finance_ops", password="pass12345")
+        response = self.client.post(
+            reverse("accounting_dashboard"),
+            {
+                "form_type": "journal_approval_decision",
+                "approval_id": approval.id,
+                "decision": "approve",
+                "checker_note": "self",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        approval.refresh_from_db()
+        self.assertEqual(approval.status, JournalEntryApproval.STATUS_PENDING)
+
+    def test_reclass_amount_cannot_exceed_source_exposure(self):
+        posted = self._create_draft_entry()
+        posted.post(self.checker)
+        self.client.login(username="finance_ops", password="pass12345")
+        response = self.client.post(
+            reverse("accounting_dashboard"),
+            {
+                "form_type": "journal_reclass_request",
+                "source_entry_id": posted.id,
+                "from_account_id": self.cash.id,
+                "to_account_id": self.liability.id,
+                "amount": "999.00",
+                "reason": "invalid large amount",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            JournalEntryApproval.objects.filter(
+                source_entry=posted, request_type=JournalEntryApproval.TYPE_RECLASS
+            ).exists()
+        )
+
+    def test_export_approval_queue_csv(self):
+        entry = self._create_draft_entry()
+        JournalEntryApproval.objects.create(
+            entry=entry,
+            request_type=JournalEntryApproval.TYPE_POST,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="export me",
+        )
+        self.client.login(username="finance_ops", password="pass12345")
+        response = self.client.post(
+            reverse("accounting_dashboard"),
+            {
+                "form_type": "journal_export",
+                "export_type": "approval_queue",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response["Content-Type"].startswith("text/csv"))
+        body = response.content.decode("utf-8")
+        self.assertIn("entry_no,request_type,status", body)
+        self.assertIn("JE-OPS-1", body)
+
+    def test_non_accounting_user_forbidden(self):
+        outsider = User.objects.create_user(username="outsider_acc", password="pass12345")
+        self.client.login(username="outsider_acc", password="pass12345")
+        response = self.client.get(reverse("accounting_dashboard"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_queue_filter_by_type(self):
+        post_entry = self._create_draft_entry()
+        JournalEntryApproval.objects.create(
+            entry=post_entry,
+            request_type=JournalEntryApproval.TYPE_POST,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="post",
+        )
+        source_posted = JournalEntry.objects.create(
+            entry_no="JE-OPS-2",
+            created_by=self.finance,
+            description="Posted source",
+            currency="USD",
+        )
+        JournalLine.objects.create(entry=source_posted, account=self.cash, debit="30.00", credit="0")
+        JournalLine.objects.create(entry=source_posted, account=self.liability, debit="0", credit="30.00")
+        source_posted.post(self.checker)
+        reversal_entry = JournalEntry.objects.create(
+            entry_no="JE-OPS-3",
+            created_by=self.finance,
+            description="Reversal draft",
+            currency="USD",
+        )
+        JournalLine.objects.create(entry=reversal_entry, account=self.cash, debit="0", credit="30.00")
+        JournalLine.objects.create(entry=reversal_entry, account=self.liability, debit="30.00", credit="0")
+        JournalEntryApproval.objects.create(
+            entry=reversal_entry,
+            source_entry=source_posted,
+            request_type=JournalEntryApproval.TYPE_REVERSAL,
+            status=JournalEntryApproval.STATUS_PENDING,
+            maker=self.finance,
+            reason="reversal",
+        )
+
+        self.client.login(username="checker_ops", password="pass12345")
+        response = self.client.get(
+            reverse("accounting_dashboard"),
+            {"queue_type": "reversal", "queue_status": "pending"},
+        )
+        self.assertEqual(response.status_code, 200)
+        queue_page = response.context["approval_queue"]
+        self.assertGreaterEqual(len(queue_page.object_list), 1)
+        self.assertTrue(
+            all(req.request_type == JournalEntryApproval.TYPE_REVERSAL for req in queue_page.object_list)
+        )
+
 
 class OpsWorkQueueAccountingTests(TestCase):
     def setUp(self):

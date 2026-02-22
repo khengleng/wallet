@@ -1782,6 +1782,8 @@ def accounting_dashboard(request):
                 checker_note = (request.POST.get("checker_note") or "").strip()
                 if decision not in {"approve", "reject"}:
                     raise ValidationError("Invalid approval decision.")
+                if decision == "reject" and not checker_note:
+                    raise ValidationError("Checker note is required when rejecting a request.")
                 if decision == "approve":
                     approval.entry.post(request.user)
                     approval.status = JournalEntryApproval.STATUS_APPROVED
@@ -1859,6 +1861,24 @@ def accounting_dashboard(request):
                 )
                 if from_account.id == to_account.id:
                     raise ValidationError("From and To account cannot be the same.")
+                source_exposure = (
+                    source_entry.lines.filter(account=from_account).aggregate(
+                        debit=models.Sum("debit"),
+                        credit=models.Sum("credit"),
+                    )
+                )
+                available_amount = (
+                    (source_exposure.get("debit") or Decimal("0"))
+                    + (source_exposure.get("credit") or Decimal("0"))
+                )
+                if available_amount <= Decimal("0"):
+                    raise ValidationError(
+                        f"From account {from_account.code} does not exist in source entry {source_entry.entry_no}."
+                    )
+                if amount > available_amount:
+                    raise ValidationError(
+                        f"Reclass amount exceeds source account exposure ({available_amount})."
+                    )
                 reason = (request.POST.get("reason") or "").strip()
                 if not reason:
                     raise ValidationError("Reclass reason is required.")
@@ -1999,15 +2019,49 @@ def accounting_dashboard(request):
         .select_related("created_by", "posted_by")
         .order_by("-posted_at")[:120]
     )
-    approval_queue = (
-        JournalEntryApproval.objects.filter(status=JournalEntryApproval.STATUS_PENDING)
-        .select_related("entry", "maker", "source_entry")
-        .order_by("-created_at")[:80]
-    )
-    approval_history = (
-        JournalEntryApproval.objects.select_related("entry", "maker", "checker", "source_entry")
-        .order_by("-created_at")[:120]
-    )
+    queue_type = (request.GET.get("queue_type") or "all").strip().lower()
+    queue_status = (request.GET.get("queue_status") or JournalEntryApproval.STATUS_PENDING).strip().lower()
+    history_type = (request.GET.get("history_type") or "all").strip().lower()
+    history_status = (request.GET.get("history_status") or "all").strip().lower()
+    allowed_types = {
+        "all",
+        JournalEntryApproval.TYPE_POST,
+        JournalEntryApproval.TYPE_REVERSAL,
+        JournalEntryApproval.TYPE_RECLASS,
+    }
+    allowed_statuses = {
+        "all",
+        JournalEntryApproval.STATUS_PENDING,
+        JournalEntryApproval.STATUS_APPROVED,
+        JournalEntryApproval.STATUS_REJECTED,
+    }
+    if queue_type not in allowed_types:
+        queue_type = "all"
+    if queue_status not in allowed_statuses:
+        queue_status = JournalEntryApproval.STATUS_PENDING
+    if history_type not in allowed_types:
+        history_type = "all"
+    if history_status not in allowed_statuses:
+        history_status = "all"
+
+    approval_queue_qs = JournalEntryApproval.objects.select_related(
+        "entry", "maker", "source_entry"
+    ).order_by("-created_at")
+    if queue_type != "all":
+        approval_queue_qs = approval_queue_qs.filter(request_type=queue_type)
+    if queue_status != "all":
+        approval_queue_qs = approval_queue_qs.filter(status=queue_status)
+
+    approval_history_qs = JournalEntryApproval.objects.select_related(
+        "entry", "maker", "checker", "source_entry"
+    ).order_by("-created_at")
+    if history_type != "all":
+        approval_history_qs = approval_history_qs.filter(request_type=history_type)
+    if history_status != "all":
+        approval_history_qs = approval_history_qs.filter(status=history_status)
+
+    approval_queue = Paginator(approval_queue_qs, 25).get_page(request.GET.get("queue_page") or 1)
+    approval_history = Paginator(approval_history_qs, 30).get_page(request.GET.get("history_page") or 1)
 
     totals: dict[int, dict[str, Decimal]] = {}
     for line in JournalLine.objects.filter(entry__status=JournalEntry.STATUS_POSTED).select_related("account"):
@@ -2049,6 +2103,22 @@ def accounting_dashboard(request):
             "can_create_ops_request": user_has_any_role(request.user, ("finance", "treasury", "admin", "super_admin")),
             "approval_queue": approval_queue,
             "approval_history": approval_history,
+            "approval_type_choices": (
+                ("all", "All"),
+                (JournalEntryApproval.TYPE_POST, "Post"),
+                (JournalEntryApproval.TYPE_REVERSAL, "Reversal"),
+                (JournalEntryApproval.TYPE_RECLASS, "Reclass"),
+            ),
+            "approval_status_choices": (
+                ("all", "All"),
+                (JournalEntryApproval.STATUS_PENDING, "Pending"),
+                (JournalEntryApproval.STATUS_APPROVED, "Approved"),
+                (JournalEntryApproval.STATUS_REJECTED, "Rejected"),
+            ),
+            "queue_type": queue_type,
+            "queue_status": queue_status,
+            "history_type": history_type,
+            "history_status": history_status,
             "supported_currencies": _supported_currencies(),
             "fx_rates": FxRate.objects.filter(is_active=True).order_by("-effective_at")[:50],
             "accounting_periods": AccountingPeriodClose.objects.select_related("closed_by").order_by("-period_start")[:60],
