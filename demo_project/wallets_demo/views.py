@@ -81,6 +81,7 @@ from .models import (
     SanctionScreeningRecord,
     SettlementPayout,
     TreasuryAccount,
+    TreasuryPolicy,
     TreasuryTransferRequest,
     TransactionMonitoringAlert,
     User,
@@ -1006,12 +1007,41 @@ def treasury_dashboard(request):
             amount = _parse_amount(request.POST.get("amount"))
             reason = request.POST.get("reason", "")
             maker_note = request.POST.get("maker_note", "")
+            policy = TreasuryPolicy.get_solo()
+            if from_account.id == to_account.id:
+                raise ValidationError("From and To treasury accounts must be different.")
+            if from_account.currency != to_account.currency:
+                raise ValidationError("Cross-currency treasury transfer is not supported.")
+            if amount > policy.single_txn_limit:
+                raise ValidationError(
+                    f"Amount exceeds treasury single transaction limit ({policy.single_txn_limit})."
+                )
+            today = timezone.localdate()
+            day_outflow = (
+                TreasuryTransferRequest.objects.filter(
+                    from_account=from_account,
+                    created_at__date=today,
+                    status__in=[
+                        TreasuryTransferRequest.STATUS_PENDING,
+                        TreasuryTransferRequest.STATUS_APPROVED,
+                    ],
+                ).aggregate(total=models.Sum("amount")).get("total")
+                or Decimal("0")
+            )
+            if day_outflow + amount > policy.daily_outflow_limit:
+                raise ValidationError(
+                    f"Daily treasury outflow limit exceeded ({policy.daily_outflow_limit})."
+                )
+            required_checker_role = ""
+            if amount >= policy.require_super_admin_above:
+                required_checker_role = "super_admin"
             req = TreasuryTransferRequest.objects.create(
                 maker=request.user,
                 from_account=from_account,
                 to_account=to_account,
                 amount=amount,
                 reason=reason,
+                required_checker_role=required_checker_role,
                 maker_note=maker_note,
             )
             messages.success(
@@ -1022,6 +1052,7 @@ def treasury_dashboard(request):
             messages.error(request, f"Treasury request failed: {exc}")
 
     accounts = TreasuryAccount.objects.filter(is_active=True).order_by("name")
+    treasury_policy = TreasuryPolicy.get_solo()
     pending_requests = TreasuryTransferRequest.objects.filter(
         status=TreasuryTransferRequest.STATUS_PENDING
     )[:25]
@@ -1035,6 +1066,7 @@ def treasury_dashboard(request):
             "my_requests": my_requests,
             "can_make_treasury_request": user_has_any_role(request.user, MAKER_ROLES),
             "can_check_treasury_request": user_has_any_role(request.user, CHECKER_ROLES),
+            "treasury_policy": treasury_policy,
         },
     )
 
@@ -1047,6 +1079,10 @@ def treasury_decision(request, request_id: int):
         raise PermissionDenied("You do not have checker role.")
 
     req = get_object_or_404(TreasuryTransferRequest, id=request_id)
+    if req.required_checker_role and not user_has_any_role(request.user, (req.required_checker_role,)):
+        raise PermissionDenied(
+            f"Checker must have role {req.required_checker_role} for this treasury request."
+        )
     decision = request.POST.get("decision")
     checker_note = request.POST.get("checker_note", "")
     try:
@@ -1379,6 +1415,16 @@ def accounting_dashboard(request):
                     raise ValidationError("Journal entry needs at least 2 lines.")
 
                 with transaction.atomic():
+                    today = timezone.localdate()
+                    if AccountingPeriodClose.objects.filter(
+                        currency=entry_currency,
+                        is_closed=True,
+                        period_start__lte=today,
+                        period_end__gte=today,
+                    ).exists():
+                        raise ValidationError(
+                            f"Accounting period is closed for {entry_currency} on {today}."
+                        )
                     entry = JournalEntry.objects.create(
                         entry_no=_new_entry_no(),
                         reference=reference,
@@ -1895,6 +1941,7 @@ def operations_center(request):
                     maker=request.user,
                     maker_note=(request.POST.get("maker_note") or "").strip(),
                     source_cashflow_event=source_event,
+                    sla_due_at=timezone.now() + timedelta(hours=48),
                 )
                 case.case_type = OperationCase.TYPE_REFUND
                 case.status = OperationCase.STATUS_IN_PROGRESS

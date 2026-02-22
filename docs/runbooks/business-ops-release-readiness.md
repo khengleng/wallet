@@ -25,6 +25,20 @@ This runbook defines the release gate for business operations services.
    - `wallets_demo.tests.MerchantOpsWorkflowTests`
    - `wallets_demo.tests.OperationalHardeningTests`
 
+## Scheduled Business Automation Jobs
+
+1. Settlement lifecycle automation
+   - `python manage.py automate_settlements --actor-username <ops_user>`
+   - Optional payout creation:
+   - `python manage.py automate_settlements --actor-username <ops_user> --create-payouts`
+2. Dispute SLA escalation
+   - `python manage.py escalate_refund_disputes --actor-username <ops_user>`
+3. Accounting period governance
+   - Close:
+   - `python manage.py manage_accounting_period --actor-username <finance_user> --period-start YYYY-MM-DD --period-end YYYY-MM-DD --currency USD --action close`
+   - Re-open:
+   - `python manage.py manage_accounting_period --actor-username <finance_user> --period-start YYYY-MM-DD --period-end YYYY-MM-DD --currency USD --action open`
+
 ## Rollback Triggers
 
 1. Reconciliation break spike after release.

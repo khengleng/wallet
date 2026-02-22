@@ -37,6 +37,7 @@ from .models import (
     OperationCaseNote,
     OperationSetting,
     TreasuryAccount,
+    TreasuryPolicy,
     TreasuryTransferRequest,
     User,
 )
@@ -91,6 +92,17 @@ class TreasuryTransferRequestAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "created_at")
     search_fields = ("maker__username", "checker__username", "reason")
+
+
+@admin.register(TreasuryPolicy)
+class TreasuryPolicyAdmin(admin.ModelAdmin):
+    list_display = (
+        "currency",
+        "single_txn_limit",
+        "daily_outflow_limit",
+        "require_super_admin_above",
+        "updated_at",
+    )
 
 
 @admin.register(OperationSetting)

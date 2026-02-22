@@ -195,6 +195,10 @@ class ApprovalRequest(models.Model):
             raise ValidationError("Only checker role can approve requests.")
         if checker.pk == self.maker_id:
             raise ValidationError("Maker and checker must be different users.")
+        if self.required_checker_role and not user_has_any_role(checker, [self.required_checker_role]):
+            raise ValidationError(
+                f"Checker must have role {self.required_checker_role} for this treasury request."
+            )
 
         description = self.description or "Approval workflow transaction"
         meta = {
@@ -301,6 +305,38 @@ class TreasuryAccount(models.Model):
         return f"{self.name} ({self.currency})"
 
 
+class TreasuryPolicy(models.Model):
+    singleton_key = models.PositiveSmallIntegerField(default=1, unique=True, editable=False)
+    single_txn_limit = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("100000"))
+    daily_outflow_limit = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("1000000"))
+    require_super_admin_above = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("500000"))
+    currency = models.CharField(max_length=12, default="USD")
+    updated_by = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="updated_treasury_policies",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Treasury policy"
+        verbose_name_plural = "Treasury policies"
+
+    def save(self, *args, **kwargs):
+        self.singleton_key = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls) -> "TreasuryPolicy":
+        obj, _created = cls.objects.get_or_create(singleton_key=1)
+        return obj
+
+    def __str__(self):
+        return f"Treasury policy ({self.currency})"
+
+
 class TreasuryTransferRequest(models.Model):
     STATUS_PENDING = "pending"
     STATUS_APPROVED = "approved"
@@ -334,6 +370,7 @@ class TreasuryTransferRequest(models.Model):
         max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True
     )
     reason = models.CharField(max_length=255, blank=True, default="")
+    required_checker_role = models.CharField(max_length=32, blank=True, default="")
     maker_note = models.TextField(blank=True, default="")
     checker_note = models.TextField(blank=True, default="")
     error_message = models.TextField(blank=True, default="")
@@ -1141,6 +1178,9 @@ class DisputeRefundRequest(models.Model):
         related_name="executed_refund_requests",
     )
     error_message = models.TextField(blank=True, default="")
+    sla_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    escalated_at = models.DateTimeField(null=True, blank=True)
+    escalation_reason = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     decided_at = models.DateTimeField(null=True, blank=True)
 
