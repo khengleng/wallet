@@ -138,6 +138,23 @@
 <div class="card">
   <h2>Mobile Service Playground</h2>
   <p class="text-muted">Business operator playground to test new mobile channel services before native app implementation.</p>
+  <div class="form-group">
+    <label>Test Account Mode</label>
+    <select id="auth-mode">
+      <option value="session">Session User (current portal account)</option>
+      <option value="token">Bearer Token (different mobile user)</option>
+    </select>
+  </div>
+  <div id="token-mode-panel" style="display:none;">
+    <div class="form-group">
+      <label>Mobile User Access Token</label>
+      <textarea id="override-token" rows="3" placeholder="Paste Keycloak access token for target mobile user"></textarea>
+    </div>
+    <div class="flex gap-2">
+      <button id="btn-save-token" class="btn btn-outline" type="button">Save Token</button>
+      <button id="btn-clear-token" class="btn btn-outline" type="button">Clear Token</button>
+    </div>
+  </div>
   {% if not has_oidc_token %}
   <div class="alert alert-warning">
     Keycloak access token is not present in this web session. Assistant and gateway calls may fail until you sign in through SSO again.
@@ -248,6 +265,34 @@
     const apiOutput = document.getElementById("api-output");
     const homeOutput = document.getElementById("home-output");
 
+    const authModeEl = document.getElementById("auth-mode");
+    const tokenPanelEl = document.getElementById("token-mode-panel");
+    const overrideTokenEl = document.getElementById("override-token");
+
+    function getOverrideToken() {
+      return (overrideTokenEl.value || "").trim();
+    }
+
+    function getActiveToken() {
+      if (authModeEl.value === "token") {
+        return getOverrideToken();
+      }
+      return (accessToken || "").trim();
+    }
+
+    function authHeaders() {
+      const token = getActiveToken();
+      if (!token) return null;
+      return {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + token
+      };
+    }
+
+    function inTokenMode() {
+      return authModeEl.value === "token";
+    }
+
     function setOutput(obj) {
       apiOutput.textContent = JSON.stringify(obj, null, 2);
     }
@@ -264,7 +309,17 @@
 
     async function loadHome() {
       try {
-        const personalization = await callJson("/api/mobile/personalization/", { method: "GET" });
+        let personalization;
+        if (inTokenMode()) {
+          const headers = authHeaders();
+          if (!headers) {
+            setOutput({ error: "Token mode selected but no token provided." });
+            return;
+          }
+          personalization = await callJson(gatewayBase + "/personalization", { method: "GET", headers: headers });
+        } else {
+          personalization = await callJson("/api/mobile/personalization/", { method: "GET" });
+        }
         homeOutput.textContent = JSON.stringify(personalization, null, 2);
         setOutput(personalization);
       } catch (err) {
@@ -274,7 +329,17 @@
 
     async function loadProfile() {
       try {
-        const p = await callJson("/api/mobile/profile/", { method: "GET" });
+        let p;
+        if (inTokenMode()) {
+          const headers = authHeaders();
+          if (!headers) {
+            setOutput({ error: "Token mode selected but no token provided." });
+            return;
+          }
+          p = await callJson(gatewayBase + "/profile", { method: "GET", headers: headers });
+        } else {
+          p = await callJson("/api/mobile/profile/", { method: "GET" });
+        }
         const user = (p.data || {}).user || {};
         const cif = (p.data || {}).cif || {};
         document.getElementById("pf-first").value = user.first_name || "";
@@ -297,14 +362,28 @@
         profile_picture_url: document.getElementById("pf-avatar").value.trim(),
       };
       try {
-        const p = await callJson("/api/mobile/profile/", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrfToken
-          },
-          body: JSON.stringify(payload)
-        });
+        let p;
+        if (inTokenMode()) {
+          const headers = authHeaders();
+          if (!headers) {
+            setOutput({ error: "Token mode selected but no token provided." });
+            return;
+          }
+          p = await callJson(gatewayBase + "/profile", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(payload)
+          });
+        } else {
+          p = await callJson("/api/mobile/profile/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": csrfToken
+            },
+            body: JSON.stringify(payload)
+          });
+        }
         setOutput(p);
       } catch (err) {
         setOutput({ error: err });
@@ -320,14 +399,28 @@
         return;
       }
       try {
-        const p = await callJson("/api/mobile/personalization/signals/", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrfToken
-          },
-          body: JSON.stringify({ data_points: dataPoints })
-        });
+        let p;
+        if (inTokenMode()) {
+          const headers = authHeaders();
+          if (!headers) {
+            setOutput({ error: "Token mode selected but no token provided." });
+            return;
+          }
+          p = await callJson(gatewayBase + "/personalization/signals", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify({ data_points: dataPoints })
+          });
+        } else {
+          p = await callJson("/api/mobile/personalization/signals/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": csrfToken
+            },
+            body: JSON.stringify({ data_points: dataPoints })
+          });
+        }
         setOutput(p);
       } catch (err) {
         setOutput({ error: err });
@@ -392,14 +485,28 @@
       appendChat("user", message);
 
       try {
-        const body = await callJson("/api/mobile/assistant/chat/", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": csrfToken
-          },
-          body: JSON.stringify({ message: message, context: { channel: "native_lab_web" } })
-        });
+        let body;
+        if (inTokenMode()) {
+          const headers = authHeaders();
+          if (!headers) {
+            appendChat("bot", "Token mode selected but no token provided.");
+            return;
+          }
+          body = await callJson(gatewayBase + "/assistant/chat", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify({ message: message, context: { channel: "native_lab_web_token_mode" } })
+          });
+        } else {
+          body = await callJson("/api/mobile/assistant/chat/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": csrfToken
+            },
+            body: JSON.stringify({ message: message, context: { channel: "native_lab_web" } })
+          });
+        }
         const reply = ((((body || {}).data || {}).assistant || {}).reply) || "No reply";
         appendChat("bot", reply);
         setOutput(body);
@@ -442,6 +549,26 @@
         document.getElementById("sandbox-body").value = "{}";
       }
     });
+
+    authModeEl.addEventListener("change", function() {
+      tokenPanelEl.style.display = this.value === "token" ? "block" : "none";
+      setOutput({ mode: this.value });
+    });
+    document.getElementById("btn-save-token").addEventListener("click", function() {
+      const token = getOverrideToken();
+      localStorage.setItem("mobile_playground_override_token", token);
+      setOutput({ token_saved: !!token, length: token.length });
+    });
+    document.getElementById("btn-clear-token").addEventListener("click", function() {
+      overrideTokenEl.value = "";
+      localStorage.removeItem("mobile_playground_override_token");
+      setOutput({ token_cleared: true });
+    });
+
+    const cachedToken = localStorage.getItem("mobile_playground_override_token");
+    if (cachedToken) {
+      overrideTokenEl.value = cachedToken;
+    }
 
     loadHome();
   })();
