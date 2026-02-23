@@ -155,6 +155,21 @@
       <button id="btn-clear-token" class="btn btn-outline" type="button">Clear Token</button>
     </div>
   </div>
+  <div id="session-impersonation-panel">
+    <div class="form-group">
+      <label>Test As Another User (Session Mode)</label>
+      <select id="persona-select">
+        <option value="">Loading personas...</option>
+      </select>
+    </div>
+    <div class="flex gap-2">
+      <button id="btn-apply-persona" class="btn btn-outline" type="button">Apply Persona</button>
+      <button id="btn-clear-persona" class="btn btn-outline" type="button">Reset to My Account</button>
+    </div>
+    <div id="persona-status" class="text-muted" style="margin-top:0.45rem; font-size:0.84rem;">
+      Effective user: loading...
+    </div>
+  </div>
   {% if not has_oidc_token %}
   <div class="alert alert-warning">
     Keycloak access token is not present in this web session. Assistant and gateway calls may fail until you sign in through SSO again.
@@ -287,6 +302,9 @@
     const authModeEl = document.getElementById("auth-mode");
     const tokenPanelEl = document.getElementById("token-mode-panel");
     const overrideTokenEl = document.getElementById("override-token");
+    const personaPanelEl = document.getElementById("session-impersonation-panel");
+    const personaSelectEl = document.getElementById("persona-select");
+    const personaStatusEl = document.getElementById("persona-status");
 
     function getOverrideToken() {
       return (overrideTokenEl.value || "").trim();
@@ -318,6 +336,16 @@
 
     function setDiagnostics(obj) {
       diagnosticsOutput.textContent = JSON.stringify(obj, null, 2);
+    }
+
+    function setPersonaStatus(text) {
+      personaStatusEl.textContent = text;
+    }
+
+    function updateModePanels() {
+      const tokenMode = authModeEl.value === "token";
+      tokenPanelEl.style.display = tokenMode ? "block" : "none";
+      personaPanelEl.style.display = tokenMode ? "none" : "block";
     }
 
     function parseMaybeJson(raw) {
@@ -622,6 +650,93 @@
       setOutput(diag);
     }
 
+    async function loadPersonas() {
+      try {
+        const body = await callJson("/api/playground/personas/", { method: "GET" });
+        const personas = (((body || {}).data || {}).personas) || [];
+        personaSelectEl.innerHTML = "";
+        if (!personas.length) {
+          const noneOption = document.createElement("option");
+          noneOption.value = "";
+          noneOption.textContent = "No personas available";
+          personaSelectEl.appendChild(noneOption);
+          setPersonaStatus("Effective user: current portal account");
+          return;
+        }
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Select user profile";
+        personaSelectEl.appendChild(defaultOption);
+        personas.forEach((persona) => {
+          if (!persona.username) return;
+          const option = document.createElement("option");
+          option.value = persona.username;
+          const serviceClass = persona.service_class ? " | class " + persona.service_class : "";
+          option.textContent = persona.username + " (" + (persona.wallet_type || "C") + serviceClass + ")";
+          personaSelectEl.appendChild(option);
+        });
+      } catch (err) {
+        personaSelectEl.innerHTML = '<option value="">Failed to load personas</option>';
+        setOutput({ error: normalizeError(err) });
+      }
+    }
+
+    async function loadImpersonationStatus() {
+      try {
+        const body = await callJson("/api/playground/impersonation/", { method: "GET" });
+        const effective = (((body || {}).data || {}).effective_user) || null;
+        if (effective && effective.username) {
+          personaSelectEl.value = effective.username;
+          setPersonaStatus("Effective user: " + effective.username + " (" + (effective.email || "no-email") + ")");
+        } else {
+          setPersonaStatus("Effective user: current portal account");
+          personaSelectEl.value = "";
+        }
+      } catch (err) {
+        setPersonaStatus("Effective user: unavailable");
+        setOutput({ error: normalizeError(err) });
+      }
+    }
+
+    async function applyPersona() {
+      const username = (personaSelectEl.value || "").trim();
+      if (!username) {
+        setOutput({ error: "Select a user profile first." });
+        return;
+      }
+      try {
+        const body = await callJson("/api/playground/impersonation/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrfToken
+          },
+          body: JSON.stringify({ username: username })
+        });
+        setOutput(body);
+        await loadImpersonationStatus();
+        await loadHome();
+      } catch (err) {
+        setOutput({ error: normalizeError(err) });
+      }
+    }
+
+    async function clearPersona() {
+      try {
+        const body = await callJson("/api/playground/impersonation/", {
+          method: "DELETE",
+          headers: {
+            "X-CSRFToken": csrfToken
+          }
+        });
+        setOutput(body);
+        await loadImpersonationStatus();
+        await loadHome();
+      } catch (err) {
+        setOutput({ error: normalizeError(err) });
+      }
+    }
+
     document.getElementById("btn-load-home").addEventListener("click", loadHome);
     document.getElementById("btn-save-profile").addEventListener("click", saveProfile);
     document.getElementById("btn-save-signals").addEventListener("click", saveSignals);
@@ -664,7 +779,7 @@
     });
 
     authModeEl.addEventListener("change", function() {
-      tokenPanelEl.style.display = this.value === "token" ? "block" : "none";
+      updateModePanels();
       setOutput({ mode: this.value });
     });
     document.getElementById("btn-save-token").addEventListener("click", function() {
@@ -677,12 +792,16 @@
       localStorage.removeItem("mobile_playground_override_token");
       setOutput({ token_cleared: true });
     });
+    document.getElementById("btn-apply-persona").addEventListener("click", applyPersona);
+    document.getElementById("btn-clear-persona").addEventListener("click", clearPersona);
 
     const cachedToken = localStorage.getItem("mobile_playground_override_token");
     if (cachedToken) {
       overrideTokenEl.value = cachedToken;
     }
 
+    updateModePanels();
+    loadPersonas().then(loadImpersonationStatus);
     loadHome();
     runDiagnostics();
   })();

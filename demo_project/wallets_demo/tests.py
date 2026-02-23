@@ -1,5 +1,6 @@
 from decimal import Decimal
 import io
+import json
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -926,6 +927,21 @@ class MobileNativeLabPageTests(TestCase):
             password="pass12345",
         )
         assign_roles(self.user, ["operation"])
+        self.target_user = User.objects.create_user(
+            username="native_lab_target",
+            email="native_lab_target@example.com",
+            password="pass12345",
+            first_name="Target",
+            last_name="User",
+        )
+        CustomerCIF.objects.create(
+            cif_no="CIF-LAB-TARGET",
+            user=self.target_user,
+            legal_name="Target User",
+            mobile_no="+85510020001",
+            email=self.target_user.email,
+            created_by=self.user,
+        )
 
     def test_mobile_native_lab_requires_auth(self):
         response = self.client.get(reverse("mobile_native_lab"))
@@ -948,6 +964,29 @@ class MobileNativeLabPageTests(TestCase):
         self.client.login(username="native_lab_outsider", password="pass12345")
         response = self.client.get(reverse("mobile_native_lab"))
         self.assertEqual(response.status_code, 403)
+
+    def test_mobile_playground_can_impersonate_mobile_profile_user(self):
+        self.client.login(username="native_lab_user", password="pass12345")
+        set_response = self.client.post(
+            reverse("mobile_playground_impersonation"),
+            data=json.dumps({"username": "native_lab_target"}),
+            content_type="application/json",
+        )
+        self.assertEqual(set_response.status_code, 200)
+        self.assertTrue(set_response.json()["ok"])
+        self.assertEqual(
+            set_response.json()["data"]["effective_user"]["username"],
+            "native_lab_target",
+        )
+
+        profile_response = self.client.get(reverse("mobile_profile"))
+        self.assertEqual(profile_response.status_code, 200)
+        profile_data = profile_response.json()["data"]["user"]
+        self.assertEqual(profile_data["username"], "native_lab_target")
+
+        clear_response = self.client.delete(reverse("mobile_playground_impersonation"))
+        self.assertEqual(clear_response.status_code, 200)
+        self.assertFalse(clear_response.json()["data"]["impersonation_enabled"])
 
 
 class PolicyHubUpgradeWorkflowTests(TestCase):

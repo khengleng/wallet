@@ -3,6 +3,7 @@
 from . import views as legacy
 
 mobile_playground_personas = legacy.mobile_playground_personas
+mobile_playground_impersonation = legacy.mobile_playground_impersonation
 mobile_playground_policy_tariff_simulate = legacy.mobile_playground_policy_tariff_simulate
 mobile_playground_assistant_action = legacy.mobile_playground_assistant_action
 mobile_playground_journey_run = legacy.mobile_playground_journey_run

@@ -67,6 +67,11 @@ urlpatterns = [
     path('mobile/native-lab/', views_mobile.mobile_native_lab, name='mobile_native_lab'),
     path('api/playground/personas/', views_playground.mobile_playground_personas, name='mobile_playground_personas'),
     path(
+        'api/playground/impersonation/',
+        views_playground.mobile_playground_impersonation,
+        name='mobile_playground_impersonation',
+    ),
+    path(
         'api/playground/policy-tariff/simulate/',
         views_playground.mobile_playground_policy_tariff_simulate,
         name='mobile_playground_policy_tariff_simulate',

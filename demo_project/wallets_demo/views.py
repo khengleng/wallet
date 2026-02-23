@@ -569,6 +569,77 @@ def _playground_forbidden() -> JsonResponse:
     )
 
 
+MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY = "mobile_playground_impersonate_user_id"
+
+
+@login_required
+def mobile_playground_impersonation(request):
+    if not _has_playground_access(request.user):
+        return _playground_forbidden()
+
+    if request.method == "GET":
+        user_id = request.session.get(MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY)
+        active_user = None
+        if user_id:
+            active_user = User.objects.filter(id=user_id, is_active=True).first()
+            if active_user is None:
+                request.session.pop(MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY, None)
+        return JsonResponse(
+            {
+                "ok": True,
+                "data": {
+                    "impersonation_enabled": bool(active_user),
+                    "effective_user": (
+                        {
+                            "id": active_user.id,
+                            "username": active_user.username,
+                            "email": active_user.email,
+                        }
+                        if active_user
+                        else None
+                    ),
+                },
+            }
+        )
+
+    if request.method == "POST":
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            return _mobile_json_error("Invalid payload.", code="invalid_payload")
+
+        username = str(payload.get("username") or "").strip()
+        if not username:
+            return _mobile_json_error("username is required.", code="username_required")
+
+        target = User.objects.filter(username=username, is_active=True).first()
+        if target is None:
+            return _mobile_json_error("username not found.", code="user_not_found", status=404)
+
+        request.session[MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY] = target.id
+        return JsonResponse(
+            {
+                "ok": True,
+                "data": {
+                    "impersonation_enabled": True,
+                    "effective_user": {
+                        "id": target.id,
+                        "username": target.username,
+                        "email": target.email,
+                    },
+                },
+            }
+        )
+
+    if request.method == "DELETE":
+        request.session.pop(MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY, None)
+        return JsonResponse({"ok": True, "data": {"impersonation_enabled": False, "effective_user": None}})
+
+    return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
+
+
 @login_required
 def mobile_playground_personas(request):
     if not _has_playground_access(request.user):
@@ -1080,6 +1151,13 @@ def _mobile_json_error(message: str, *, status: int = 400, code: str = "bad_requ
 def _mobile_current_user(request) -> User | None:
     user = getattr(request, "user", None)
     if user is not None and user.is_authenticated:
+        if _has_playground_access(user):
+            impersonate_user_id = request.session.get(MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY)
+            if impersonate_user_id:
+                impersonated_user = User.objects.filter(id=impersonate_user_id, is_active=True).first()
+                if impersonated_user is not None:
+                    return impersonated_user
+                request.session.pop(MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY, None)
         return user
 
     authorization = request.headers.get("Authorization", "")
