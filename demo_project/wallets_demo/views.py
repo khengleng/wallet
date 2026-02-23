@@ -1481,7 +1481,7 @@ def _mobile_current_user(request) -> User | None:
 
 def _mobile_bff_base_url() -> str:
     base = getattr(settings, "MOBILE_BFF_BASE_URL", "").strip().rstrip("/")
-    return base or "http://mobile-bff-service.railway.internal"
+    return base or "http://mobile-bff.railway.internal"
 
 
 def _mobile_bff_probe(

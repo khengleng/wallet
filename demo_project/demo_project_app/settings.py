@@ -252,7 +252,7 @@ IDENTITY_SERVICE_TIMEOUT_SECONDS = float(
 )
 MOBILE_BFF_BASE_URL = _env(
     "MOBILE_BFF_BASE_URL",
-    "http://mobile-bff-service.railway.internal",
+    "http://mobile-bff.railway.internal",
 ).strip().rstrip("/")
 
 
