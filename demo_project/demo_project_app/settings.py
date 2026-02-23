@@ -258,6 +258,13 @@ OPENAI_API_KEY = _env("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-5-mini").strip()
 OPENAI_BASE_URL = _env("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "10.0"))
+RELEASE_VERSION = _env(
+    "RELEASE_VERSION",
+    os.getenv("RAILWAY_GIT_COMMIT_SHA", ""),
+).strip()
+if not RELEASE_VERSION:
+    RELEASE_VERSION = "unknown"
+RELEASE_SHORT_SHA = RELEASE_VERSION[:7] if RELEASE_VERSION != "unknown" else "unknown"
 
 
 def _parse_keycloak_role_group_map() -> dict[str, str]:

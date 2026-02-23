@@ -1551,6 +1551,19 @@ def metrics(request):
     return HttpResponse("\n".join(lines) + "\n", content_type="text/plain; version=0.0.4")
 
 
+def version_info(request):
+    return JsonResponse(
+        {
+            "ok": True,
+            "data": {
+                "release_version": getattr(settings, "RELEASE_VERSION", "unknown"),
+                "release_short_sha": getattr(settings, "RELEASE_SHORT_SHA", "unknown"),
+                "environment": getattr(settings, "ENVIRONMENT", ""),
+            },
+        }
+    )
+
+
 @login_required
 def dashboard(request):
     selected_currency = _normalize_currency(request.GET.get("currency"))

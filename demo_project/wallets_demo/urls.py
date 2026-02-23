@@ -8,6 +8,7 @@ from . import views_playground
 
 urlpatterns = [
     path('', views.dashboard, name='dashboard'),
+    path('version', views.version_info, name='version_info'),
     path('api/mobile/bootstrap/', views_mobile.mobile_bootstrap, name='mobile_bootstrap'),
     path('api/mobile/profile/', views_mobile.mobile_profile, name='mobile_profile'),
     path('api/mobile/personalization/', views_mobile.mobile_personalization, name='mobile_personalization'),
