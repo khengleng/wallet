@@ -692,7 +692,7 @@
           appendChat("bot", "Token mode selected but no token provided.");
           return;
         }
-        const body = await callJson("/api/mobile/assistant/chat/", {
+        let body = await callJson("/api/mobile/assistant/chat/", {
           method: "POST",
           headers: assistantHeaders(),
           body: JSON.stringify({
@@ -711,8 +711,39 @@
         }
         setOutput(body);
       } catch (err) {
+        const normalized = normalizeError(err);
+        if (normalized.status === 401 && inTokenMode() && getActiveToken()) {
+          try {
+            const body = await callJson(gatewayBase + "/assistant/chat", {
+              method: "POST",
+              headers: authHeaders(),
+              body: JSON.stringify({
+                message: message,
+                context: { channel: "native_lab_gateway_fallback" }
+              })
+            });
+            const reply = ((((body || {}).data || {}).assistant || {}).reply) || "No reply";
+            const proposal = ((((body || {}).data || {}).assistant || {}).action_proposal) || null;
+            appendChat("bot", reply);
+            if (proposal) {
+              openTxSheetFromProposal(proposal);
+              appendChat("bot", "I prepared a transaction sheet. Please review and commit with PIN.");
+            }
+            setOutput(body);
+            return;
+          } catch (gatewayErr) {
+            appendChat("bot", "Assistant call failed in both local and gateway paths.");
+            setOutput({ error: normalizeError(gatewayErr), local_error: normalized });
+            return;
+          }
+        }
+        if (normalized.status === 401) {
+          appendChat("bot", "Session expired. Please sign in again, then retry.");
+          setOutput({ error: normalized, hint: "login_required" });
+          return;
+        }
         appendChat("bot", "Assistant call failed.");
-        setOutput({ error: normalizeError(err) });
+        setOutput({ error: normalized });
       }
     }
 
