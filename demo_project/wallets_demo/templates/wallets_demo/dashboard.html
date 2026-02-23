@@ -1,35 +1,36 @@
 {% extends 'wallets_demo/base.html' %}
+{% load i18n %}
 
-{% block title %}Dashboard - DJ Wallet{% endblock %}
+{% block title %}{% trans "Dashboard" %} - DJ Wallet{% endblock %}
 
 {% block content %}
 <div class="flex justify-between align-center mb-4">
-    <h1>Welcome, {{ user.username }}!</h1>
+    <h1>{% blocktrans with username=user.username %}Welcome, {{ username }}!{% endblocktrans %}</h1>
     <div class="text-right">
-        <p class="text-muted">Selected Wallet Balance</p>
+        <p class="text-muted">{% trans "Selected Wallet Balance" %}</p>
         <p class="text-2xl font-bold color-primary">{{ selected_balance|floatformat:2 }} {{ selected_currency }}</p>
     </div>
 </div>
 
 <div class="card">
     <form method="get" class="flex gap-2 align-center">
-        <label for="currency" style="margin:0;">Wallet Currency</label>
+        <label for="currency" style="margin:0;">{% trans "Wallet Currency" %}</label>
         <select id="currency" name="currency">
             {% for c in supported_currencies %}
                 <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
             {% endfor %}
         </select>
-        <button type="submit" class="btn btn-outline">Switch</button>
-        <a href="{% url 'wallet_fx_exchange' %}" class="btn btn-primary">FX Convert</a>
+        <button type="submit" class="btn btn-outline">{% trans "Switch" %}</button>
+        <a href="{% url 'wallet_fx_exchange' %}" class="btn btn-primary">{% trans "FX Convert" %}</a>
     </form>
 </div>
 
 <div class="card" style="background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%); color: white;">
     <div class="flex justify-between align-center">
         <div>
-            <p style="opacity: 0.8; font-size: 0.875rem;">{{ selected_currency }} Wallet</p>
+            <p style="opacity: 0.8; font-size: 0.875rem;">{% blocktrans with currency=selected_currency %}{{ currency }} Wallet{% endblocktrans %}</p>
             <h2 style="font-size: 2.5rem; margin-top: 0.5rem;">{{ selected_balance|floatformat:2 }} {{ selected_currency }}</h2>
-            <p style="margin-top: 1rem; opacity: 0.9;">Available for transactions</p>
+            <p style="margin-top: 1rem; opacity: 0.9;">{% trans "Available for transactions" %}</p>
         </div>
         <div style="background: rgba(255,255,255,0.1); padding: 1.5rem; border-radius: 1rem;">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -42,18 +43,18 @@
 </div>
 
 <div class="flex gap-2 mb-4">
-    <a href="{% url 'deposit' %}?currency={{ selected_currency }}" class="btn btn-primary" style="flex: 1;">Deposit</a>
-    <a href="{% url 'withdraw' %}?currency={{ selected_currency }}" class="btn btn-outline" style="flex: 1;">Withdraw</a>
-    <a href="{% url 'transfer' %}?currency={{ selected_currency }}" class="btn btn-outline" style="flex: 1;">Transfer</a>
+    <a href="{% url 'deposit' %}?currency={{ selected_currency }}" class="btn btn-primary" style="flex: 1;">{% trans "Deposit" %}</a>
+    <a href="{% url 'withdraw' %}?currency={{ selected_currency }}" class="btn btn-outline" style="flex: 1;">{% trans "Withdraw" %}</a>
+    <a href="{% url 'transfer' %}?currency={{ selected_currency }}" class="btn btn-outline" style="flex: 1;">{% trans "Transfer" %}</a>
 </div>
 
 <div class="card">
-    <h3 class="mb-4">Wallet Balances</h3>
+    <h3 class="mb-4">{% trans "Wallet Balances" %}</h3>
     <table>
         <thead>
             <tr>
-                <th>Currency</th>
-                <th>Balance</th>
+                <th>{% trans "Currency" %}</th>
+                <th>{% trans "Balance" %}</th>
             </tr>
         </thead>
         <tbody>
@@ -64,7 +65,7 @@
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="2" class="text-muted" style="text-align:center;">No wallets yet.</td>
+                    <td colspan="2" class="text-muted" style="text-align:center;">{% trans "No wallets yet." %}</td>
                 </tr>
             {% endfor %}
         </tbody>
@@ -72,15 +73,15 @@
 </div>
 
 <div class="card">
-    <h3 class="mb-4">Recent Transactions</h3>
+    <h3 class="mb-4">{% trans "Recent Transactions" %}</h3>
     <table>
         <thead>
             <tr>
-                <th>Type</th>
-                <th>Amount</th>
-                <th>Description</th>
-                <th>Date</th>
-                <th>Status</th>
+                <th>{% trans "Type" %}</th>
+                <th>{% trans "Amount" %}</th>
+                <th>{% trans "Description" %}</th>
+                <th>{% trans "Date" %}</th>
+                <th>{% trans "Status" %}</th>
             </tr>
         </thead>
         <tbody>
@@ -88,11 +89,11 @@
             <tr>
                 <td>
                     {% if tx.type == 'deposit' %}
-                    <span class="badge badge-success">Deposit</span>
+                    <span class="badge badge-success">{% trans "Deposit" %}</span>
                     {% elif tx.type == 'withdraw' %}
-                    <span class="badge badge-danger">Withdraw</span>
+                    <span class="badge badge-danger">{% trans "Withdraw" %}</span>
                     {% else %}
-                    <span class="badge badge-info">Transfer</span>
+                    <span class="badge badge-info">{% trans "Transfer" %}</span>
                     {% endif %}
                 </td>
                 <td class="font-bold">
@@ -104,11 +105,11 @@
                 </td>
                 <td>{{ tx.meta.description|default:tx.type|title }}</td>
                 <td class="text-muted">{{ tx.created_at|date:"M d, Y H:i" }}</td>
-                <td><span class="badge badge-success">Completed</span></td>
+                <td><span class="badge badge-success">{% trans "Completed" %}</span></td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="5" style="text-align: center; padding: 2rem;" class="text-muted">No transactions yet.</td>
+                <td colspan="5" style="text-align: center; padding: 2rem;" class="text-muted">{% trans "No transactions yet." %}</td>
             </tr>
             {% endfor %}
         </tbody>

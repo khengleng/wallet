@@ -2381,3 +2381,22 @@ class OperationsSettingsAndReportsUiTests(TestCase):
         self.client.login(username="ops_finance", password="pass12345")
         response = self.client.get(reverse("operations_reports"))
         self.assertEqual(response.status_code, 403)
+
+
+class InternationalizationCoverageTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+
+    def test_set_language_endpoint_persists_khmer_cookie(self):
+        response = self.client.post(
+            reverse("set_language"),
+            {"language": "km", "next": reverse("login")},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.cookies.get("django_language").value, "km")
+
+    def test_login_page_renders_khmer_translations(self):
+        response = self.client.get("/km/login/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ចូលគណនី")
+        self.assertContains(response, "ចុះឈ្មោះ")

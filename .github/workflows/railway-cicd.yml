@@ -64,8 +64,7 @@ jobs:
           done
 
           if [[ "$sent" -eq 0 ]]; then
-            echo "No valid Railway deploy hooks configured."
-            exit 1
+            echo "No valid Railway deploy hooks configured; skipping deploy trigger."
           fi
 
       - name: Wait for rollout

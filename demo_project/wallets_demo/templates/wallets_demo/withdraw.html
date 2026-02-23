@@ -1,22 +1,23 @@
 {% extends 'wallets_demo/base.html' %}
+{% load i18n %}
 
-{% block title %}Withdraw - DJ Wallet{% endblock %}
+{% block title %}{% trans "Withdraw" %} - DJ Wallet{% endblock %}
 
 {% block content %}
 <div style="max-width: 500px; margin: 0 auto;">
     <div class="card">
-        <h1>Withdraw Funds</h1>
-        <p class="text-muted mb-4">Take money out of your virtual wallet balance.</p>
+        <h1>{% trans "Withdraw Funds" %}</h1>
+        <p class="text-muted mb-4">{% trans "Take money out of your virtual wallet balance." %}</p>
 
         <div class="alert alert-info"
             style="font-size: 0.875rem; background: #eff6ff; color: #1e40af; border-color: #bfdbfe;">
-            Current Balance: <strong>{{ selected_balance|floatformat:2 }} {{ selected_currency }}</strong>
+            {% trans "Current Balance" %}: <strong>{{ selected_balance|floatformat:2 }} {{ selected_currency }}</strong>
         </div>
 
         <form method="post">
             {% csrf_token %}
             <div class="form-group">
-                <label for="currency">Currency</label>
+                <label for="currency">{% trans "Currency" %}</label>
                 <select name="currency" id="currency" required>
                     {% for c in supported_currencies %}
                     <option value="{{ c }}" {% if c == selected_currency %}selected{% endif %}>{{ c }}</option>
@@ -24,22 +25,21 @@
                 </select>
             </div>
             <div class="form-group">
-                <label for="amount">Amount</label>
-                <input type="number" step="0.01" name="amount" id="amount" placeholder="0.00" required>
+                <label for="amount">{% trans "Amount" %}</label>
+                <input type="number" step="0.01" name="amount" id="amount" placeholder="{% trans '0.00' %}" required>
             </div>
             <div class="form-group">
-                <label for="description">Description (Optional)</label>
-                <input type="text" name="description" id="description" placeholder="e.g. ATM Withdrawal">
+                <label for="description">{% trans "Description (Optional)" %}</label>
+                <input type="text" name="description" id="description" placeholder="{% trans 'e.g. ATM Withdrawal' %}">
             </div>
             <div class="form-group">
-                <label for="maker_note">Maker Note (Optional)</label>
+                <label for="maker_note">{% trans "Maker Note (Optional)" %}</label>
                 <textarea name="maker_note" id="maker_note" rows="3"
-                    placeholder="Required context for checker approval if maker-checker applies"></textarea>
+                    placeholder="{% trans 'Required context for checker approval if maker-checker applies' %}"></textarea>
             </div>
-            <button type="submit" class="btn btn-primary" style="width: 100%; background-color: var(--danger);">Complete
-                Withdrawal</button>
+            <button type="submit" class="btn btn-primary" style="width: 100%; background-color: var(--danger);">{% trans "Complete Withdrawal" %}</button>
         </form>
     </div>
-    <a href="{% url 'dashboard' %}" class="btn btn-outline" style="width: 100%;">Back to Dashboard</a>
+    <a href="{% url 'dashboard' %}" class="btn btn-outline" style="width: 100%;">{% trans "Back to Dashboard" %}</a>
 </div>
 {% endblock %}

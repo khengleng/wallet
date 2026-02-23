@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-02-23 19:30+0700\n"
+"POT-Creation-Date: 2026-02-23 20:07+0700\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -16,6 +16,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
+
 #: wallets_demo/templates/wallets_demo/base.html:497
 msgid "Profile"
 msgstr "个人资料"
@@ -43,18 +44,28 @@ msgid "Wallet"
 msgstr "钱包"
 
 #: wallets_demo/templates/wallets_demo/base.html:515
+#: wallets_demo/templates/wallets_demo/dashboard.html:4
 msgid "Dashboard"
 msgstr "仪表盘"
 
 #: wallets_demo/templates/wallets_demo/base.html:517
+#: wallets_demo/templates/wallets_demo/dashboard.html:48
+#: wallets_demo/templates/wallets_demo/dashboard.html:96
+#: wallets_demo/templates/wallets_demo/transfer.html:4
 msgid "Transfer"
 msgstr "转账"
 
 #: wallets_demo/templates/wallets_demo/base.html:519
+#: wallets_demo/templates/wallets_demo/dashboard.html:46
+#: wallets_demo/templates/wallets_demo/dashboard.html:92
+#: wallets_demo/templates/wallets_demo/deposit.html:4
 msgid "Deposit"
 msgstr "存款"
 
 #: wallets_demo/templates/wallets_demo/base.html:521
+#: wallets_demo/templates/wallets_demo/dashboard.html:47
+#: wallets_demo/templates/wallets_demo/dashboard.html:94
+#: wallets_demo/templates/wallets_demo/withdraw.html:4
 msgid "Withdraw"
 msgstr "提现"
 
@@ -63,6 +74,8 @@ msgid "FX Exchange"
 msgstr "外汇兑换"
 
 #: wallets_demo/templates/wallets_demo/base.html:525
+#: wallets_demo/templates/wallets_demo/profile.html:4
+#: wallets_demo/templates/wallets_demo/profile.html:8
 msgid "My Profile"
 msgstr "我的资料"
 
@@ -170,6 +183,135 @@ msgstr "基于 Django 与 dj-wallet 构建。"
 msgid "Release"
 msgstr "版本"
 
+#: wallets_demo/templates/wallets_demo/dashboard.html:8
+#, python-format
+msgid "Welcome, %(username)s!"
+msgstr "欢迎，%(username)s！"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:10
+msgid "Selected Wallet Balance"
+msgstr "当前钱包余额"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:17
+msgid "Wallet Currency"
+msgstr "钱包币种"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:23
+msgid "Switch"
+msgstr "切换"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:24
+msgid "FX Convert"
+msgstr "外汇转换"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:31
+#, python-format
+msgid "%(currency)s Wallet"
+msgstr "%(currency)s 钱包"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:33
+msgid "Available for transactions"
+msgstr "可用于交易"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:52
+msgid "Wallet Balances"
+msgstr "钱包余额"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:56
+#: wallets_demo/templates/wallets_demo/deposit.html:15
+#: wallets_demo/templates/wallets_demo/transfer.html:20
+#: wallets_demo/templates/wallets_demo/withdraw.html:20
+msgid "Currency"
+msgstr "币种"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:57
+msgid "Balance"
+msgstr "余额"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:68
+msgid "No wallets yet."
+msgstr "暂无钱包。"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:76
+msgid "Recent Transactions"
+msgstr "近期交易"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:80
+msgid "Type"
+msgstr "类型"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:81
+#: wallets_demo/templates/wallets_demo/deposit.html:23
+#: wallets_demo/templates/wallets_demo/transfer.html:37
+#: wallets_demo/templates/wallets_demo/withdraw.html:28
+msgid "Amount"
+msgstr "金额"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:82
+msgid "Description"
+msgstr "描述"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:83
+msgid "Date"
+msgstr "日期"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:84
+msgid "Status"
+msgstr "状态"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:108
+msgid "Completed"
+msgstr "已完成"
+
+#: wallets_demo/templates/wallets_demo/dashboard.html:112
+msgid "No transactions yet."
+msgstr "暂无交易。"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:9
+msgid "Deposit Funds"
+msgstr "充值资金"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:10
+msgid "Add money to your virtual wallet balance."
+msgstr "向您的虚拟钱包余额充值。"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:24
+#: wallets_demo/templates/wallets_demo/transfer.html:38
+#: wallets_demo/templates/wallets_demo/withdraw.html:29
+msgid "0.00"
+msgstr "0.00"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:27
+#: wallets_demo/templates/wallets_demo/withdraw.html:32
+msgid "Description (Optional)"
+msgstr "描述（可选）"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:28
+msgid "e.g. Weekly topup"
+msgstr "例如：每周充值"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:31
+#: wallets_demo/templates/wallets_demo/transfer.html:45
+#: wallets_demo/templates/wallets_demo/withdraw.html:36
+msgid "Maker Note (Optional)"
+msgstr "经办备注（可选）"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:33
+#: wallets_demo/templates/wallets_demo/transfer.html:47
+#: wallets_demo/templates/wallets_demo/withdraw.html:38
+msgid "Required context for checker approval if maker-checker applies"
+msgstr "如启用经办-复核流程，需填写供复核人审批的说明"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:35
+msgid "Complete Deposit"
+msgstr "完成充值"
+
+#: wallets_demo/templates/wallets_demo/deposit.html:38
+#: wallets_demo/templates/wallets_demo/transfer.html:52
+#: wallets_demo/templates/wallets_demo/withdraw.html:43
+msgid "Back to Dashboard"
+msgstr "返回仪表盘"
+
 #: wallets_demo/templates/wallets_demo/login.html:10
 msgid "Access your virtual wallet."
 msgstr "访问您的虚拟钱包。"
@@ -183,6 +325,8 @@ msgid "Continue with SSO"
 msgstr "使用 SSO 继续"
 
 #: wallets_demo/templates/wallets_demo/login.html:19
+#: wallets_demo/templates/wallets_demo/profile.html:19
+#: wallets_demo/templates/wallets_demo/profile.html:41
 #: wallets_demo/templates/wallets_demo/register.html:16
 msgid "Username"
 msgstr "用户名"
@@ -208,6 +352,56 @@ msgstr "还没有账号？"
 msgid "Sign up"
 msgstr "注册"
 
+#: wallets_demo/templates/wallets_demo/profile.html:9
+msgid "Manage your account details and security settings."
+msgstr "管理您的账户信息和安全设置。"
+
+#: wallets_demo/templates/wallets_demo/profile.html:13
+msgid "Account Details"
+msgstr "账户详情"
+
+#: wallets_demo/templates/wallets_demo/profile.html:23
+msgid "First Name"
+msgstr "名"
+
+#: wallets_demo/templates/wallets_demo/profile.html:27
+msgid "Last Name"
+msgstr "姓"
+
+#: wallets_demo/templates/wallets_demo/profile.html:31
+#: wallets_demo/templates/wallets_demo/profile.html:45
+#: wallets_demo/templates/wallets_demo/register.html:20
+msgid "Email"
+msgstr "邮箱"
+
+#: wallets_demo/templates/wallets_demo/profile.html:34
+msgid "Save Profile"
+msgstr "保存资料"
+
+#: wallets_demo/templates/wallets_demo/profile.html:38
+msgid ""
+"Your profile details are managed by your identity provider. Please update "
+"profile attributes in Keycloak."
+msgstr "您的资料由身份提供方管理。请在 Keycloak 中更新资料属性。"
+
+#: wallets_demo/templates/wallets_demo/profile.html:52
+msgid "Security"
+msgstr "安全"
+
+#: wallets_demo/templates/wallets_demo/profile.html:66
+msgid "Change Password"
+msgstr "修改密码"
+
+#: wallets_demo/templates/wallets_demo/profile.html:70
+msgid "Password and MFA are managed by your identity provider."
+msgstr "密码和多因素认证由身份提供方管理。"
+
+#: wallets_demo/templates/wallets_demo/profile.html:72
+msgid ""
+"Use Keycloak account console to change password or configure multi-factor "
+"authentication."
+msgstr "请使用 Keycloak 账户控制台修改密码或配置多因素认证。"
+
 #: wallets_demo/templates/wallets_demo/register.html:9
 msgid "Join DJ Wallet"
 msgstr "加入 DJ Wallet"
@@ -216,10 +410,6 @@ msgstr "加入 DJ Wallet"
 msgid "Start managing your virtual funds today."
 msgstr "立即开始管理您的虚拟资金。"
 
-#: wallets_demo/templates/wallets_demo/register.html:20
-msgid "Email"
-msgstr "邮箱"
-
 #: wallets_demo/templates/wallets_demo/register.html:27
 msgid "Create Account"
 msgstr "创建账号"
@@ -227,3 +417,52 @@ msgstr "创建账号"
 #: wallets_demo/templates/wallets_demo/register.html:31
 msgid "Already have an account?"
 msgstr "已有账号？"
+
+#: wallets_demo/templates/wallets_demo/transfer.html:9
+msgid "Send Money"
+msgstr "转账汇款"
+
+#: wallets_demo/templates/wallets_demo/transfer.html:10
+msgid "Transfer funds instantly to another user."
+msgstr "即时向其他用户转账。"
+
+#: wallets_demo/templates/wallets_demo/transfer.html:14
+#: wallets_demo/templates/wallets_demo/withdraw.html:14
+msgid "Current Balance"
+msgstr "当前余额"
+
+#: wallets_demo/templates/wallets_demo/transfer.html:28
+msgid "Recipient Username"
+msgstr "收款人用户名"
+
+#: wallets_demo/templates/wallets_demo/transfer.html:30
+msgid "Select user..."
+msgstr "选择用户..."
+
+#: wallets_demo/templates/wallets_demo/transfer.html:41
+msgid "Message (Optional)"
+msgstr "留言（可选）"
+
+#: wallets_demo/templates/wallets_demo/transfer.html:42
+msgid "e.g. Lunch money"
+msgstr "例如：午餐费"
+
+#: wallets_demo/templates/wallets_demo/transfer.html:49
+msgid "Send Funds"
+msgstr "发起转账"
+
+#: wallets_demo/templates/wallets_demo/withdraw.html:9
+msgid "Withdraw Funds"
+msgstr "提取资金"
+
+#: wallets_demo/templates/wallets_demo/withdraw.html:10
+msgid "Take money out of your virtual wallet balance."
+msgstr "从您的虚拟钱包余额中提取资金。"
+
+#: wallets_demo/templates/wallets_demo/withdraw.html:33
+msgid "e.g. ATM Withdrawal"
+msgstr "例如：ATM 提现"
+
+#: wallets_demo/templates/wallets_demo/withdraw.html:40
+msgid "Complete Withdrawal"
+msgstr "完成提现"
