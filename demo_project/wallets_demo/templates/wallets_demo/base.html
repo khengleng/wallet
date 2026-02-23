@@ -483,8 +483,6 @@
             {{ org_name|default:"DJ Wallet" }}
         </a>
         <div class="nav-links">
-            {% if user.is_authenticated %}
-            <span class="font-bold">{{ user.username }}</span>
             <form action="{% url 'set_language' %}" method="post" style="display:inline; margin-left: 0.8rem;">
                 {% csrf_token %}
                 <input type="hidden" name="next" value="{{ request.get_full_path }}">
@@ -494,6 +492,8 @@
                     <option value="zh-hans" {% if LANGUAGE_CODE == "zh-hans" %}selected{% endif %}>简体中文</option>
                 </select>
             </form>
+            {% if user.is_authenticated %}
+            <span class="font-bold">{{ user.username }}</span>
             <a href="{% url 'profile' %}" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; margin-left: 0.8rem;">{% trans "Profile" %}</a>
             <form action="{% url 'logout' %}" method="post" style="display: inline; margin-left: 1rem;">
                 {% csrf_token %}

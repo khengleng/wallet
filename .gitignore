@@ -50,6 +50,7 @@ coverage.xml
 
 # Translations
 *.mo
+!demo_project/locale/**/django.mo
 *.pot
 
 # Django stuff:
