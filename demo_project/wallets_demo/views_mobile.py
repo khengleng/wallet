@@ -7,7 +7,8 @@ import re
 from decimal import Decimal
 
 from django.conf import settings
-from django.contrib.auth.hashers import make_password
+from django.contrib.auth.hashers import check_password, make_password
+from django.core.cache import cache
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
@@ -21,6 +22,51 @@ from django.contrib.contenttypes.models import ContentType
 from . import views as legacy
 
 logger = logging.getLogger(__name__)
+PIN_SETUP_MAX_FAILED_ATTEMPTS = 5
+PIN_SETUP_LOCK_SECONDS = 15 * 60
+
+
+def _is_weak_pin(pin: str) -> bool:
+    if not pin.isdigit():
+        return True
+    if len(set(pin)) == 1:
+        return True
+    ascending = "0123456789"
+    descending = ascending[::-1]
+    if pin in ascending or pin in descending:
+        return True
+    return False
+
+
+def _pin_setup_cache_key(user_id: int) -> str:
+    return f"mobile_pin_setup_failures:{user_id}"
+
+
+def _pin_setup_locked(user_id: int) -> bool:
+    data = cache.get(_pin_setup_cache_key(user_id)) or {}
+    return int(data.get("locked_until", 0) or 0) > int(timezone.now().timestamp())
+
+
+def _pin_setup_lock_remaining_seconds(user_id: int) -> int:
+    data = cache.get(_pin_setup_cache_key(user_id)) or {}
+    remaining = int(data.get("locked_until", 0) or 0) - int(timezone.now().timestamp())
+    return max(remaining, 0)
+
+
+def _pin_setup_fail(user_id: int) -> None:
+    key = _pin_setup_cache_key(user_id)
+    now_ts = int(timezone.now().timestamp())
+    data = cache.get(key) or {}
+    failures = int(data.get("failures", 0) or 0) + 1
+    locked_until = int(data.get("locked_until", 0) or 0)
+    if failures >= PIN_SETUP_MAX_FAILED_ATTEMPTS:
+        locked_until = now_ts + PIN_SETUP_LOCK_SECONDS
+        failures = 0
+    cache.set(key, {"failures": failures, "locked_until": locked_until}, timeout=PIN_SETUP_LOCK_SECONDS)
+
+
+def _pin_setup_success(user_id: int) -> None:
+    cache.delete(_pin_setup_cache_key(user_id))
 
 
 def _extract_first_json_object(raw: str) -> dict:
@@ -484,6 +530,7 @@ def mobile_profile(request):
     ).strip()
     transaction_pin = str(payload.get("transaction_pin") or "").strip()
     transaction_pin_confirm = str(payload.get("transaction_pin_confirm") or "").strip()
+    current_transaction_pin = str(payload.get("current_transaction_pin") or "").strip()
     incoming_preferences = payload.get("preferences")
     if incoming_preferences is None:
         incoming_preferences = {}
@@ -510,15 +557,54 @@ def mobile_profile(request):
             "profile_picture_url must be a valid HTTP/HTTPS URL.",
             code="invalid_profile_picture_url",
         )
-    if transaction_pin or transaction_pin_confirm:
+    current_preferences = user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {}
+    existing_pin_hash = str(current_preferences.get("transaction_pin_hash") or "").strip()
+    pin_update_requested = bool(transaction_pin or transaction_pin_confirm)
+
+    if pin_update_requested and _pin_setup_locked(user.id):
+        return legacy._mobile_json_error(
+            "PIN setup is temporarily locked due to multiple failed attempts.",
+            status=429,
+            code="pin_setup_locked",
+            metadata={"retry_after_seconds": _pin_setup_lock_remaining_seconds(user.id)},
+        )
+
+    if pin_update_requested:
         if transaction_pin != transaction_pin_confirm:
             return legacy._mobile_json_error("PIN confirmation does not match.", code="pin_mismatch")
         if not re.fullmatch(r"\d{4,8}", transaction_pin):
             return legacy._mobile_json_error("PIN must be 4-8 digits.", code="invalid_pin")
+        if _is_weak_pin(transaction_pin):
+            return legacy._mobile_json_error(
+                "PIN is too weak. Avoid repeated or sequential digits.",
+                code="weak_pin",
+            )
+        if existing_pin_hash:
+            if not current_transaction_pin:
+                return legacy._mobile_json_error(
+                    "Current PIN is required to rotate PIN.",
+                    status=403,
+                    code="current_pin_required",
+                )
+            if not check_password(current_transaction_pin, existing_pin_hash):
+                _pin_setup_fail(user.id)
+                if _pin_setup_locked(user.id):
+                    return legacy._mobile_json_error(
+                        "PIN setup is temporarily locked due to multiple failed attempts.",
+                        status=429,
+                        code="pin_setup_locked",
+                        metadata={"retry_after_seconds": _pin_setup_lock_remaining_seconds(user.id)},
+                    )
+                return legacy._mobile_json_error(
+                    "Current PIN is invalid.",
+                    status=403,
+                    code="current_pin_invalid",
+                )
+
     if incoming_preferences:
         try:
             normalized_preferences = legacy._sanitize_mobile_preferences(
-                user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {},
+                current_preferences,
                 incoming_preferences,
             )
         except Exception:
@@ -531,8 +617,9 @@ def mobile_profile(request):
     user.first_name = first_name
     user.last_name = last_name
     user.profile_picture_url = profile_picture_url
-    if transaction_pin:
+    if pin_update_requested:
         normalized_preferences["transaction_pin_hash"] = make_password(transaction_pin)
+        _pin_setup_success(user.id)
     user.mobile_preferences = normalized_preferences
     user.save(update_fields=["first_name", "last_name", "profile_picture_url", "mobile_preferences"])
 
@@ -545,7 +632,11 @@ def mobile_profile(request):
         "mobile.profile.update",
         target_type="CustomerCIF",
         target_id=str(customer_cif.id),
-        metadata={"cif_no": customer_cif.cif_no},
+        metadata={
+            "cif_no": customer_cif.cif_no,
+            "pin_updated": pin_update_requested,
+            "profile_picture_updated": bool(profile_picture_url),
+        },
     )
 
     return JsonResponse({"ok": True, "data": legacy._serialize_mobile_profile(user, customer_cif)})

@@ -241,6 +241,7 @@
           <div class="form-group"><label>Legal Name</label><input id="pf-legal" type="text" /></div>
           <div class="form-group"><label>Mobile No</label><input id="pf-mobile" type="text" /></div>
           <div class="form-group"><label>Profile Picture URL</label><input id="pf-avatar" type="url" /></div>
+          <div class="form-group"><label>Current PIN (required for PIN rotation)</label><input id="pf-pin-current" type="password" autocomplete="current-password" inputmode="numeric" placeholder="Current PIN" /></div>
           <div class="form-group"><label>Transaction PIN (4-8 digits)</label><input id="pf-pin" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Set/rotate PIN" /></div>
           <div class="form-group"><label>Confirm PIN</label><input id="pf-pin-confirm" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Confirm PIN" /></div>
           <div id="pf-pin-status" class="text-muted" style="font-size:0.82rem; margin-bottom:0.45rem;">PIN status: unknown</div>
@@ -333,10 +334,13 @@
     <div class="card">
       <h3>Account Security (PIN Setup)</h3>
       <p class="text-muted">Set or rotate transaction PIN for the current account owner before committing transactions.</p>
-      <div class="form-group"><label>New PIN (4-8 digits)</label><input id="pin-setup" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Enter PIN" /></div>
-      <div class="form-group"><label>Confirm New PIN</label><input id="pin-setup-confirm" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Confirm PIN" /></div>
-      <div id="pin-setup-status" class="text-muted" style="margin-bottom:0.6rem;">PIN status: unknown</div>
-      <button id="btn-pin-setup-save" class="btn btn-primary" type="button">Save Transaction PIN</button>
+      <form id="pin-setup-form" onsubmit="return false;" novalidate>
+        <div class="form-group"><label>Current PIN (required if already configured)</label><input id="pin-setup-current" type="password" autocomplete="current-password" inputmode="numeric" placeholder="Current PIN" /></div>
+        <div class="form-group"><label>New PIN (4-8 digits)</label><input id="pin-setup" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Enter PIN" /></div>
+        <div class="form-group"><label>Confirm New PIN</label><input id="pin-setup-confirm" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Confirm PIN" /></div>
+        <div id="pin-setup-status" class="text-muted" style="margin-bottom:0.6rem;">PIN status: unknown</div>
+        <button id="btn-pin-setup-save" class="btn btn-primary" type="submit">Save Transaction PIN</button>
+      </form>
     </div>
     <div class="card">
       <h3>Assistant Diagnostics</h3>
@@ -461,6 +465,20 @@
     function setPinSetupStatus(text) {
       pinSetupStatusEl.textContent = text;
     }
+    function pinSetupErrorText(err) {
+      const code = (((err || {}).body || {}).error || {}).code || "";
+      if (code === "current_pin_required") return "Current PIN is required to rotate PIN.";
+      if (code === "current_pin_invalid") return "Current PIN is invalid.";
+      if (code === "pin_setup_locked") {
+        const wait = ((((err || {}).body || {}).error || {}).metadata || {}).retry_after_seconds;
+        if (wait) return "PIN setup temporarily locked. Retry in " + wait + "s.";
+        return "PIN setup temporarily locked. Retry later.";
+      }
+      if (code === "weak_pin") return "PIN too weak. Avoid repeated/sequential digits.";
+      if (code === "pin_mismatch") return "PIN confirmation does not match.";
+      if (code === "invalid_pin") return "PIN must be 4-8 digits.";
+      return "PIN setup failed. Check API output.";
+    }
     function showTxModal() {
       txModalBackdropEl.classList.add("active");
       txModalBackdropEl.setAttribute("aria-hidden", "false");
@@ -553,6 +571,7 @@
         document.getElementById("pf-legal").value = cif.legal_name || "";
         document.getElementById("pf-mobile").value = cif.mobile_no || "";
         document.getElementById("pf-avatar").value = user.profile_picture_url || "";
+        document.getElementById("pf-pin-current").value = "";
         document.getElementById("pf-pin").value = "";
         document.getElementById("pf-pin-confirm").value = "";
         const pinState = user.transaction_pin_configured ? "configured" : "not configured";
@@ -572,6 +591,7 @@
         legal_name: document.getElementById("pf-legal").value.trim(),
         mobile_no: document.getElementById("pf-mobile").value.trim(),
         profile_picture_url: document.getElementById("pf-avatar").value.trim(),
+        current_transaction_pin: document.getElementById("pf-pin-current").value.trim(),
         transaction_pin: document.getElementById("pf-pin").value.trim(),
         transaction_pin_confirm: document.getElementById("pf-pin-confirm").value.trim(),
       };
@@ -602,14 +622,17 @@
         const pinState = (((p.data || {}).user || {}).transaction_pin_configured ? "configured" : "not configured");
         pinStatusEl.textContent = "PIN status: " + pinState;
         setPinSetupStatus("PIN status: " + pinState);
+        document.getElementById("pf-pin-current").value = "";
         document.getElementById("pf-pin").value = "";
         document.getElementById("pf-pin-confirm").value = "";
       } catch (err) {
         setOutput({ error: normalizeError(err) });
+        setPinSetupStatus(pinSetupErrorText(err));
       }
     }
 
     async function savePinSetup() {
+      const current = (document.getElementById("pin-setup-current").value || "").trim();
       const pin = (document.getElementById("pin-setup").value || "").trim();
       const confirm = (document.getElementById("pin-setup-confirm").value || "").trim();
       if (!pin || !confirm) {
@@ -618,6 +641,7 @@
         return;
       }
       const payload = {
+        current_transaction_pin: current,
         transaction_pin: pin,
         transaction_pin_confirm: confirm,
       };
@@ -647,11 +671,12 @@
         setOutput(p);
         setPinSetupStatus("PIN status: configured");
         pinStatusEl.textContent = "PIN status: configured";
+        document.getElementById("pin-setup-current").value = "";
         document.getElementById("pin-setup").value = "";
         document.getElementById("pin-setup-confirm").value = "";
       } catch (err) {
         setOutput({ error: normalizeError(err) });
-        setPinSetupStatus("PIN setup failed. Check API output.");
+        setPinSetupStatus(pinSetupErrorText(err));
       }
     }
 
