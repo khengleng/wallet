@@ -1,0 +1,14 @@
+"""Playground-facing view exports (phase 1 split from monolithic views module)."""
+
+from . import views as legacy
+
+mobile_playground_personas = legacy.mobile_playground_personas
+mobile_playground_policy_tariff_simulate = legacy.mobile_playground_policy_tariff_simulate
+mobile_playground_assistant_action = legacy.mobile_playground_assistant_action
+mobile_playground_journey_run = legacy.mobile_playground_journey_run
+mobile_playground_feature_flags_preview = legacy.mobile_playground_feature_flags_preview
+mobile_playground_abtest = legacy.mobile_playground_abtest
+mobile_playground_event_validate = legacy.mobile_playground_event_validate
+mobile_playground_risk_simulate = legacy.mobile_playground_risk_simulate
+mobile_playground_contract_replay = legacy.mobile_playground_contract_replay
+mobile_playground_release_gate = legacy.mobile_playground_release_gate
