@@ -53,7 +53,7 @@
                 <div class="form-group"><label>Assigned To</label><select name="assigned_to"><option value="">-- unassigned --</option>{% for u in users %}<option value="{{ u.id }}" {% if case_obj.assigned_to and case_obj.assigned_to.id == u.id %}selected{% endif %}>{{ u.username }}</option>{% endfor %}</select></div>
                 <div class="form-group"><label>SLA Due At</label><input type="datetime-local" name="sla_due_at" value="{% if case_obj.sla_due_at %}{{ case_obj.sla_due_at|date:'Y-m-d\\TH:i' }}{% endif %}" /></div>
                 <div class="form-group"><label>Title</label><input type="text" name="title" value="{{ case_obj.title }}" required /></div>
-                <div class="form-group" style="grid-column:1/-1;"><label>Description</label><textarea name="description" rows="3">{{ case_obj.description }}</textarea></div>
+                <div class="form-group" style="grid-column:1/-1;"><label>Description</label><textarea name="description" rows="3">{% if user|can_view_field:"ops.case.description" %}{{ case_obj.description }}{% endif %}</textarea></div>
             </div>
             <button class="btn btn-primary" type="submit">Save Case</button>
         </form>

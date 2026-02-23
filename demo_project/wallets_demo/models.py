@@ -285,9 +285,10 @@ class ApprovalRequest(models.Model):
             raise ValidationError("Only checker role can approve requests.")
         if checker.pk == self.maker_id:
             raise ValidationError("Maker and checker must be different users.")
-        if self.required_checker_role and not user_has_any_role(checker, [self.required_checker_role]):
+        required_checker_role = getattr(self, "required_checker_role", "")
+        if required_checker_role and not user_has_any_role(checker, [required_checker_role]):
             raise ValidationError(
-                f"Checker must have role {self.required_checker_role} for this treasury request."
+                f"Checker must have role {required_checker_role} for this treasury request."
             )
 
         description = self.description or "Approval workflow transaction"

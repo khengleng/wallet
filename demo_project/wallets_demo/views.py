@@ -1194,8 +1194,17 @@ def mobile_playground_release_gate(request):
     return JsonResponse({"ok": True, "data": snapshot})
 
 
-def _mobile_json_error(message: str, *, status: int = 400, code: str = "bad_request") -> JsonResponse:
-    return JsonResponse({"ok": False, "error": {"code": code, "message": message}}, status=status)
+def _mobile_json_error(
+    message: str,
+    *,
+    status: int = 400,
+    code: str = "bad_request",
+    metadata: dict | None = None,
+) -> JsonResponse:
+    error_payload: dict[str, object] = {"code": code, "message": message}
+    if isinstance(metadata, dict) and metadata:
+        error_payload["metadata"] = metadata
+    return JsonResponse({"ok": False, "error": error_payload}, status=status)
 
 
 def _mobile_current_user(request) -> User | None:

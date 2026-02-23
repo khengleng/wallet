@@ -2128,3 +2128,136 @@ class OperationCaseSLAWorkflowTests(TestCase):
         self.assertEqual(kwargs["actor_username"], "case_ops")
         self.assertEqual(kwargs["fallback_sla_hours"], 24)
         self.assertTrue(kwargs["dry_run"])
+
+
+class BackofficeRbacUiMatrixTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.super_admin = User.objects.create_user(
+            username="rbac_super_admin",
+            email="rbac_super_admin@example.com",
+            password="pass12345",
+        )
+        self.customer_service = User.objects.create_user(
+            username="rbac_cs",
+            email="rbac_cs@example.com",
+            password="pass12345",
+        )
+        self.customer = User.objects.create_user(
+            username="rbac_customer",
+            email="rbac_customer@example.com",
+            password="pass12345",
+        )
+        assign_roles(self.super_admin, ["super_admin"])
+        assign_roles(self.customer_service, ["customer_service"])
+
+        self.merchant = Merchant.objects.create(
+            code="MRC-RBAC-1",
+            name="RBAC Merchant",
+            owner=self.customer_service,
+            contact_email="merchant.ops@example.com",
+            contact_phone="+12025551234",
+            created_by=self.super_admin,
+            updated_by=self.super_admin,
+        )
+        settlement = MerchantSettlementRecord.objects.create(
+            settlement_no="STL-RBAC-1",
+            merchant=self.merchant,
+            currency="USD",
+            period_start=timezone.localdate(),
+            period_end=timezone.localdate(),
+            gross_amount=Decimal("100.00"),
+            fee_amount=Decimal("2.00"),
+            net_amount=Decimal("98.00"),
+            event_count=1,
+            status=MerchantSettlementRecord.STATUS_POSTED,
+            created_by=self.super_admin,
+        )
+        SettlementPayout.objects.create(
+            settlement=settlement,
+            payout_reference="PO-RBAC-1",
+            amount=Decimal("98.00"),
+            currency="USD",
+            status=SettlementPayout.STATUS_PENDING,
+            payout_channel="bank_transfer",
+            destination_account="12345678901234",
+            initiated_by=self.super_admin,
+        )
+        credential = MerchantApiCredential.objects.create(
+            merchant=self.merchant,
+            key_id="kid-rbac-visible",
+            secret_hash=make_password("secret"),
+            webhook_url="https://merchant.example.com/webhook",
+            scopes_csv="wallet:read,payout:read",
+            is_active=True,
+            created_by=self.super_admin,
+            updated_by=self.super_admin,
+        )
+        MerchantWebhookEvent.objects.create(
+            credential=credential,
+            event_type="payment.status",
+            nonce="nonce-rbac-visible",
+            payload_hash="abc123hash",
+            signature="sig-abc",
+            signature_valid=True,
+            replay_detected=False,
+            status="accepted",
+            response_code=200,
+        )
+
+        self.case = OperationCase.objects.create(
+            case_no="CASE-RBAC-1",
+            case_type=OperationCase.TYPE_COMPLAINT,
+            priority=OperationCase.PRIORITY_MEDIUM,
+            status=OperationCase.STATUS_OPEN,
+            title="RBAC case",
+            description="Sensitive case description value",
+            customer=self.customer,
+            merchant=self.merchant,
+            created_by=self.super_admin,
+            assigned_to=self.customer_service,
+        )
+        OperationCaseNote.objects.create(
+            case=self.case,
+            note="Sensitive case note value",
+            is_internal=True,
+            created_by=self.super_admin,
+        )
+
+    def test_customer_service_ui_hides_unauthorized_forms(self):
+        self.client.login(username="rbac_cs", password="pass12345")
+        response = self.client.get(reverse("operations_center"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="form_type" value="merchant_fee_rule_upsert"')
+        self.assertNotContains(response, 'name="form_type" value="merchant_api_rotate"')
+        self.assertContains(response, "You do not have permission to manage merchant fee rules.")
+        self.assertContains(response, "You do not have permission to rotate merchant API credentials.")
+
+    def test_customer_service_sensitive_fields_are_masked(self):
+        self.client.login(username="rbac_cs", password="pass12345")
+        portal_response = self.client.get(reverse("merchant_portal"))
+        self.assertEqual(portal_response.status_code, 200)
+        self.assertNotContains(portal_response, "kid-rbac-visible")
+        self.assertNotContains(portal_response, "nonce-rbac-visible")
+        self.assertNotContains(portal_response, "12345678901234")
+        self.assertContains(portal_response, "****")
+
+        case_response = self.client.get(reverse("case_detail", kwargs={"case_id": self.case.id}))
+        self.assertEqual(case_response.status_code, 200)
+        self.assertNotContains(case_response, "Sensitive case description value")
+        self.assertNotContains(case_response, "Sensitive case note value")
+
+    def test_super_admin_can_see_sensitive_fields_and_actions(self):
+        self.client.login(username="rbac_super_admin", password="pass12345")
+        portal_response = self.client.get(reverse("merchant_portal"))
+        self.assertEqual(portal_response.status_code, 200)
+        self.assertContains(portal_response, "kid-rbac-visible")
+        self.assertContains(portal_response, "nonce-rbac-visible")
+        self.assertContains(portal_response, "12345678901234")
+        self.assertContains(portal_response, 'name="form_type" value="merchant_portal_update_webhook"')
+
+        case_response = self.client.get(reverse("case_detail", kwargs={"case_id": self.case.id}))
+        self.assertEqual(case_response.status_code, 200)
+        self.assertContains(case_response, "Sensitive case description value")
+        self.assertContains(case_response, "Sensitive case note value")

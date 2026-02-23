@@ -150,8 +150,8 @@ DEFAULT_FIELD_ROLE_RULES: dict[str, tuple[str, ...]] = {
     "merchant.api.webhook_url": ("super_admin", "admin", "operation", "risk"),
     "merchant.webhook.nonce": ("super_admin", "admin", "operation", "risk"),
     "settlement.payout.destination_account": ("super_admin", "admin", "operation", "finance", "treasury", "risk"),
-    "ops.case.description": ("super_admin", "admin", "operation", "customer_service", "risk"),
-    "ops.case.note": ("super_admin", "admin", "operation", "customer_service", "risk"),
+    "ops.case.description": ("super_admin", "admin", "operation", "risk"),
+    "ops.case.note": ("super_admin", "admin", "operation", "risk"),
 }
 
 
