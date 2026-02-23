@@ -40,11 +40,11 @@
         {% csrf_token %}
         <input type="hidden" name="form_type" value="merchant_portal_update_webhook" />
         <input type="hidden" name="merchant_id" value="{{ m.id }}" />
-        <div class="form-group"><label>Key ID</label><input type="text" value="{{ cred.key_id }}" disabled /></div>
+        <div class="form-group"><label>Key ID</label><input type="text" value="{% if user|can_view_field:'merchant.api.key_id' %}{{ cred.key_id }}{% else %}****{% endif %}" disabled /></div>
         <div class="form-group"><label>Scopes (csv)</label><input type="text" name="scopes_csv"
                 value="{{ cred.scopes_csv }}" /></div>
         <div class="form-group"><label>Webhook URL</label><input type="url" name="webhook_url"
-                value="{{ cred.webhook_url }}" /></div>
+                value="{% if user|can_view_field:'merchant.api.webhook_url' %}{{ cred.webhook_url }}{% endif %}" {% if not user|can_view_field:'merchant.api.webhook_url' %}placeholder="Hidden by policy"{% endif %} /></div>
         <button class="btn btn-primary" type="submit">Save API Settings</button>
     </form>
     {% else %}
@@ -104,7 +104,13 @@
                 <td>{% sensitive_value p.amount "settlement_amount" %} {{ p.currency }}</td>
                 <td>{{ p.status }}</td>
                 <td>{{ p.payout_channel }}</td>
-                <td>{{ p.destination_account|default:"-" }}</td>
+                <td>
+                    {% if user|can_view_field:"settlement.payout.destination_account" %}
+                    {{ p.destination_account|default:"-" }}
+                    {% else %}
+                    ****
+                    {% endif %}
+                </td>
                 <td>{{ p.updated_at|date:"Y-m-d H:i" }}</td>
             </tr>
             {% empty %}
@@ -131,7 +137,7 @@
             {% for e in webhook_map|get_item:m.id %}
             <tr>
                 <td>{{ e.created_at|date:"Y-m-d H:i" }}</td>
-                <td>{{ e.nonce }}</td>
+                <td>{% if user|can_view_field:"merchant.webhook.nonce" %}{{ e.nonce }}{% else %}****{% endif %}</td>
                 <td>{% if e.signature_valid %}Y{% else %}N{% endif %}</td>
                 <td>{% if e.replay_detected %}Y{% else %}N{% endif %}</td>
                 <td>{{ e.status }}</td>

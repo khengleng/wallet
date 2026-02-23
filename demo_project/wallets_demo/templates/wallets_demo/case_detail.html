@@ -8,7 +8,13 @@
             <h2>Case 360: {{ case_obj.case_no }}</h2>
             <p class="text-muted">{{ case_obj.case_type|title }} | Priority: {{ case_obj.priority|title }} | Status: {{ case_obj.status|title }}</p>
             <p><strong>{{ case_obj.title }}</strong></p>
-            <p class="text-muted">{{ case_obj.description|default:"No description" }}</p>
+            <p class="text-muted">
+                {% if user|can_view_field:"ops.case.description" %}
+                {{ case_obj.description|default:"No description" }}
+                {% else %}
+                ****
+                {% endif %}
+            </p>
         </div>
         <a class="btn btn-outline" href="{% url 'operations_center' %}?tab=oc-cases#oc-cases">Back to Case List</a>
     </div>
@@ -37,6 +43,7 @@
 
     <div class="card">
         <h3>Update Case</h3>
+        {% if user|can_do_action:"form.case_update" %}
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="form_type" value="case_update" />
@@ -50,12 +57,16 @@
             </div>
             <button class="btn btn-primary" type="submit">Save Case</button>
         </form>
+        {% else %}
+        <p class="text-muted">You do not have permission to update this case.</p>
+        {% endif %}
     </div>
 </div>
 
 <div class="tab-pane" id="case-timeline">
     <div class="card">
         <h3>Add Note</h3>
+        {% if user|can_do_action:"form.case_note_add" %}
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="form_type" value="case_note_add" />
@@ -63,6 +74,9 @@
             <label style="display:flex;gap:0.5rem;margin-bottom:1rem;"><input type="checkbox" name="is_internal" checked />Internal note</label>
             <button class="btn btn-primary" type="submit">Add Note</button>
         </form>
+        {% else %}
+        <p class="text-muted">You do not have permission to add case notes.</p>
+        {% endif %}
     </div>
     <div class="card">
         <h3>Timeline</h3>
@@ -75,7 +89,13 @@
                         <td style="font-size:0.78rem;">{{ note.created_at|date:"d M Y H:i" }}</td>
                         <td>{{ note.created_by.username }}</td>
                         <td>{% if note.is_internal %}<span class="badge-pending">Internal</span>{% else %}External{% endif %}</td>
-                        <td>{{ note.note }}</td>
+                        <td>
+                            {% if user|can_view_field:"ops.case.note" %}
+                            {{ note.note }}
+                            {% else %}
+                            ****
+                            {% endif %}
+                        </td>
                     </tr>
                     {% empty %}
                     <tr><td colspan="4" class="text-muted" style="text-align:center;">No notes yet.</td></tr>
@@ -111,6 +131,7 @@
 <div class="tab-pane" id="case-docs">
     <div class="card">
         <h3>Upload Document</h3>
+        {% if user|can_do_action:"form.case_document_add" %}
         <form method="post" enctype="multipart/form-data">
             {% csrf_token %}
             <input type="hidden" name="form_type" value="case_document_add" />
@@ -124,6 +145,9 @@
             <label style="display:flex;gap:0.5rem;margin-bottom:1rem;"><input type="checkbox" name="is_internal" checked />Internal document</label>
             <button class="btn btn-primary" type="submit">Upload Document</button>
         </form>
+        {% else %}
+        <p class="text-muted">You do not have permission to upload case documents.</p>
+        {% endif %}
     </div>
 
     <div class="card">
