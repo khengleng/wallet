@@ -4,6 +4,7 @@ import time
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.messages.api import MessageFailure
 from django.contrib.auth import logout as auth_logout
 from django.shortcuts import redirect
 
@@ -45,8 +46,13 @@ class KeycloakSessionGuardMiddleware:
             return self.get_response(request)
 
         auth_logout(request)
-        messages.error(
-            request,
-            "Your identity session is no longer active. Please sign in again.",
-        )
+        try:
+            messages.error(
+                request,
+                "Your identity session is no longer active. Please sign in again.",
+            )
+        except MessageFailure:
+            # Some deployment paths may not have message middleware active.
+            # Redirect should still work without raising a 500.
+            pass
         return redirect("login")
