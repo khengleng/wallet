@@ -723,8 +723,9 @@ def keycloak_callback(request):
         introspection_claims: dict = {}
         try:
             introspection_claims = introspect_access_token(access_token)
-        except Exception:
+        except Exception as exc:
             # Best-effort only; login should not fail solely due to introspection jitter.
+            logger.warning("Keycloak introspection failed during callback: %s", exc)
             introspection_claims = {}
         merged_claims = merge_keycloak_claims(
             access_claims,
