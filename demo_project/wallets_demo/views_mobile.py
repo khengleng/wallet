@@ -185,11 +185,15 @@ def mobile_assistant_diagnostics(request):
     if request.method != "GET":
         return legacy._mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
 
-    access_token = request.session.get("oidc_access_token", "").strip()
+    authorization = request.headers.get("Authorization", "")
+    header_token = ""
+    if authorization.startswith("Bearer "):
+        header_token = authorization.split(" ", 1)[1].strip()
+    access_token = header_token or request.session.get("oidc_access_token", "").strip()
     health_probe = legacy._mobile_bff_probe(path="/healthz", timeout=4)
     result = {
         "timestamp": timezone.now().isoformat(),
-        "mode": "session",
+        "mode": "token" if header_token else "session",
         "mobile_bff_base_url": legacy._mobile_bff_base_url(),
         "session_token_present": bool(access_token),
         "web_openai_configured": bool(getattr(settings, "OPENAI_API_KEY", "").strip()),
@@ -247,7 +251,11 @@ def mobile_assistant_chat(request):
     if not message:
         return legacy._mobile_json_error("message is required.", code="message_required")
 
-    access_token = request.session.get("oidc_access_token", "").strip()
+    authorization = request.headers.get("Authorization", "")
+    header_token = ""
+    if authorization.startswith("Bearer "):
+        header_token = authorization.split(" ", 1)[1].strip()
+    access_token = header_token or request.session.get("oidc_access_token", "").strip()
     if not access_token:
         fallback = _openai_assistant_fallback(
             user=user,

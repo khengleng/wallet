@@ -326,6 +326,18 @@
       };
     }
 
+    function assistantHeaders() {
+      const headers = {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken
+      };
+      const token = getActiveToken();
+      if (token) {
+        headers["Authorization"] = "Bearer " + token;
+      }
+      return headers;
+    }
+
     function inTokenMode() {
       return authModeEl.value === "token";
     }
@@ -566,28 +578,20 @@
       appendChat("user", message);
 
       try {
-        let body;
-        if (inTokenMode()) {
-          const headers = authHeaders();
-          if (!headers) {
-            appendChat("bot", "Token mode selected but no token provided.");
-            return;
-          }
-          body = await callJson(gatewayBase + "/assistant/chat", {
-            method: "POST",
-            headers: headers,
-            body: JSON.stringify({ message: message, context: { channel: "native_lab_web_token_mode" } })
-          });
-        } else {
-          body = await callJson("/api/mobile/assistant/chat/", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-CSRFToken": csrfToken
-            },
-            body: JSON.stringify({ message: message, context: { channel: "native_lab_web" } })
-          });
+        if (inTokenMode() && !getActiveToken()) {
+          appendChat("bot", "Token mode selected but no token provided.");
+          return;
         }
+        const body = await callJson("/api/mobile/assistant/chat/", {
+          method: "POST",
+          headers: assistantHeaders(),
+          body: JSON.stringify({
+            message: message,
+            context: {
+              channel: inTokenMode() ? "native_lab_web_token_mode" : "native_lab_web"
+            }
+          })
+        });
         const reply = ((((body || {}).data || {}).assistant || {}).reply) || "No reply";
         appendChat("bot", reply);
         setOutput(body);
