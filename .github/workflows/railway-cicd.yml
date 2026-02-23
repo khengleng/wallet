@@ -1,23 +1,13 @@
-name: Railway CI/CD
+name: Railway Smoke Verify (Manual)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
-  deploy:
+  smoke_verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
-      RAILWAY_DEPLOY_HOOK_WEB: ${{ secrets.RAILWAY_DEPLOY_HOOK_WEB }}
-      RAILWAY_DEPLOY_HOOK_LEDGER: ${{ secrets.RAILWAY_DEPLOY_HOOK_LEDGER }}
-      RAILWAY_DEPLOY_HOOK_GATEWAY: ${{ secrets.RAILWAY_DEPLOY_HOOK_GATEWAY }}
-      RAILWAY_DEPLOY_HOOK_IDENTITY: ${{ secrets.RAILWAY_DEPLOY_HOOK_IDENTITY }}
-      RAILWAY_DEPLOY_HOOK_OPS_RISK: ${{ secrets.RAILWAY_DEPLOY_HOOK_OPS_RISK }}
-      RAILWAY_DEPLOY_HOOK_AUDIT_EXPORT: ${{ secrets.RAILWAY_DEPLOY_HOOK_AUDIT_EXPORT }}
-      RAILWAY_DEPLOY_HOOK_MOBILE_BFF: ${{ secrets.RAILWAY_DEPLOY_HOOK_MOBILE_BFF }}
       SMOKE_WEB_BASE_URL: ${{ secrets.SMOKE_WEB_BASE_URL }}
       SMOKE_GATEWAY_BASE_URL: ${{ secrets.SMOKE_GATEWAY_BASE_URL }}
       SMOKE_LEDGER_BASE_URL: ${{ secrets.SMOKE_LEDGER_BASE_URL }}
@@ -33,40 +23,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Trigger Railway deploy hooks
-        run: |
-          set -euo pipefail
-          trigger_hook() {
-            local name="$1"
-            local hook="$2"
-            if [ -z "$hook" ]; then
-              echo "skip ${name} (no hook configured)"
-              return 0
-            fi
-            if [[ "$hook" == *"<"* ]] || [[ "$hook" == *">"* ]] || [[ "$hook" == *"..."* ]]; then
-              echo "skip ${name} (placeholder hook value)"
-              return 0
-            fi
-            if [[ "$hook" != https://backboard.railway.app/hooks/* ]]; then
-              echo "skip ${name} (invalid hook format)"
-              return 0
-            fi
-            echo "trigger ${name}"
-            curl --fail --silent --show-error --retry 4 --retry-delay 3 \
-              -X POST "$hook" >/dev/null
-          }
-
-          trigger_hook "web" "${RAILWAY_DEPLOY_HOOK_WEB}"
-          trigger_hook "ledger" "${RAILWAY_DEPLOY_HOOK_LEDGER}"
-          trigger_hook "gateway" "${RAILWAY_DEPLOY_HOOK_GATEWAY}"
-          trigger_hook "identity" "${RAILWAY_DEPLOY_HOOK_IDENTITY}"
-          trigger_hook "ops_risk" "${RAILWAY_DEPLOY_HOOK_OPS_RISK}"
-          trigger_hook "audit_export" "${RAILWAY_DEPLOY_HOOK_AUDIT_EXPORT}"
-          trigger_hook "mobile_bff" "${RAILWAY_DEPLOY_HOOK_MOBILE_BFF}"
-
-      - name: Wait for rollout
-        run: sleep 45
 
       - name: Post-deploy smoke checks
         run: |
