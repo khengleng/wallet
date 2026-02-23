@@ -1605,14 +1605,20 @@ class MerchantOpsWorkflowTests(TestCase):
         payout = SettlementPayout.objects.get(settlement=settlement)
         self.assertEqual(payout.status, SettlementPayout.STATUS_PENDING)
 
+        checker_admin = User.objects.create_user(
+            username="ops_admin_checker",
+            password="pass12345",
+        )
+        assign_roles(checker_admin, ["admin"])
         self.client.logout()
-        self.client.login(username="risk_user", password="pass12345")
+        self.client.login(username="ops_admin_checker", password="pass12345")
         resp = self.client.post(
             reverse("operations_center"),
             {
                 "form_type": "settlement_payout_decision",
                 "payout_id": payout.id,
                 "decision": "settle",
+                "checker_note": "settled after bank confirmation",
             },
         )
         self.assertEqual(resp.status_code, 302)
@@ -1620,6 +1626,62 @@ class MerchantOpsWorkflowTests(TestCase):
         settlement.refresh_from_db()
         self.assertEqual(payout.status, SettlementPayout.STATUS_SETTLED)
         self.assertEqual(settlement.status, MerchantSettlementRecord.STATUS_PAID)
+
+    def test_payout_decision_rejects_maker_checker_same_user(self):
+        settlement = MerchantSettlementRecord.objects.create(
+            merchant=self.merchant,
+            settlement_no="SETTLE-OPS-2",
+            currency="USD",
+            period_start=self.case.created_at.date(),
+            period_end=self.case.created_at.date(),
+            gross_amount=Decimal("120"),
+            fee_amount=Decimal("2"),
+            net_amount=Decimal("118"),
+            event_count=1,
+            status=MerchantSettlementRecord.STATUS_POSTED,
+            created_by=self.admin,
+        )
+        self.client.login(username="ops_admin", password="pass12345")
+        submit_resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "settlement_payout_submit",
+                "settlement_id": settlement.id,
+                "payout_channel": "bank_transfer",
+                "destination_account": "ACC-RISK",
+            },
+        )
+        self.assertEqual(submit_resp.status_code, 302)
+        payout = SettlementPayout.objects.get(settlement=settlement)
+        self.assertEqual(payout.initiated_by, self.admin)
+
+        decide_resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "settlement_payout_decision",
+                "payout_id": payout.id,
+                "decision": "send",
+                "checker_note": "self-check should fail",
+            },
+        )
+        self.assertEqual(decide_resp.status_code, 200)
+        payout.refresh_from_db()
+        self.assertEqual(payout.status, SettlementPayout.STATUS_PENDING)
+
+    def test_case_resolution_requires_note(self):
+        self.client.login(username="ops_user", password="pass12345")
+        resp = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "case_update",
+                "case_id": self.case.id,
+                "status": OperationCase.STATUS_RESOLVED,
+                "note": "",
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.case.refresh_from_db()
+        self.assertNotEqual(self.case.status, OperationCase.STATUS_RESOLVED)
 
     def test_reconciliation_run_and_break_resolution(self):
         self.client.login(username="ops_admin", password="pass12345")

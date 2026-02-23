@@ -433,6 +433,18 @@ def _require_menu_access(user, menu_key: str) -> None:
         raise PermissionDenied(f"Menu '{menu_key}' is not available for your role.")
 
 
+def _require_checker_note(*, decision: str, checker_note: str, label: str) -> None:
+    decision = (decision or "").strip().lower()
+    requires_note = decision in {"approve", "reject", "send", "settle", "fail"}
+    if requires_note and not (checker_note or "").strip():
+        raise ValidationError(f"Checker note is required for {label}.")
+
+
+def _ensure_maker_checker_separation(*, checker_user: User, maker_user_id: int | None, label: str) -> None:
+    if maker_user_id and checker_user.id == maker_user_id:
+        raise ValidationError(f"Maker cannot decide own {label}.")
+
+
 def _require_form_action_permission(
     user,
     form_type: str,
@@ -3054,14 +3066,20 @@ def accounting_dashboard(request):
                 )
                 if approval.status != JournalEntryApproval.STATUS_PENDING:
                     raise ValidationError("Approval request already decided.")
-                if approval.maker_id == request.user.id:
-                    raise ValidationError("Maker cannot approve/reject own request.")
+                _ensure_maker_checker_separation(
+                    checker_user=request.user,
+                    maker_user_id=approval.maker_id,
+                    label="journal approval request",
+                )
                 decision = (request.POST.get("decision") or "").strip().lower()
                 checker_note = (request.POST.get("checker_note") or "").strip()
                 if decision not in {"approve", "reject"}:
                     raise ValidationError("Invalid approval decision.")
-                if decision == "reject" and not checker_note:
-                    raise ValidationError("Checker note is required when rejecting a request.")
+                _require_checker_note(
+                    decision=decision,
+                    checker_note=checker_note,
+                    label="journal approval decision",
+                )
                 if decision == "approve":
                     approval.entry.post(request.user)
                     approval.status = JournalEntryApproval.STATUS_APPROVED
@@ -3605,8 +3623,18 @@ def operations_center(request):
                 decision = (request.POST.get("decision") or "").strip().lower()
                 if kyb.status != MerchantKYBRequest.STATUS_PENDING:
                     raise ValidationError("KYB request is not pending.")
+                _ensure_maker_checker_separation(
+                    checker_user=request.user,
+                    maker_user_id=kyb.maker_id,
+                    label="KYB request",
+                )
                 if decision not in {MerchantKYBRequest.STATUS_APPROVED, MerchantKYBRequest.STATUS_REJECTED}:
                     raise ValidationError("Invalid KYB decision.")
+                _require_checker_note(
+                    decision="approve" if decision == MerchantKYBRequest.STATUS_APPROVED else "reject",
+                    checker_note=(request.POST.get("checker_note") or "").strip(),
+                    label="KYB decision",
+                )
                 kyb.status = decision
                 kyb.checker = request.user
                 kyb.checker_note = (request.POST.get("checker_note") or "").strip()
@@ -3849,6 +3877,21 @@ def operations_center(request):
                     MerchantSettlementRecord.STATUS_PAID,
                 }:
                     raise ValidationError("Invalid settlement status.")
+                checker_note = (request.POST.get("checker_note") or "").strip()
+                if status in {
+                    MerchantSettlementRecord.STATUS_POSTED,
+                    MerchantSettlementRecord.STATUS_PAID,
+                }:
+                    _ensure_maker_checker_separation(
+                        checker_user=request.user,
+                        maker_user_id=settlement.created_by_id,
+                        label="settlement status update",
+                    )
+                    _require_checker_note(
+                        decision="approve",
+                        checker_note=checker_note,
+                        label="settlement status update",
+                    )
                 settlement.status = status
                 if status in {
                     MerchantSettlementRecord.STATUS_POSTED,
@@ -3932,8 +3975,18 @@ def operations_center(request):
                     raise ValidationError("Refund request is not pending.")
                 decision = (request.POST.get("decision") or "").strip().lower()
                 checker_note = (request.POST.get("checker_note") or "").strip()
+                _ensure_maker_checker_separation(
+                    checker_user=request.user,
+                    maker_user_id=refund.maker_id,
+                    label="refund request",
+                )
                 if decision not in {"approve", "reject"}:
                     raise ValidationError("Invalid refund decision.")
+                _require_checker_note(
+                    decision=decision,
+                    checker_note=checker_note,
+                    label="refund decision",
+                )
                 if decision == "reject":
                     refund.status = DisputeRefundRequest.STATUS_REJECTED
                     refund.checker = request.user
@@ -4132,8 +4185,18 @@ def operations_center(request):
                     SettlementPayout.STATUS_SENT,
                 }:
                     raise ValidationError("Payout is not in actionable status.")
+                _ensure_maker_checker_separation(
+                    checker_user=request.user,
+                    maker_user_id=payout.initiated_by_id,
+                    label="payout request",
+                )
                 if decision not in {"send", "settle", "fail"}:
                     raise ValidationError("Invalid payout decision.")
+                _require_checker_note(
+                    decision=decision,
+                    checker_note=(request.POST.get("checker_note") or "").strip(),
+                    label="payout decision",
+                )
                 now = timezone.now()
                 if decision == "send":
                     payout.status = SettlementPayout.STATUS_SENT
@@ -4510,8 +4573,18 @@ def operations_center(request):
                 if approval.status != JournalBackdateApproval.STATUS_PENDING:
                     raise ValidationError("Backdate request already decided.")
                 decision = (request.POST.get("decision") or "").strip().lower()
+                _ensure_maker_checker_separation(
+                    checker_user=request.user,
+                    maker_user_id=approval.maker_id,
+                    label="backdate request",
+                )
                 if decision not in {"approve", "reject"}:
                     raise ValidationError("Invalid backdate decision.")
+                _require_checker_note(
+                    decision=decision,
+                    checker_note=(request.POST.get("checker_note") or "").strip(),
+                    label="backdate decision",
+                )
                 approval.status = (
                     JournalBackdateApproval.STATUS_APPROVED
                     if decision == "approve"
@@ -4822,6 +4895,11 @@ def operations_center(request):
                 if sla_due_at_raw is not None:
                     case.sla_due_at = _parse_optional_datetime(sla_due_at_raw)
                 if case.status in (OperationCase.STATUS_RESOLVED, OperationCase.STATUS_CLOSED):
+                    note_text = (request.POST.get("note") or "").strip()
+                    if not note_text:
+                        raise ValidationError(
+                            "Resolution note is required when moving case to resolved/closed."
+                        )
                     case.resolved_at = timezone.now()
                 case.save(
                     update_fields=["status", "assigned_to", "sla_due_at", "resolved_at", "updated_at"]
@@ -5279,7 +5357,32 @@ def operations_center(request):
                     "Operations center merchant bootstrap failed for merchant_id=%s",
                     merchant.id,
                 )
-        cases = OperationCase.objects.select_related("customer", "merchant", "assigned_to").order_by("-created_at")[:100]
+        case_status_filter = (request.GET.get("case_status") or "").strip().lower()
+        case_priority_filter = (request.GET.get("case_priority") or "").strip().lower()
+        case_assigned_to_filter = (request.GET.get("case_assigned_to") or "").strip()
+        case_sla_filter = (request.GET.get("case_sla") or "").strip().lower()
+
+        case_qs = OperationCase.objects.select_related(
+            "customer", "merchant", "assigned_to"
+        ).order_by("-created_at")
+        if case_status_filter:
+            case_qs = case_qs.filter(status=case_status_filter)
+        if case_priority_filter:
+            case_qs = case_qs.filter(priority=case_priority_filter)
+        if case_assigned_to_filter:
+            case_qs = case_qs.filter(assigned_to_id=case_assigned_to_filter)
+        now_ts = timezone.now()
+        if case_sla_filter == "overdue":
+            case_qs = case_qs.exclude(
+                status__in=[OperationCase.STATUS_RESOLVED, OperationCase.STATUS_CLOSED]
+            ).filter(sla_due_at__isnull=False, sla_due_at__lt=now_ts)
+        elif case_sla_filter == "due_24h":
+            case_qs = case_qs.exclude(
+                status__in=[OperationCase.STATUS_RESOLVED, OperationCase.STATUS_CLOSED]
+            ).filter(sla_due_at__isnull=False, sla_due_at__gte=now_ts, sla_due_at__lte=now_ts + timedelta(hours=24))
+        elif case_sla_filter == "no_sla":
+            case_qs = case_qs.filter(sla_due_at__isnull=True)
+        cases = case_qs[:100]
         case_ids = [item.id for item in cases]
         case_notes = OperationCaseNote.objects.select_related("created_by", "case").filter(
             case_id__in=case_ids
@@ -5336,6 +5439,38 @@ def operations_center(request):
         access_reviews = AccessReviewRecord.objects.select_related(
             "user", "reviewer"
         ).order_by("-created_at")[:100]
+        open_case_statuses = [
+            OperationCase.STATUS_OPEN,
+            OperationCase.STATUS_IN_PROGRESS,
+            OperationCase.STATUS_ESCALATED,
+        ]
+        open_cases_count = OperationCase.objects.filter(status__in=open_case_statuses).count()
+        breached_cases_count = OperationCase.objects.filter(
+            status__in=open_case_statuses,
+            sla_due_at__isnull=False,
+            sla_due_at__lt=now_ts,
+        ).count()
+        refunds_overdue_count = DisputeRefundRequest.objects.filter(
+            status=DisputeRefundRequest.STATUS_PENDING,
+            sla_due_at__isnull=False,
+            sla_due_at__lt=now_ts,
+        ).count()
+        pending_payout_24h = SettlementPayout.objects.filter(
+            status__in=[SettlementPayout.STATUS_PENDING, SettlementPayout.STATUS_SENT],
+            created_at__lt=now_ts - timedelta(hours=24),
+        ).count()
+        pending_payout_72h = SettlementPayout.objects.filter(
+            status__in=[SettlementPayout.STATUS_PENDING, SettlementPayout.STATUS_SENT],
+            created_at__lt=now_ts - timedelta(hours=72),
+        ).count()
+        open_recon_2d = ReconciliationBreak.objects.filter(
+            status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW],
+            created_at__lt=now_ts - timedelta(days=2),
+        ).count()
+        open_recon_7d = ReconciliationBreak.objects.filter(
+            status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW],
+            created_at__lt=now_ts - timedelta(days=7),
+        ).count()
         return render(
             request,
             "wallets_demo/operations_center.html",
@@ -5366,6 +5501,21 @@ def operations_center(request):
                 "users": User.objects.order_by("username")[:300],
                 "operation_settings": _operation_settings(),
                 "supported_currencies": _supported_currencies(),
+                "operations_kpis": {
+                    "open_cases": open_cases_count,
+                    "sla_breaches": breached_cases_count,
+                    "refunds_overdue": refunds_overdue_count,
+                    "pending_payout_24h": pending_payout_24h,
+                    "pending_payout_72h": pending_payout_72h,
+                    "open_recon_2d": open_recon_2d,
+                    "open_recon_7d": open_recon_7d,
+                },
+                "case_filters": {
+                    "status": case_status_filter,
+                    "priority": case_priority_filter,
+                    "assigned_to": case_assigned_to_filter,
+                    "sla": case_sla_filter,
+                },
                 "flow_choices": FLOW_CHOICES,
                 "case_type_choices": OperationCase.TYPE_CHOICES,
                 "case_priority_choices": OperationCase.PRIORITY_CHOICES,
@@ -5763,9 +5913,19 @@ def reconciliation_workbench(request):
                 decision = (request.POST.get("decision") or "").strip().lower()
                 if recon_break.resolution_status != ReconciliationBreak.RESOLUTION_PENDING:
                     raise ValidationError("Resolution is not pending checker decision.")
+                _ensure_maker_checker_separation(
+                    checker_user=request.user,
+                    maker_user_id=recon_break.resolution_requested_by_id,
+                    label="reconciliation resolution",
+                )
                 required_role = (recon_break.required_checker_role or "").strip()
                 if required_role and not user_has_any_role(request.user, (required_role,)):
                     raise PermissionDenied(f"Checker must have role {required_role}.")
+                _require_checker_note(
+                    decision=decision,
+                    checker_note=(request.POST.get("resolution_checker_note") or "").strip(),
+                    label="reconciliation resolution decision",
+                )
                 recon_break.resolution_checker = request.user
                 recon_break.resolution_checker_note = (
                     request.POST.get("resolution_checker_note") or recon_break.resolution_checker_note
@@ -6902,12 +7062,20 @@ def policy_hub(request):
                 ).get(id=request.POST.get("request_id"))
                 if req.status != CustomerClassUpgradeRequest.STATUS_PENDING:
                     raise ValidationError("Only pending requests can be decided.")
-                if req.maker_id == request.user.id:
-                    raise ValidationError("Maker and checker must be different users.")
+                _ensure_maker_checker_separation(
+                    checker_user=request.user,
+                    maker_user_id=req.maker_id,
+                    label="customer class upgrade request",
+                )
                 decision = (request.POST.get("decision") or "").strip().lower()
                 checker_note = (request.POST.get("checker_note") or "").strip()
                 if decision not in {"approve", "reject"}:
                     raise ValidationError("Invalid decision.")
+                _require_checker_note(
+                    decision=decision,
+                    checker_note=checker_note,
+                    label="customer class upgrade decision",
+                )
                 req.checker = request.user
                 req.checker_note = checker_note
                 req.decided_at = timezone.now()
