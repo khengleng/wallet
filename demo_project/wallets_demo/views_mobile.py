@@ -3,6 +3,7 @@
 import json
 import logging
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 import re
 from decimal import Decimal
 
@@ -102,8 +103,9 @@ def _openai_assistant_fallback(*, user, message: str, context: dict) -> dict:
             "suggested_actions": ["configure_openai", "check_mobile_bff", "contact_ops_admin"],
         }
 
+    model_name = getattr(settings, "OPENAI_MODEL", "gpt-5-mini")
     payload = {
-        "model": getattr(settings, "OPENAI_MODEL", "gpt-5-mini"),
+        "model": model_name,
         "input": [
             {
                 "role": "system",
@@ -137,42 +139,108 @@ def _openai_assistant_fallback(*, user, message: str, context: dict) -> dict:
         },
         method="POST",
     )
+    parsed = {}
+    used_endpoint = "responses"
     try:
         with urlopen(req, timeout=float(getattr(settings, "OPENAI_TIMEOUT_SECONDS", 10.0) or 10.0)) as resp:
             raw = resp.read().decode("utf-8")
         parsed = json.loads(raw or "{}")
-        output_text = ""
-        for item in parsed.get("output", []) or []:
-            for content in item.get("content", []) or []:
-                if content.get("type") in {"output_text", "text"}:
-                    output_text += str(content.get("text", ""))
-        assistant_payload = _extract_first_json_object(output_text)
-        reply = str(assistant_payload.get("reply") or "").strip()
-        actions = assistant_payload.get("suggested_actions")
-        if not isinstance(actions, list):
-            actions = []
-        actions = [str(a).strip() for a in actions if str(a).strip()][:8]
-        if not reply:
-            reply = "I can help with wallet actions, limits, fees, and safety. Ask a specific question."
-        return {
-            "enabled": True,
-            "status": "ok",
-            "source": "web_openai_fallback",
-            "model": getattr(settings, "OPENAI_MODEL", "gpt-5-mini"),
-            "reply": reply,
-            "suggested_actions": actions,
-        }
     except Exception as exc:
-        logger.warning("openai fallback failed: %s", exc)
-        return {
-            "enabled": False,
-            "status": "fallback",
-            "reply": (
-                "I cannot reach the AI service right now. "
-                "Please try again shortly."
-            ),
-            "suggested_actions": ["retry", "check_openai_key", "contact_ops_admin"],
+        used_endpoint = "chat_completions"
+        chat_payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a wallet app assistant. "
+                        "Be concise, safe, and actionable. "
+                        "Return strict JSON: {\"reply\": string, \"suggested_actions\": string[]}."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "username": user.username,
+                            "wallet_type": user.wallet_type,
+                            "message": message,
+                            "context": context if isinstance(context, dict) else {},
+                        },
+                        separators=(",", ":"),
+                    ),
+                },
+            ],
+            "max_tokens": 350,
+            "temperature": 0.2,
         }
+        chat_req = Request(
+            f"{getattr(settings, 'OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/')}/chat/completions",
+            data=json.dumps(chat_payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(chat_req, timeout=float(getattr(settings, "OPENAI_TIMEOUT_SECONDS", 10.0) or 10.0)) as resp:
+                chat_raw = resp.read().decode("utf-8")
+            chat_parsed = json.loads(chat_raw or "{}")
+            content = ""
+            choices = chat_parsed.get("choices") or []
+            if choices:
+                message_obj = choices[0].get("message") or {}
+                content = str(message_obj.get("content") or "")
+            parsed = {"output": [{"content": [{"type": "output_text", "text": content}]}]}
+        except Exception as chat_exc:
+            status_code = 0
+            reason = "openai_request_failed"
+            err = chat_exc
+            if isinstance(err, HTTPError):
+                status_code = int(getattr(err, "code", 0) or 0)
+                if status_code in {401, 403}:
+                    reason = "openai_auth_error"
+                elif status_code == 429:
+                    reason = "openai_rate_limited"
+                elif status_code in {400, 404, 422}:
+                    reason = "openai_model_or_endpoint_error"
+            elif isinstance(err, URLError):
+                reason = "openai_network_error"
+            logger.warning("openai fallback failed: %s", exc)
+            return {
+                "enabled": False,
+                "status": "fallback",
+                "reason": reason,
+                "http_status": status_code,
+                "reply": (
+                    "I cannot reach the AI service right now. "
+                    "Please try again shortly."
+                ),
+                "suggested_actions": ["retry", "check_openai_key", "contact_ops_admin"],
+            }
+
+    output_text = ""
+    for item in parsed.get("output", []) or []:
+        for content in item.get("content", []) or []:
+            if content.get("type") in {"output_text", "text"}:
+                output_text += str(content.get("text", ""))
+    assistant_payload = _extract_first_json_object(output_text)
+    reply = str(assistant_payload.get("reply") or "").strip()
+    actions = assistant_payload.get("suggested_actions")
+    if not isinstance(actions, list):
+        actions = []
+    actions = [str(a).strip() for a in actions if str(a).strip()][:8]
+    if not reply:
+        reply = "I can help with wallet actions, limits, fees, and safety. Ask a specific question."
+    return {
+        "enabled": True,
+        "status": "ok",
+        "source": f"web_openai_fallback_{used_endpoint}",
+        "model": model_name,
+        "reply": reply,
+        "suggested_actions": actions,
+    }
 
 
 def _extract_transaction_proposal(*, user, message: str) -> dict | None:

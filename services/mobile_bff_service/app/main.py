@@ -363,8 +363,9 @@ async def _openai_assistant_chat(
         "Return strict JSON: {reply: string, suggested_actions: string[]}. "
         "If transaction execution is requested, respond with guidance only."
     )
+    model_name = settings.openai_model
     request_payload = {
-        "model": settings.openai_model,
+        "model": model_name,
         "input": [
             {"role": "system", "content": instructions},
             {"role": "user", "content": json.dumps(model_context, separators=(",", ":"))},
@@ -376,6 +377,8 @@ async def _openai_assistant_chat(
         "Content-Type": "application/json",
     }
     endpoint = f"{settings.openai_base_url}/responses"
+    used_endpoint = "responses"
+    body: dict[str, Any] | None = None
     try:
         response = await _get_http_client().post(
             endpoint,
@@ -385,17 +388,59 @@ async def _openai_assistant_chat(
         )
         response.raise_for_status()
         body = response.json()
-    except Exception:
-        _inc_counter("upstream_errors_total")
-        return {
-            "enabled": True,
-            "status": "fallback",
-            "reply": "I cannot reach the AI service right now. Please try again shortly.",
-            "suggested_actions": ["retry", "view_balance", "contact_support"],
+    except Exception as exc:
+        # Compatibility fallback for providers or models that do not support /responses.
+        used_endpoint = "chat_completions"
+        chat_endpoint = f"{settings.openai_base_url}/chat/completions"
+        chat_payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": json.dumps(model_context, separators=(",", ":"))},
+            ],
+            "max_tokens": 350,
+            "temperature": 0.2,
         }
+        try:
+            chat_response = await _get_http_client().post(
+                chat_endpoint,
+                headers=headers,
+                json=chat_payload,
+                timeout=settings.openai_timeout_seconds,
+            )
+            chat_response.raise_for_status()
+            chat_body = chat_response.json()
+            message_content = ""
+            choices = chat_body.get("choices") or []
+            if choices:
+                message = choices[0].get("message") or {}
+                message_content = str(message.get("content") or "")
+            body = {"output": [{"content": [{"type": "output_text", "text": message_content}]}]}
+        except Exception as chat_exc:
+            _inc_counter("upstream_errors_total")
+            reason = "openai_request_failed"
+            status_code = 0
+            if isinstance(chat_exc, httpx.HTTPStatusError):
+                status_code = int(chat_exc.response.status_code)
+                if status_code in {401, 403}:
+                    reason = "openai_auth_error"
+                elif status_code == 429:
+                    reason = "openai_rate_limited"
+                elif status_code in {400, 404, 422}:
+                    reason = "openai_model_or_endpoint_error"
+            elif isinstance(exc, httpx.HTTPStatusError):
+                status_code = int(exc.response.status_code)
+            return {
+                "enabled": True,
+                "status": "fallback",
+                "reason": reason,
+                "http_status": status_code,
+                "reply": "I cannot reach the AI service right now. Please try again shortly.",
+                "suggested_actions": ["retry", "check_openai_configuration", "contact_support"],
+            }
 
     output_text = ""
-    for item in body.get("output", []) or []:
+    for item in (body or {}).get("output", []) or []:
         for content in item.get("content", []) or []:
             if content.get("type") in {"output_text", "text"}:
                 output_text += str(content.get("text", ""))
@@ -410,7 +455,8 @@ async def _openai_assistant_chat(
     return {
         "enabled": True,
         "status": "ok",
-        "model": settings.openai_model,
+        "model": model_name,
+        "source": used_endpoint,
         "reply": reply,
         "suggested_actions": actions,
     }
