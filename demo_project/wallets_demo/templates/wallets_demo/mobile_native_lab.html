@@ -367,7 +367,12 @@
           <div class="form-group"><label>Amount</label><input id="tx-amount" type="text" value="0" /></div>
           <div class="form-group"><label>Currency</label><input id="tx-currency" type="text" value="USD" /></div>
           <div class="form-group"><label>From Username</label><input id="tx-from-username" type="text" /></div>
-          <div class="form-group"><label>To Username (transfer only)</label><input id="tx-to-username" type="text" /></div>
+          <div class="form-group">
+            <label>To Username (transfer only)</label>
+            <select id="tx-to-username">
+              <option value="">Select recipient</option>
+            </select>
+          </div>
           <div class="form-group"><label>Description</label><input id="tx-description" type="text" value="assistant_transfer" /></div>
           <div class="form-group"><label>Transaction PIN</label><input id="tx-pin" type="password" autocomplete="one-time-code" inputmode="numeric" placeholder="PIN required for commit" /></div>
           <div class="flex gap-2">
@@ -397,6 +402,7 @@
     const personaPanelEl = document.getElementById("session-impersonation-panel");
     const personaSelectEl = document.getElementById("persona-select");
     const personaStatusEl = document.getElementById("persona-status");
+    const txToUsernameEl = document.getElementById("tx-to-username");
     const pinStatusEl = document.getElementById("pf-pin-status");
     const pinSetupStatusEl = document.getElementById("pin-setup-status");
     const txSheetStatusEl = document.getElementById("tx-sheet-status");
@@ -702,7 +708,13 @@
       document.getElementById("tx-amount").value = prefill.amount || "0";
       document.getElementById("tx-currency").value = (prefill.currency || "USD").toUpperCase();
       document.getElementById("tx-from-username").value = prefill.from_username || "";
-      document.getElementById("tx-to-username").value = prefill.to_username || "";
+      if (prefill.to_username && !Array.from(txToUsernameEl.options).some((opt) => opt.value === prefill.to_username)) {
+        const dynamicOption = document.createElement("option");
+        dynamicOption.value = prefill.to_username;
+        dynamicOption.textContent = prefill.to_username + " (typed)";
+        txToUsernameEl.appendChild(dynamicOption);
+      }
+      txToUsernameEl.value = prefill.to_username || "";
       document.getElementById("tx-description").value = prefill.description || "assistant_txn";
       setTxSheetStatus("Assistant prepared transaction. Review and commit with PIN.");
       showTxModal();
@@ -923,6 +935,11 @@
         const body = await callJson("/api/playground/personas/", { method: "GET" });
         const personas = (((body || {}).data || {}).personas) || [];
         personaSelectEl.innerHTML = "";
+        txToUsernameEl.innerHTML = "";
+        const recipientDefaultOption = document.createElement("option");
+        recipientDefaultOption.value = "";
+        recipientDefaultOption.textContent = "Select recipient";
+        txToUsernameEl.appendChild(recipientDefaultOption);
         if (!personas.length) {
           const noneOption = document.createElement("option");
           noneOption.value = "";
@@ -942,6 +959,10 @@
           const serviceClass = persona.service_class ? " | class " + persona.service_class : "";
           option.textContent = persona.username + " (" + (persona.wallet_type || "C") + serviceClass + ")";
           personaSelectEl.appendChild(option);
+          const recipientOption = document.createElement("option");
+          recipientOption.value = persona.username;
+          recipientOption.textContent = option.textContent;
+          txToUsernameEl.appendChild(recipientOption);
         });
       } catch (err) {
         personaSelectEl.innerHTML = '<option value="">Failed to load personas</option>';
@@ -1022,7 +1043,7 @@
       document.getElementById("tx-amount").value = "0";
       document.getElementById("tx-currency").value = "USD";
       document.getElementById("tx-from-username").value = "";
-      document.getElementById("tx-to-username").value = "";
+      txToUsernameEl.value = "";
       document.getElementById("tx-description").value = "assistant_transfer";
       document.getElementById("tx-pin").value = "";
       setTxSheetStatus("Transaction sheet reset.");
