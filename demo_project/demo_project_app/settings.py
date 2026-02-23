@@ -254,6 +254,10 @@ MOBILE_BFF_BASE_URL = _env(
     "MOBILE_BFF_BASE_URL",
     "http://mobile-bff.railway.internal",
 ).strip().rstrip("/")
+OPENAI_API_KEY = _env("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-5-mini").strip()
+OPENAI_BASE_URL = _env("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "10.0"))
 
 
 def _parse_keycloak_role_group_map() -> dict[str, str]:

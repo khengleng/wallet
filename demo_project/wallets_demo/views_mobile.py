@@ -3,7 +3,9 @@
 import json
 import logging
 from urllib.request import Request, urlopen
+import re
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
@@ -17,6 +19,112 @@ from django.contrib.contenttypes.models import ContentType
 from . import views as legacy
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_first_json_object(raw: str) -> dict:
+    if not raw:
+        return {}
+    direct = raw.strip()
+    if direct.startswith("{") and direct.endswith("}"):
+        try:
+            parsed = json.loads(direct)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    match = re.search(r"\{[\s\S]*\}", raw)
+    if not match:
+        return {}
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _openai_assistant_fallback(*, user, message: str, context: dict) -> dict:
+    api_key = getattr(settings, "OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return {
+            "enabled": False,
+            "status": "fallback",
+            "reply": (
+                "Assistant is not configured yet. "
+                "Set OPENAI_API_KEY in Railway web service or restore mobile-bff connectivity."
+            ),
+            "suggested_actions": ["configure_openai", "check_mobile_bff", "contact_ops_admin"],
+        }
+
+    payload = {
+        "model": getattr(settings, "OPENAI_MODEL", "gpt-5-mini"),
+        "input": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a wallet app assistant. "
+                    "Be concise, safe, and actionable. "
+                    "Return strict JSON: {\"reply\": string, \"suggested_actions\": string[]}."
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "username": user.username,
+                        "wallet_type": user.wallet_type,
+                        "message": message,
+                        "context": context if isinstance(context, dict) else {},
+                    },
+                    separators=(",", ":"),
+                ),
+            },
+        ],
+        "max_output_tokens": 350,
+    }
+    req = Request(
+        f"{getattr(settings, 'OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/')}/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=float(getattr(settings, "OPENAI_TIMEOUT_SECONDS", 10.0) or 10.0)) as resp:
+            raw = resp.read().decode("utf-8")
+        parsed = json.loads(raw or "{}")
+        output_text = ""
+        for item in parsed.get("output", []) or []:
+            for content in item.get("content", []) or []:
+                if content.get("type") in {"output_text", "text"}:
+                    output_text += str(content.get("text", ""))
+        assistant_payload = _extract_first_json_object(output_text)
+        reply = str(assistant_payload.get("reply") or "").strip()
+        actions = assistant_payload.get("suggested_actions")
+        if not isinstance(actions, list):
+            actions = []
+        actions = [str(a).strip() for a in actions if str(a).strip()][:8]
+        if not reply:
+            reply = "I can help with wallet actions, limits, fees, and safety. Ask a specific question."
+        return {
+            "enabled": True,
+            "status": "ok",
+            "source": "web_openai_fallback",
+            "model": getattr(settings, "OPENAI_MODEL", "gpt-5-mini"),
+            "reply": reply,
+            "suggested_actions": actions,
+        }
+    except Exception as exc:
+        logger.warning("openai fallback failed: %s", exc)
+        return {
+            "enabled": False,
+            "status": "fallback",
+            "reply": (
+                "I cannot reach the AI service right now. "
+                "Please try again shortly."
+            ),
+            "suggested_actions": ["retry", "check_openai_key", "contact_ops_admin"],
+        }
 
 
 @login_required
@@ -84,6 +192,7 @@ def mobile_assistant_diagnostics(request):
         "mode": "session",
         "mobile_bff_base_url": legacy._mobile_bff_base_url(),
         "session_token_present": bool(access_token),
+        "web_openai_configured": bool(getattr(settings, "OPENAI_API_KEY", "").strip()),
         "mobile_bff_health": health_probe,
     }
 
@@ -140,6 +249,13 @@ def mobile_assistant_chat(request):
 
     access_token = request.session.get("oidc_access_token", "").strip()
     if not access_token:
+        fallback = _openai_assistant_fallback(
+            user=user,
+            message=message,
+            context=payload.get("context", {}),
+        )
+        if fallback.get("enabled"):
+            return JsonResponse({"ok": True, "data": {"assistant": fallback}})
         return JsonResponse(
             {
                 "ok": True,
@@ -182,6 +298,13 @@ def mobile_assistant_chat(request):
         return JsonResponse(body, status=status_code)
     except Exception as exc:
         logger.warning("mobile_assistant_chat proxy failed: %s", exc)
+        fallback = _openai_assistant_fallback(
+            user=user,
+            message=message,
+            context=payload.get("context", {}),
+        )
+        if fallback.get("enabled"):
+            return JsonResponse({"ok": True, "data": {"assistant": fallback}})
 
     return JsonResponse(
         {
