@@ -390,6 +390,18 @@
   </div>
 </div>
 
+<div id="tx-result-backdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal-card" style="max-width:480px;">
+    <div class="modal-head">
+      <strong id="tx-result-title">Transaction Result</strong>
+      <button id="btn-close-tx-result" class="btn btn-outline" type="button">Close</button>
+    </div>
+    <div class="modal-body">
+      <p id="tx-result-message" class="text-muted" style="margin:0;">No result yet.</p>
+    </div>
+  </div>
+</div>
+
 <script>
   (function() {
     const csrfToken = "{{ csrf_token }}";
@@ -411,6 +423,9 @@
     const pinSetupStatusEl = document.getElementById("pin-setup-status");
     const txSheetStatusEl = document.getElementById("tx-sheet-status");
     const txModalBackdropEl = document.getElementById("tx-modal-backdrop");
+    const txResultBackdropEl = document.getElementById("tx-result-backdrop");
+    const txResultTitleEl = document.getElementById("tx-result-title");
+    const txResultMessageEl = document.getElementById("tx-result-message");
 
     function getOverrideToken() {
       return (overrideTokenEl.value || "").trim();
@@ -486,6 +501,16 @@
     function hideTxModal() {
       txModalBackdropEl.classList.remove("active");
       txModalBackdropEl.setAttribute("aria-hidden", "true");
+    }
+    function showTxResult(title, message) {
+      txResultTitleEl.textContent = title || "Transaction Result";
+      txResultMessageEl.textContent = message || "";
+      txResultBackdropEl.classList.add("active");
+      txResultBackdropEl.setAttribute("aria-hidden", "false");
+    }
+    function hideTxResult() {
+      txResultBackdropEl.classList.remove("active");
+      txResultBackdropEl.setAttribute("aria-hidden", "true");
     }
 
     function updateModePanels() {
@@ -698,7 +723,16 @@
       if (execute && !payload.pin) {
         setOutput({ error: "PIN is required for commit." });
         setTxSheetStatus("Commit blocked: PIN required.");
+        showTxResult("Commit Failed", "PIN is required for commit.");
         return;
+      }
+      if (execute) {
+        const ok = window.confirm("Confirm this transaction now?");
+        if (!ok) {
+          setTxSheetStatus("Commit cancelled by user.");
+          showTxResult("Commit Cancelled", "Transaction was not submitted.");
+          return;
+        }
       }
       try {
         const body = await callJson("/api/playground/assistant/action/", {
@@ -715,14 +749,25 @@
           setTxSheetStatus("Transaction committed successfully.");
           document.getElementById("tx-pin").value = "";
           hideTxModal();
+          showTxResult("Commit Success", "Transaction committed successfully.");
         } else if (data.allowed) {
           setTxSheetStatus("Preview passed. Fee: " + (data.tariff_fee || "0"));
         } else {
-          setTxSheetStatus("Blocked: " + (data.reason || "policy or balance check failed"));
+          const reason = data.reason || "policy or balance check failed";
+          setTxSheetStatus("Blocked: " + reason);
+          if (execute) {
+            showTxResult("Commit Failed", "Transaction blocked: " + reason);
+          }
         }
       } catch (err) {
         setTxSheetStatus("Transaction call failed.");
-        setOutput({ error: normalizeError(err) });
+        const normalized = normalizeError(err);
+        setOutput({ error: normalized });
+        if (execute) {
+          const code = (((normalized || {}).body || {}).error || {}).code || "";
+          const message = (((normalized || {}).body || {}).error || {}).message || normalized.message || "Transaction request failed.";
+          showTxResult("Commit Failed", (code ? ("[" + code + "] ") : "") + message);
+        }
       }
     }
 
@@ -1060,6 +1105,7 @@
     document.getElementById("btn-run-diagnostics").addEventListener("click", runDiagnostics);
     document.getElementById("btn-open-tx-modal").addEventListener("click", showTxModal);
     document.getElementById("btn-close-tx-modal").addEventListener("click", hideTxModal);
+    document.getElementById("btn-close-tx-result").addEventListener("click", hideTxResult);
     document.getElementById("btn-pin-setup-save").addEventListener("click", savePinSetup);
     document.getElementById("btn-tx-preview").addEventListener("click", function() { runTxAction(false); });
     document.getElementById("btn-tx-commit").addEventListener("click", function() { runTxAction(true); });
