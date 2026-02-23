@@ -48,6 +48,7 @@ from .access_policy import (
     DEFAULT_SENSITIVE_DOMAIN_RULES,
     DEFAULT_SENSITIVE_ROLES,
     user_can_do_action,
+    user_can_view_menu,
 )
 from .release_readiness import release_readiness_snapshot
 from .identity_client import (
@@ -425,6 +426,11 @@ def _require_role_or_perm(
 def _require_action_permission(user, action_key: str) -> None:
     if not user_can_do_action(user, action_key):
         raise PermissionDenied(f"Action '{action_key}' is not allowed for your role.")
+
+
+def _require_menu_access(user, menu_key: str) -> None:
+    if not user_can_view_menu(user, menu_key):
+        raise PermissionDenied(f"Menu '{menu_key}' is not available for your role.")
 
 
 def _require_form_action_permission(
@@ -1703,6 +1709,7 @@ def dashboard(request):
 def backoffice(request):
     if not user_has_any_role(request.user, BACKOFFICE_ROLES):
         raise PermissionDenied("You do not have access to backoffice.")
+    _require_menu_access(request.user, "backoffice")
 
     recent_transactions = Transaction.objects.select_related("wallet").order_by(
         "-created_at"
@@ -1884,6 +1891,7 @@ def approval_decision(request, request_id: int):
 def treasury_dashboard(request):
     if not user_has_any_role(request.user, BACKOFFICE_ROLES):
         raise PermissionDenied("You do not have access to treasury.")
+    _require_menu_access(request.user, "treasury_dashboard")
 
     try:
         if request.method == "POST":
@@ -2100,6 +2108,7 @@ def fx_management(request):
         roles=ACCOUNTING_ROLES,
         perms=("wallets_demo.view_fxrate",),
     )
+    _require_menu_access(request.user, "fx_management")
     if request.method == "POST":
         try:
             _require_role_or_perm(request.user, perms=("wallets_demo.add_fxrate",))
@@ -2811,6 +2820,7 @@ def _raise_privileged_accounting_alert_if_needed(
 def accounting_dashboard(request):
     if not user_has_any_role(request.user, ACCOUNTING_ROLES):
         raise PermissionDenied("You do not have access to accounting.")
+    _require_menu_access(request.user, "accounting_dashboard")
 
     if request.method == "POST":
         form_type = request.POST.get("form_type")
@@ -3410,6 +3420,7 @@ def operations_center(request):
     operation_roles = ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "sales")
     if not user_has_any_role(request.user, operation_roles):
         raise PermissionDenied("You do not have access to operations center.")
+    _require_menu_access(request.user, "operations_center")
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -5377,6 +5388,7 @@ def settlement_operations(request):
     roles = ("super_admin", "admin", "operation", "finance", "treasury", "risk")
     if not user_has_any_role(request.user, roles):
         raise PermissionDenied("You do not have access to settlement operations.")
+    _require_menu_access(request.user, "settlement_operations")
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -5619,6 +5631,7 @@ def reconciliation_workbench(request):
     roles = ("super_admin", "admin", "operation", "finance", "risk", "treasury")
     if not user_has_any_role(request.user, roles):
         raise PermissionDenied("You do not have access to reconciliation workbench.")
+    _require_menu_access(request.user, "reconciliation_workbench")
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -5964,6 +5977,7 @@ def wallet_management(request):
             "wallets_demo/wallet_management.html",
             {"can_manage_wallet_management": False},
         )
+    _require_menu_access(request.user, "wallet_management")
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -6394,6 +6408,7 @@ def accounting_post_entry(request, entry_id: int):
 def rbac_management(request):
     if not user_has_any_role(request.user, RBAC_ADMIN_ROLES):
         raise PermissionDenied("You do not have access to RBAC management.")
+    _require_menu_access(request.user, "rbac_management")
 
     if request.method == "POST":
         target_user = get_object_or_404(User, id=request.POST.get("user_id"))
@@ -6451,6 +6466,7 @@ def rbac_management(request):
 def operations_settings(request):
     if not user_has_any_role(request.user, ("super_admin",)):
         raise PermissionDenied("Only super admin can manage system settings.")
+    _require_menu_access(request.user, "operations_settings")
 
     settings_row = _operation_settings()
     prefix_fields = (
@@ -6682,6 +6698,7 @@ def operations_reports(request):
         request.user, ("super_admin", "admin", "operation", "finance", "risk", "treasury")
     ):
         raise PermissionDenied("You do not have access to operational reports.")
+    _require_menu_access(request.user, "operations_reports")
 
     now = timezone.now()
     last_24h = now - timedelta(hours=24)
@@ -6755,6 +6772,7 @@ def policy_hub(request):
     policy_admin_roles = ("super_admin", "admin", "risk", "finance", "operation")
     if not user_has_any_role(request.user, policy_admin_roles):
         raise PermissionDenied("You do not have access to policy hub.")
+    _require_menu_access(request.user, "policy_hub")
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -7039,6 +7057,7 @@ def ops_work_queue(request):
     operation_roles = ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "treasury")
     if not user_has_any_role(request.user, operation_roles):
         raise PermissionDenied("You do not have access to operation work queue.")
+    _require_menu_access(request.user, "ops_work_queue")
 
     queue_type = (request.GET.get("type") or "all").strip().lower()
     items: list[dict] = []
@@ -7214,6 +7233,7 @@ def ops_work_queue(request):
 def approval_matrix(request):
     if not user_has_any_role(request.user, ("super_admin", "admin", "risk", "finance", "operation", "treasury")):
         raise PermissionDenied("You do not have access to approval matrix.")
+    _require_menu_access(request.user, "approval_matrix")
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "approval_rule_upsert").strip().lower()
@@ -7272,6 +7292,7 @@ def approval_matrix(request):
 def documents_center(request):
     if not user_has_any_role(request.user, ("super_admin", "admin", "operation", "risk", "finance", "customer_service", "sales", "treasury")):
         raise PermissionDenied("You do not have access to documents center.")
+    _require_menu_access(request.user, "documents_center")
 
     if request.method == "POST":
         try:

@@ -530,7 +530,7 @@
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_webhook_validate" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="form-group"><label>Credential</label><select name="credential_id" required>{% for cred in api_credentials %}<option value="{{ cred.id }}">{{ cred.merchant.code }} - {{ cred.key_id }}
+                <div class="form-group"><label>Credential</label><select name="credential_id" required>{% for cred in api_credentials %}<option value="{{ cred.id }}">{{ cred.merchant.code }} - {% if user|can_view_field:"merchant.api.key_id" %}{{ cred.key_id }}{% else %}****{% endif %}
                         </option>{% endfor %}</select></div>
                 <div class="form-group"><label>Event Type</label><input type="text" name="event_type"
                         value="payment.status" /></div>
@@ -1181,7 +1181,7 @@
                         <td>{{ note.case.case_no }}</td>
                         <td>{{ note.created_by.username }}</td>
                         <td>{% if note.is_internal %}Internal{% else %}External{% endif %}</td>
-                        <td>{{ note.note }}</td>
+                        <td>{% if user|can_view_field:"ops.case.note" %}{{ note.note }}{% else %}****{% endif %}</td>
                     </tr>
                     {% endfor %}
                     {% if not case_notes_feed %}

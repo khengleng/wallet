@@ -2248,6 +2248,11 @@ class BackofficeRbacUiMatrixTests(TestCase):
         self.assertNotContains(case_response, "Sensitive case description value")
         self.assertNotContains(case_response, "Sensitive case note value")
 
+        ops_center_response = self.client.get(reverse("operations_center"))
+        self.assertEqual(ops_center_response.status_code, 200)
+        self.assertNotContains(ops_center_response, "Sensitive case note value")
+        self.assertNotContains(ops_center_response, "kid-rbac-visible")
+
     def test_super_admin_can_see_sensitive_fields_and_actions(self):
         self.client.login(username="rbac_super_admin", password="pass12345")
         portal_response = self.client.get(reverse("merchant_portal"))
@@ -2277,8 +2282,14 @@ class OperationsSettingsAndReportsUiTests(TestCase):
             email="ops_cs@example.com",
             password="pass12345",
         )
+        self.finance = User.objects.create_user(
+            username="ops_finance",
+            email="ops_finance@example.com",
+            password="pass12345",
+        )
         assign_roles(self.super_admin, ["super_admin"])
         assign_roles(self.customer_service, ["customer_service"])
+        assign_roles(self.finance, ["finance"])
 
     def test_super_admin_can_view_grouped_system_settings_matrix(self):
         self.client.login(username="ops_super_admin", password="pass12345")
@@ -2299,3 +2310,12 @@ class OperationsSettingsAndReportsUiTests(TestCase):
         self.client.login(username="ops_cs", password="pass12345")
         denied_response = self.client.get(reverse("operations_reports"))
         self.assertEqual(denied_response.status_code, 403)
+
+    def test_menu_override_blocks_reports_route_even_for_backoffice_role(self):
+        settings_row = OperationSetting.get_solo()
+        settings_row.nav_visibility_rules = {"operations_reports": ["super_admin"]}
+        settings_row.save(update_fields=["nav_visibility_rules", "updated_at"])
+
+        self.client.login(username="ops_finance", password="pass12345")
+        response = self.client.get(reverse("operations_reports"))
+        self.assertEqual(response.status_code, 403)
