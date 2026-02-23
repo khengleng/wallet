@@ -542,14 +542,12 @@ def portal_logout(request):
     return impl(request)
 
 
-@login_required
 def profile(request):
     from .views_auth import profile as impl
 
     return impl(request)
 
 
-@login_required
 def mobile_native_lab(request):
     from .views_mobile import mobile_native_lab as impl
 
@@ -1159,14 +1157,12 @@ def _mobile_bff_probe(
         return {"ok": False, "error": str(exc)}
 
 
-@login_required
 def mobile_assistant_diagnostics(request):
     from .views_mobile import mobile_assistant_diagnostics as impl
 
     return impl(request)
 
 
-@transaction.atomic
 def mobile_assistant_chat(request):
     from .views_mobile import mobile_assistant_chat as impl
 
@@ -1378,7 +1374,6 @@ def mobile_bootstrap(request):
     return impl(request)
 
 
-@transaction.atomic
 def mobile_profile(request):
     from .views_mobile import mobile_profile as impl
 
@@ -1391,21 +1386,18 @@ def mobile_statement(request):
     return impl(request)
 
 
-@transaction.atomic
 def mobile_personalization(request):
     from .views_mobile import mobile_personalization as impl
 
     return impl(request)
 
 
-@transaction.atomic
 def mobile_personalization_signals(request):
     from .views_mobile import mobile_personalization_signals as impl
 
     return impl(request)
 
 
-@transaction.atomic
 def mobile_self_onboard(request):
     from .views_mobile import mobile_self_onboard as impl
 

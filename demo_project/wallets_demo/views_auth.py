@@ -2,11 +2,13 @@
 
 from datetime import timedelta
 import hashlib
+import logging
+import secrets
 from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import authenticate, login
+from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -27,6 +29,8 @@ from .keycloak_auth import (
 )
 from . import utils as shared_utils
 
+logger = logging.getLogger(__name__)
+
 
 register = legacy.register
 
@@ -45,8 +49,8 @@ def portal_login(request):
                     "keycloak_start_url": f"{request.path}?start=1",
                 },
             )
-        state = legacy.secrets.token_urlsafe(32)
-        nonce = legacy.secrets.token_urlsafe(32)
+        state = secrets.token_urlsafe(32)
+        nonce = secrets.token_urlsafe(32)
         state_history = request.session.get("oidc_state_history", [])
         if not isinstance(state_history, list):
             state_history = []
@@ -133,7 +137,7 @@ def keycloak_callback(request):
         try:
             introspection_claims = introspect_access_token(access_token)
         except Exception as exc:
-            legacy.logger.warning("Keycloak introspection failed during callback: %s", exc)
+            logger.warning("Keycloak introspection failed during callback: %s", exc)
             introspection_claims = {}
         merged_claims = merge_keycloak_claims(
             access_claims,
@@ -143,7 +147,7 @@ def keycloak_callback(request):
         )
         sync_user_roles_from_keycloak_claims(user, merged_claims)
     except Exception as exc:
-        legacy.logger.exception("Keycloak callback failed: %s", str(exc))
+        logger.exception("Keycloak callback failed: %s", str(exc))
         legacy._track(
             request,
             "auth_login_failed",
@@ -189,7 +193,7 @@ def keycloak_callback(request):
 
 def portal_logout(request):
     id_token = request.session.get("oidc_id_token", "")
-    legacy.auth_logout(request)
+    auth_logout(request)
     if shared_utils.use_keycloak_oidc() and id_token:
         post_logout = settings.KEYCLOAK_POST_LOGOUT_REDIRECT_URI or settings.KEYCLOAK_REDIRECT_URI
         try:
@@ -206,7 +210,7 @@ def portal_logout(request):
                     "client_id": settings.KEYCLOAK_CLIENT_ID,
                 }
             )
-            legacy.logger.warning("Identity service logout-url failed; falling back to direct Keycloak.")
+            logger.warning("Identity service logout-url failed; falling back to direct Keycloak.")
             logout_url = f"{shared_utils.keycloak_realm_base_url()}/protocol/openid-connect/logout?{query}"
         return redirect(logout_url)
     return redirect("login")

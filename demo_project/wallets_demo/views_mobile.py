@@ -1,17 +1,22 @@
 """Mobile channel views extracted from the monolithic views module."""
 
 import json
+import logging
+from urllib.request import Request, urlopen
 
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 from dj_wallet.models import Transaction, Wallet
 from django.contrib.contenttypes.models import ContentType
 
 from . import views as legacy
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -21,7 +26,7 @@ def mobile_native_lab(request):
         or request.user.is_superuser
         or request.user.username.strip().lower() == "superadmin"
     ):
-        raise legacy.PermissionDenied(
+        raise PermissionDenied(
             "Mobile Service Playground is available for back-office roles."
         )
     return render(
@@ -75,7 +80,7 @@ def mobile_assistant_diagnostics(request):
     access_token = request.session.get("oidc_access_token", "").strip()
     health_probe = legacy._mobile_bff_probe(path="/healthz", timeout=4)
     result = {
-        "timestamp": legacy.timezone.now().isoformat(),
+        "timestamp": timezone.now().isoformat(),
         "mode": "session",
         "mobile_bff_base_url": legacy._mobile_bff_base_url(),
         "session_token_present": bool(access_token),
@@ -134,29 +139,49 @@ def mobile_assistant_chat(request):
         return legacy._mobile_json_error("message is required.", code="message_required")
 
     access_token = request.session.get("oidc_access_token", "").strip()
-    if access_token:
-        try:
-            req = legacy.Request(
-                f"{legacy._mobile_bff_base_url()}/v1/assistant/chat",
-                data=json.dumps(
-                    {
-                        "message": message,
-                        "context": payload.get("context", {}),
+    if not access_token:
+        return JsonResponse(
+            {
+                "ok": True,
+                "data": {
+                    "assistant": {
+                        "enabled": False,
+                        "status": "no_session_token",
+                        "reply": (
+                            "No OIDC session token found. "
+                            "Sign in again through SSO to establish a session."
+                        ),
+                        "suggested_actions": [
+                            "reload_session",
+                            "contact_ops_admin",
+                        ],
                     }
-                ).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {access_token}",
                 },
-                method="POST",
-            )
-            with legacy.urlopen(req, timeout=12) as resp:
-                raw = resp.read().decode("utf-8")
-                status_code = int(getattr(resp, "status", 200) or 200)
-            body = json.loads(raw or "{}")
-            return JsonResponse(body, status=status_code)
-        except Exception as exc:
-            legacy.logger.warning("mobile_assistant_chat proxy failed: %s", exc)
+            }
+        )
+
+    try:
+        req = Request(
+            f"{legacy._mobile_bff_base_url()}/v1/assistant/chat",
+            data=json.dumps(
+                {
+                    "message": message,
+                    "context": payload.get("context", {}),
+                }
+            ).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
+            method="POST",
+        )
+        with urlopen(req, timeout=12) as resp:
+            raw = resp.read().decode("utf-8")
+            status_code = int(getattr(resp, "status", 200) or 200)
+        body = json.loads(raw or "{}")
+        return JsonResponse(body, status=status_code)
+    except Exception as exc:
+        logger.warning("mobile_assistant_chat proxy failed: %s", exc)
 
     return JsonResponse(
         {
@@ -164,13 +189,14 @@ def mobile_assistant_chat(request):
             "data": {
                 "assistant": {
                     "enabled": False,
-                    "status": "fallback",
+                    "status": "upstream_unreachable",
                     "reply": (
-                        "Assistant service is not reachable from this session yet. "
-                        "Sign in again with SSO or verify mobile-bff connectivity."
+                        "Mobile BFF service is not reachable. "
+                        "Verify mobile-bff connectivity and try again."
                     ),
+                    "bff_base_url": legacy._mobile_bff_base_url(),
                     "suggested_actions": [
-                        "reload_session",
+                        "check_mobile_bff",
                         "check_personalization",
                         "contact_ops_admin",
                     ],
@@ -447,7 +473,7 @@ def mobile_personalization_signals(request):
         if isinstance(key, str) and key:
             merged_points[key[:64]] = value
     prefs["data_points"] = merged_points
-    prefs["data_points_updated_at"] = legacy.timezone.now().isoformat()
+    prefs["data_points_updated_at"] = timezone.now().isoformat()
     user.mobile_preferences = prefs
     user.save(update_fields=["mobile_preferences"])
 
