@@ -131,6 +131,39 @@
     padding: 0.75rem;
     background: #f8fbff;
   }
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.52);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1200;
+    padding: 1rem;
+  }
+  .modal-backdrop.active {
+    display: flex;
+  }
+  .modal-card {
+    width: min(560px, 100%);
+    background: #fff;
+    border: 1px solid #dbe3ee;
+    border-radius: 0.85rem;
+    box-shadow: 0 24px 60px rgba(2, 8, 23, 0.35);
+    overflow: hidden;
+  }
+  .modal-head {
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .modal-body {
+    padding: 0.85rem 1rem 1rem;
+    max-height: 78vh;
+    overflow: auto;
+  }
 
   @media (max-width: 1080px) {
     .lab-grid { grid-template-columns: 1fr; }
@@ -292,9 +325,35 @@
       </div>
     </div>
     <div class="card">
-      <h3>Transaction Commit Sheet</h3>
-      <p class="text-muted">Assistant transaction requests open this secure form. Review, preview, then commit with PIN.</p>
+      <h3>Transaction Action Center</h3>
+      <p class="text-muted">When assistant detects a financial transaction request, it opens a secure popup for review and PIN commit.</p>
       <div id="tx-sheet-status" class="text-muted" style="margin-bottom:0.6rem;">Waiting for assistant transaction request.</div>
+      <button id="btn-open-tx-modal" class="btn btn-primary" type="button">Open Transaction Popup</button>
+    </div>
+    <div class="card">
+      <h3>Account Security (PIN Setup)</h3>
+      <p class="text-muted">Set or rotate transaction PIN for the current account owner before committing transactions.</p>
+      <div class="form-group"><label>New PIN (4-8 digits)</label><input id="pin-setup" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Enter PIN" /></div>
+      <div class="form-group"><label>Confirm New PIN</label><input id="pin-setup-confirm" type="password" autocomplete="new-password" inputmode="numeric" placeholder="Confirm PIN" /></div>
+      <div id="pin-setup-status" class="text-muted" style="margin-bottom:0.6rem;">PIN status: unknown</div>
+      <button id="btn-pin-setup-save" class="btn btn-primary" type="button">Save Transaction PIN</button>
+    </div>
+    <div class="card">
+      <h3>Assistant Diagnostics</h3>
+      <p class="text-muted">Check token/session state, channel connectivity, and AI readiness.</p>
+      <button id="btn-run-diagnostics" class="btn btn-primary" type="button">Run Diagnostics</button>
+      <div id="diagnostics-output" class="mono" style="margin-top:0.7rem;">Waiting for diagnostic run...</div>
+    </div>
+  </section>
+</div>
+
+<div id="tx-modal-backdrop" class="modal-backdrop" aria-hidden="true">
+  <div class="modal-card">
+    <div class="modal-head">
+      <strong>Transaction Commit Popup</strong>
+      <button id="btn-close-tx-modal" class="btn btn-outline" type="button">Close</button>
+    </div>
+    <div class="modal-body">
       <div class="tx-sheet">
         <form id="tx-sheet-form" onsubmit="return false;" novalidate>
           <div class="form-group">
@@ -319,13 +378,7 @@
         </form>
       </div>
     </div>
-    <div class="card">
-      <h3>Assistant Diagnostics</h3>
-      <p class="text-muted">Check token/session state, channel connectivity, and AI readiness.</p>
-      <button id="btn-run-diagnostics" class="btn btn-primary" type="button">Run Diagnostics</button>
-      <div id="diagnostics-output" class="mono" style="margin-top:0.7rem;">Waiting for diagnostic run...</div>
-    </div>
-  </section>
+  </div>
 </div>
 
 <script>
@@ -345,7 +398,9 @@
     const personaSelectEl = document.getElementById("persona-select");
     const personaStatusEl = document.getElementById("persona-status");
     const pinStatusEl = document.getElementById("pf-pin-status");
+    const pinSetupStatusEl = document.getElementById("pin-setup-status");
     const txSheetStatusEl = document.getElementById("tx-sheet-status");
+    const txModalBackdropEl = document.getElementById("tx-modal-backdrop");
 
     function getOverrideToken() {
       return (overrideTokenEl.value || "").trim();
@@ -396,6 +451,17 @@
     }
     function setTxSheetStatus(text) {
       txSheetStatusEl.textContent = text;
+    }
+    function setPinSetupStatus(text) {
+      pinSetupStatusEl.textContent = text;
+    }
+    function showTxModal() {
+      txModalBackdropEl.classList.add("active");
+      txModalBackdropEl.setAttribute("aria-hidden", "false");
+    }
+    function hideTxModal() {
+      txModalBackdropEl.classList.remove("active");
+      txModalBackdropEl.setAttribute("aria-hidden", "true");
     }
 
     function updateModePanels() {
@@ -483,7 +549,9 @@
         document.getElementById("pf-avatar").value = user.profile_picture_url || "";
         document.getElementById("pf-pin").value = "";
         document.getElementById("pf-pin-confirm").value = "";
-        pinStatusEl.textContent = "PIN status: " + (user.transaction_pin_configured ? "configured" : "not configured");
+        const pinState = user.transaction_pin_configured ? "configured" : "not configured";
+        pinStatusEl.textContent = "PIN status: " + pinState;
+        setPinSetupStatus("PIN status: " + pinState);
         document.getElementById("tx-from-username").value = user.username || "";
         setOutput(p);
       } catch (err) {
@@ -525,11 +593,59 @@
           });
         }
         setOutput(p);
-        pinStatusEl.textContent = "PIN status: " + (((p.data || {}).user || {}).transaction_pin_configured ? "configured" : "not configured");
+        const pinState = (((p.data || {}).user || {}).transaction_pin_configured ? "configured" : "not configured");
+        pinStatusEl.textContent = "PIN status: " + pinState;
+        setPinSetupStatus("PIN status: " + pinState);
         document.getElementById("pf-pin").value = "";
         document.getElementById("pf-pin-confirm").value = "";
       } catch (err) {
         setOutput({ error: normalizeError(err) });
+      }
+    }
+
+    async function savePinSetup() {
+      const pin = (document.getElementById("pin-setup").value || "").trim();
+      const confirm = (document.getElementById("pin-setup-confirm").value || "").trim();
+      if (!pin || !confirm) {
+        setOutput({ error: "PIN and confirmation are required." });
+        setPinSetupStatus("PIN status: missing input");
+        return;
+      }
+      const payload = {
+        transaction_pin: pin,
+        transaction_pin_confirm: confirm,
+      };
+      try {
+        let p;
+        if (inTokenMode()) {
+          const headers = authHeaders();
+          if (!headers) {
+            setOutput({ error: "Token mode selected but no token provided." });
+            return;
+          }
+          p = await callJson(gatewayBase + "/profile", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(payload)
+          });
+        } else {
+          p = await callJson("/api/mobile/profile/", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-CSRFToken": csrfToken
+            },
+            body: JSON.stringify(payload)
+          });
+        }
+        setOutput(p);
+        setPinSetupStatus("PIN status: configured");
+        pinStatusEl.textContent = "PIN status: configured";
+        document.getElementById("pin-setup").value = "";
+        document.getElementById("pin-setup-confirm").value = "";
+      } catch (err) {
+        setOutput({ error: normalizeError(err) });
+        setPinSetupStatus("PIN setup failed. Check API output.");
       }
     }
 
@@ -567,6 +683,7 @@
         if (data.allowed && data.execute) {
           setTxSheetStatus("Transaction committed successfully.");
           document.getElementById("tx-pin").value = "";
+          hideTxModal();
         } else if (data.allowed) {
           setTxSheetStatus("Preview passed. Fee: " + (data.tariff_fee || "0"));
         } else {
@@ -588,6 +705,7 @@
       document.getElementById("tx-to-username").value = prefill.to_username || "";
       document.getElementById("tx-description").value = prefill.description || "assistant_txn";
       setTxSheetStatus("Assistant prepared transaction. Review and commit with PIN.");
+      showTxModal();
     }
 
     async function saveSignals() {
@@ -894,6 +1012,9 @@
     document.getElementById("btn-chat-send").addEventListener("click", sendChat);
     document.getElementById("btn-assistant-send").addEventListener("click", sendChat);
     document.getElementById("btn-run-diagnostics").addEventListener("click", runDiagnostics);
+    document.getElementById("btn-open-tx-modal").addEventListener("click", showTxModal);
+    document.getElementById("btn-close-tx-modal").addEventListener("click", hideTxModal);
+    document.getElementById("btn-pin-setup-save").addEventListener("click", savePinSetup);
     document.getElementById("btn-tx-preview").addEventListener("click", function() { runTxAction(false); });
     document.getElementById("btn-tx-commit").addEventListener("click", function() { runTxAction(true); });
     document.getElementById("btn-tx-reset").addEventListener("click", function() {
@@ -905,6 +1026,9 @@
       document.getElementById("tx-description").value = "assistant_transfer";
       document.getElementById("tx-pin").value = "";
       setTxSheetStatus("Transaction sheet reset.");
+    });
+    txModalBackdropEl.addEventListener("click", function(e) {
+      if (e.target === txModalBackdropEl) hideTxModal();
     });
     document.getElementById("btn-assistant-clear").addEventListener("click", function() {
       const log = document.getElementById("chat-log");
