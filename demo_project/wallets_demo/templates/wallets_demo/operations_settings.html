@@ -95,6 +95,29 @@
         </div>
         {% endfor %}
 
+        <h3 style="margin-top:1.5rem;">Authorization Policy Matrix</h3>
+        <p class="text-muted">Centralized RBAC-by-config for actions and field-level visibility across modules.</p>
+
+        <h4 style="margin-top:1rem;">Action Permissions (who can do)</h4>
+        <p class="text-muted">Action key → roles. Any role not listed will not see or execute that action.</p>
+        {% for action_key, roles in action_rules.items %}
+        <div class="form-group">
+            <label>{{ action_key }}</label>
+            <input type="text" name="action_roles_{{ action_key }}" value="{{ roles|join:', ' }}" />
+            <small class="text-muted">Default: {{ default_action_rules|get_item:action_key|join:", " }}</small>
+        </div>
+        {% endfor %}
+
+        <h4 style="margin-top:1rem;">Field Visibility (who can view)</h4>
+        <p class="text-muted">Field key → roles. Unauthorized roles see masked or hidden field content.</p>
+        {% for field_key, roles in field_rules.items %}
+        <div class="form-group">
+            <label>{{ field_key }}</label>
+            <input type="text" name="field_roles_{{ field_key }}" value="{{ roles|join:', ' }}" />
+            <small class="text-muted">Default: {{ default_field_rules|get_item:field_key|join:", " }}</small>
+        </div>
+        {% endfor %}
+
         <button type="submit" class="btn btn-primary">Save System Setting</button>
     </form>
 </div>

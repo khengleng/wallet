@@ -48,6 +48,31 @@ DEFAULT_SENSITIVE_DOMAIN_RULES: dict[str, tuple[str, ...]] = {
     "customer_pii": ("super_admin", "admin", "risk", "operation"),
 }
 
+DEFAULT_ACTION_ROLE_RULES: dict[str, tuple[str, ...]] = {
+    "wallet.cif_onboard": ("super_admin", "admin", "operation", "customer_service"),
+    "wallet.open_user": ("super_admin", "admin", "operation", "finance"),
+    "wallet.open_merchant": ("super_admin", "admin", "operation", "finance"),
+    "wallet.adjust_user": ("super_admin", "admin", "operation", "finance"),
+    "wallet.adjust_merchant": ("super_admin", "admin", "operation", "finance"),
+    "wallet.toggle_freeze": ("super_admin", "admin", "operation", "risk"),
+    "merchant.create": ("super_admin", "admin", "operation", "sales"),
+    "merchant.portal_api_update": ("super_admin", "admin", "operation", "risk"),
+    "merchant.kyb_submit": ("super_admin", "admin", "operation", "sales"),
+    "merchant.kyb_decide": ("super_admin", "admin", "risk"),
+    "case.create": ("super_admin", "admin", "operation", "customer_service"),
+    "case.update": ("super_admin", "admin", "operation", "customer_service", "risk"),
+    "rbac.manage": ("super_admin", "admin"),
+    "settings.manage": ("super_admin",),
+}
+
+DEFAULT_FIELD_ROLE_RULES: dict[str, tuple[str, ...]] = {
+    "wallet.customer.mobile_no": ("super_admin", "admin", "operation", "customer_service", "risk"),
+    "wallet.customer.email": ("super_admin", "admin", "operation", "customer_service", "risk"),
+    "merchant.contact.mobile_no": ("super_admin", "admin", "operation", "sales", "risk"),
+    "merchant.contact.email": ("super_admin", "admin", "operation", "sales", "risk"),
+    "ops.case.reporter_contact": ("super_admin", "admin", "operation", "customer_service", "risk"),
+}
+
 
 def _get_operation_setting():
     OperationSetting = apps.get_model("wallets_demo", "OperationSetting")
@@ -123,6 +148,52 @@ def user_can_view_sensitive_domain(user, domain_key: str) -> bool:
     if not getattr(user, "is_authenticated", False):
         return False
     return user_has_any_role(user, sensitive_roles_for_domain(domain_key))
+
+
+def allowed_roles_for_action(action_key: str) -> tuple[str, ...]:
+    defaults = DEFAULT_ACTION_ROLE_RULES.get(action_key, ())
+    settings_row = _get_operation_setting()
+    if settings_row is None:
+        return defaults
+    raw = getattr(settings_row, "action_visibility_rules", {})
+    if not isinstance(raw, dict):
+        return defaults
+    configured = _normalize_roles(raw.get(action_key))
+    if configured:
+        return configured
+    return defaults
+
+
+def user_can_do_action(user, action_key: str) -> bool:
+    if not getattr(user, "is_authenticated", False):
+        return False
+    roles = allowed_roles_for_action(action_key)
+    if not roles:
+        return False
+    return user_has_any_role(user, roles)
+
+
+def allowed_roles_for_field(field_key: str) -> tuple[str, ...]:
+    defaults = DEFAULT_FIELD_ROLE_RULES.get(field_key, ())
+    settings_row = _get_operation_setting()
+    if settings_row is None:
+        return defaults
+    raw = getattr(settings_row, "field_visibility_rules", {})
+    if not isinstance(raw, dict):
+        return defaults
+    configured = _normalize_roles(raw.get(field_key))
+    if configured:
+        return configured
+    return defaults
+
+
+def user_can_view_field(user, field_key: str) -> bool:
+    if not getattr(user, "is_authenticated", False):
+        return False
+    roles = allowed_roles_for_field(field_key)
+    if not roles:
+        return False
+    return user_has_any_role(user, roles)
 
 
 def mask_sensitive_value(value, user, mask: str = "****", domain_key: str = ""):

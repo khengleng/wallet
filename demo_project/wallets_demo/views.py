@@ -42,9 +42,12 @@ from .fx_sync import sync_external_fx_rates
 from .analytics import track_event
 from . import utils as shared_utils
 from .access_policy import (
+    DEFAULT_ACTION_ROLE_RULES,
+    DEFAULT_FIELD_ROLE_RULES,
     DEFAULT_MENU_ROLE_RULES,
     DEFAULT_SENSITIVE_DOMAIN_RULES,
     DEFAULT_SENSITIVE_ROLES,
+    user_can_do_action,
 )
 from .release_readiness import release_readiness_snapshot
 from .identity_client import (
@@ -417,6 +420,11 @@ def _require_role_or_perm(
         raise PermissionDenied("Role is not allowed for this operation.")
     if perms and not all(user.has_perm(perm) for perm in perms):
         raise PermissionDenied("Permission is not allowed for this operation.")
+
+
+def _require_action_permission(user, action_key: str) -> None:
+    if not user_can_do_action(user, action_key):
+        raise PermissionDenied(f"Action '{action_key}' is not allowed for your role.")
 
 
 def _is_locked(username: str, ip: str) -> bool:
@@ -3380,6 +3388,7 @@ def operations_center(request):
         form_type = (request.POST.get("form_type") or "").strip().lower()
         try:
             if form_type == "merchant_create":
+                _require_action_permission(request.user, "merchant.create")
                 _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "sales", "finance"))
                 code = (request.POST.get("merchant_code") or "").strip().upper()
                 name = (request.POST.get("merchant_name") or "").strip()
@@ -3506,6 +3515,7 @@ def operations_center(request):
                 return redirect("operations_center")
 
             if form_type == "merchant_kyb_submit":
+                _require_action_permission(request.user, "merchant.kyb_submit")
                 _require_role_or_perm(
                     request.user,
                     roles=("super_admin", "admin", "operation", "sales", "finance", "customer_service"),
@@ -3540,6 +3550,7 @@ def operations_center(request):
                 return redirect("operations_center")
 
             if form_type == "merchant_kyb_decision":
+                _require_action_permission(request.user, "merchant.kyb_decide")
                 _require_role_or_perm(
                     request.user,
                     roles=("super_admin", "admin", "risk"),
@@ -4682,6 +4693,7 @@ def operations_center(request):
                 return redirect("operations_center")
 
             if form_type == "case_create":
+                _require_action_permission(request.user, "case.create")
                 _require_role_or_perm(request.user, roles=operation_roles)
                 customer = User.objects.get(id=request.POST.get("case_customer_id"))
                 merchant_id = request.POST.get("case_merchant_id")
@@ -4761,6 +4773,7 @@ def operations_center(request):
                 return redirect("operations_center")
 
             if form_type == "case_update":
+                _require_action_permission(request.user, "case.update")
                 _require_role_or_perm(request.user, roles=operation_roles)
                 case = OperationCase.objects.get(id=request.POST.get("case_id"))
                 case.status = (request.POST.get("status") or case.status).strip()
@@ -5837,6 +5850,7 @@ def merchant_portal(request):
                 raise PermissionDenied("You cannot manage this merchant.")
 
             if form_type == "merchant_portal_update_webhook":
+                _require_action_permission(request.user, "merchant.portal_api_update")
                 credential = MerchantApiCredential.objects.filter(merchant=merchant).first()
                 if credential is None:
                     raise ValidationError("Merchant credential is not initialized.")
@@ -5925,6 +5939,7 @@ def wallet_management(request):
         try:
             wallet_service = get_wallet_service()
             if form_type == "wallet_open_user":
+                _require_action_permission(request.user, "wallet.open_user")
                 customer_cif = CustomerCIF.objects.select_related("user").get(
                     id=request.POST.get("cif_id")
                 )
@@ -5961,6 +5976,7 @@ def wallet_management(request):
                 return redirect("wallet_management")
 
             if form_type == "wallet_open_merchant":
+                _require_action_permission(request.user, "wallet.open_merchant")
                 merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
                 currency = _normalize_currency(request.POST.get("currency"))
                 wallet = _merchant_wallet_for_currency(merchant, currency)
@@ -5980,6 +5996,7 @@ def wallet_management(request):
                 return redirect("wallet_management")
 
             if form_type == "wallet_toggle_freeze":
+                _require_action_permission(request.user, "wallet.toggle_freeze")
                 holder_scope = (request.POST.get("holder_scope") or "user").strip().lower()
                 slug = (request.POST.get("wallet_slug") or "default").strip()
                 action = (request.POST.get("action") or "").strip().lower()
@@ -6013,6 +6030,7 @@ def wallet_management(request):
                 return redirect("wallet_management")
 
             if form_type == "wallet_adjust_user":
+                _require_action_permission(request.user, "wallet.adjust_user")
                 customer_cif = CustomerCIF.objects.select_related("user").get(
                     id=request.POST.get("cif_id")
                 )
@@ -6095,6 +6113,7 @@ def wallet_management(request):
                 return redirect("wallet_management")
 
             if form_type == "cif_onboard":
+                _require_action_permission(request.user, "wallet.cif_onboard")
                 target_user = User.objects.get(id=request.POST.get("user_id"))
                 cif_no = (request.POST.get("cif_no") or "").strip().upper()
                 legal_name = (request.POST.get("legal_name") or "").strip()
@@ -6191,6 +6210,7 @@ def wallet_management(request):
                 return redirect("wallet_management")
 
             if form_type == "wallet_adjust_merchant":
+                _require_action_permission(request.user, "wallet.adjust_merchant")
                 merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
                 currency = _normalize_currency(request.POST.get("currency"))
                 amount = _parse_amount(request.POST.get("amount"))
@@ -6447,6 +6467,24 @@ def operations_settings(request):
         key: list(current_sensitive_domain_rules.get(key) or list(default_roles))
         for key, default_roles in DEFAULT_SENSITIVE_DOMAIN_RULES.items()
     }
+    current_action_rules = (
+        settings_row.action_visibility_rules
+        if isinstance(getattr(settings_row, "action_visibility_rules", {}), dict)
+        else {}
+    )
+    merged_action_rules = {
+        key: list(current_action_rules.get(key) or list(default_roles))
+        for key, default_roles in DEFAULT_ACTION_ROLE_RULES.items()
+    }
+    current_field_rules = (
+        settings_row.field_visibility_rules
+        if isinstance(getattr(settings_row, "field_visibility_rules", {}), dict)
+        else {}
+    )
+    merged_field_rules = {
+        key: list(current_field_rules.get(key) or list(default_roles))
+        for key, default_roles in DEFAULT_FIELD_ROLE_RULES.items()
+    }
 
     if request.method == "POST":
         try:
@@ -6487,6 +6525,22 @@ def operations_settings(request):
                     if role.strip()
                 ]
                 for key in DEFAULT_SENSITIVE_DOMAIN_RULES.keys()
+            }
+            settings_row.action_visibility_rules = {
+                key: [
+                    role.strip()
+                    for role in (request.POST.get(f"action_roles_{key}") or "").split(",")
+                    if role.strip()
+                ]
+                for key in DEFAULT_ACTION_ROLE_RULES.keys()
+            }
+            settings_row.field_visibility_rules = {
+                key: [
+                    role.strip()
+                    for role in (request.POST.get(f"field_roles_{key}") or "").split(",")
+                    if role.strip()
+                ]
+                for key in DEFAULT_FIELD_ROLE_RULES.keys()
             }
             settings_row.updated_by = request.user
             settings_row.full_clean()
@@ -6557,6 +6611,10 @@ def operations_settings(request):
             "default_sensitive_roles": DEFAULT_SENSITIVE_ROLES,
             "sensitive_domain_rules": merged_sensitive_domain_rules,
             "default_sensitive_domain_rules": DEFAULT_SENSITIVE_DOMAIN_RULES,
+            "action_rules": merged_action_rules,
+            "default_action_rules": DEFAULT_ACTION_ROLE_RULES,
+            "field_rules": merged_field_rules,
+            "default_field_rules": DEFAULT_FIELD_ROLE_RULES,
         },
     )
 
@@ -7170,6 +7228,7 @@ def case_detail(request, case_id: int):
         form_type = (request.POST.get("form_type") or "").strip().lower()
         try:
             if form_type == "case_update":
+                _require_action_permission(request.user, "case.update")
                 _require_role_or_perm(request.user, roles=operation_roles)
                 case.status = (request.POST.get("status") or case.status).strip()
                 case.priority = (request.POST.get("priority") or case.priority).strip()

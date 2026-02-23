@@ -1,7 +1,11 @@
 from django import template
 
 from wallets_demo.access_policy import (
+    allowed_roles_for_action,
+    allowed_roles_for_field,
     mask_sensitive_value,
+    user_can_do_action,
+    user_can_view_field,
     user_can_view_menu,
     user_can_view_sensitive,
     user_can_view_sensitive_domain,
@@ -40,6 +44,26 @@ def mask_sensitive(value, user):
 @register.filter(name="can_view_sensitive_domain")
 def can_view_sensitive_domain(user, domain_key: str):
     return user_can_view_sensitive_domain(user, domain_key)
+
+
+@register.filter(name="can_do_action")
+def can_do_action(user, action_key: str):
+    return user_can_do_action(user, action_key)
+
+
+@register.filter(name="can_view_field")
+def can_view_field(user, field_key: str):
+    return user_can_view_field(user, field_key)
+
+
+@register.filter(name="action_roles")
+def action_roles(_user, action_key: str):
+    return allowed_roles_for_action(action_key)
+
+
+@register.filter(name="field_roles")
+def field_roles(_user, field_key: str):
+    return allowed_roles_for_field(field_key)
 
 
 @register.simple_tag(takes_context=True)

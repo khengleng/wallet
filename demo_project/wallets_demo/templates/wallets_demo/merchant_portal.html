@@ -18,12 +18,24 @@
 {% for m in merchants %}
 <div class="card">
     <h3>{{ m.code }} - {{ m.name }}</h3>
-    <p class="text-muted">Owner: {% if m.owner %}{{ m.owner.username }}{% else %}-{% endif %} | Contact: {{
-        m.contact_email|mask_email }} / {{ m.contact_phone|mask_phone }}</p>
+    <p class="text-muted">Owner: {% if m.owner %}{{ m.owner.username }}{% else %}-{% endif %} | Contact:
+        {% if user|can_view_field:"merchant.contact.email" %}
+        {{ m.contact_email|mask_email }}
+        {% else %}
+        ****
+        {% endif %}
+        /
+        {% if user|can_view_field:"merchant.contact.mobile_no" %}
+        {{ m.contact_phone|mask_phone }}
+        {% else %}
+        ****
+        {% endif %}
+    </p>
 
     {% with cred=credential_map|get_item:m.id %}
     <h4>API & Webhook</h4>
     {% if cred %}
+    {% if user|can_do_action:"merchant.portal_api_update" %}
     <form method="post">
         {% csrf_token %}
         <input type="hidden" name="form_type" value="merchant_portal_update_webhook" />
@@ -35,6 +47,9 @@
                 value="{{ cred.webhook_url }}" /></div>
         <button class="btn btn-primary" type="submit">Save API Settings</button>
     </form>
+    {% else %}
+    <p class="text-muted">API settings are visible, but your role cannot update webhook/scopes.</p>
+    {% endif %}
     {% else %}
     <p class="text-muted">No credential configured yet. Use Operations Center to rotate credential.</p>
     {% endif %}

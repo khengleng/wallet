@@ -36,6 +36,7 @@
         <h3>Customer Onboarding (CIF)</h3>
         <p class="text-muted">CIF number becomes immutable after first creation. Leave CIF empty to auto-generate using
             prefix <code>{{ operation_settings.cif_id_prefix }}</code>.</p>
+        {% if user|can_do_action:"wallet.cif_onboard" %}
         <form method="post">
             {% csrf_token %}
             <input type="hidden" name="form_type" value="cif_onboard" />
@@ -85,6 +86,9 @@
             </div>
             <button type="submit" class="btn btn-primary">Create / Update CIF</button>
         </form>
+        {% else %}
+        <p class="text-muted">You do not have permission to onboard/update CIF records.</p>
+        {% endif %}
     </div>
 
     <div class="card">
@@ -133,20 +137,8 @@
                     <td>{{ cif.legal_name }}</td>
                     <td>{{ cif.user.username }}</td>
                     <td>{% if cif.service_class %}<code>{{ cif.service_class.code }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td>
-                    <td>
-                        {% if user|can_view_sensitive_domain:"customer_pii" %}
-                        {{ cif.mobile_no|default:"-" }}
-                        {% else %}
-                        ****
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if user|can_view_sensitive_domain:"customer_pii" %}
-                        {{ cif.email|default:"-" }}
-                        {% else %}
-                        ****
-                        {% endif %}
-                    </td>
+                    <td>{% if user|can_view_field:"wallet.customer.mobile_no" %}{{ cif.mobile_no|default:"-" }}{% else %}****{% endif %}</td>
+                    <td>{% if user|can_view_field:"wallet.customer.email" %}{{ cif.email|default:"-" }}{% else %}****{% endif %}</td>
                     <td>
                         {% if cif.status == "active" %}<span class="badge-active">Active</span>
                         {% elif cif.status == "blocked" %}<span class="badge-blocked">Blocked</span>
@@ -184,6 +176,7 @@
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.25rem;">
 
         <!-- Open Customer Wallet -->
+        {% if user|can_do_action:"wallet.open_user" %}
         <div class="card" style="margin-bottom:0;">
             <h3>Open Customer Wallet</h3>
             <p class="text-muted" style="font-size:0.85rem;">Opens a wallet for a CIF-linked customer by currency.</p>
@@ -206,8 +199,10 @@
                 <button type="submit" class="btn btn-primary" style="width:100%;">Open Customer Wallet</button>
             </form>
         </div>
+        {% endif %}
 
         <!-- Open Merchant Wallet -->
+        {% if user|can_do_action:"wallet.open_merchant" %}
         <div class="card" style="margin-bottom:0;">
             <h3>Open Merchant Wallet</h3>
             <p class="text-muted" style="font-size:0.85rem;">Opens a wallet for a merchant by currency.</p>
@@ -227,8 +222,10 @@
                 <button type="submit" class="btn btn-primary" style="width:100%;">Open Merchant Wallet</button>
             </form>
         </div>
+        {% endif %}
 
         <!-- Adjust Customer Wallet -->
+        {% if user|can_do_action:"wallet.adjust_user" %}
         <div class="card" style="margin-bottom:0;">
             <h3>Adjust Customer Wallet</h3>
             <p class="text-muted" style="font-size:0.85rem;">Manual credit or debit on a customer wallet.</p>
@@ -258,8 +255,10 @@
                 <button type="submit" class="btn btn-primary" style="width:100%;">Adjust Customer Wallet</button>
             </form>
         </div>
+        {% endif %}
 
         <!-- Adjust Merchant Wallet -->
+        {% if user|can_do_action:"wallet.adjust_merchant" %}
         <div class="card" style="margin-bottom:0;">
             <h3>Adjust Merchant Wallet</h3>
             <p class="text-muted" style="font-size:0.85rem;">Manual credit or debit on a merchant wallet.</p>
@@ -288,10 +287,12 @@
                 <button type="submit" class="btn btn-primary" style="width:100%;">Adjust Merchant Wallet</button>
             </form>
         </div>
+        {% endif %}
 
     </div>
 
     <!-- Freeze / Unfreeze -->
+    {% if user|can_do_action:"wallet.toggle_freeze" %}
     <div class="card" style="margin-top:1.25rem;">
         <h3>Freeze / Unfreeze Wallet</h3>
         <form method="post">
@@ -333,6 +334,7 @@
             <button type="submit" class="btn btn-primary">Apply Freeze / Unfreeze</button>
         </form>
     </div>
+    {% endif %}
 </div>
 
 <!-- ============================================================ -->

@@ -66,6 +66,14 @@ def default_sensitive_visibility_rules() -> dict:
     return {}
 
 
+def default_action_visibility_rules() -> dict:
+    return {}
+
+
+def default_field_visibility_rules() -> dict:
+    return {}
+
+
 def default_mobile_user_preferences() -> dict:
     return {
         "language": "en",
@@ -155,6 +163,22 @@ class OperationSetting(models.Model):
         help_text=(
             "Optional sensitive-data visibility overrides by domain. "
             "Format: {\"domain_key\": [\"role1\", \"role2\"]}."
+        ),
+    )
+    action_visibility_rules = models.JSONField(
+        default=default_action_visibility_rules,
+        blank=True,
+        help_text=(
+            "Optional action visibility overrides by action key. "
+            "Format: {\"action_key\": [\"role1\", \"role2\"]}."
+        ),
+    )
+    field_visibility_rules = models.JSONField(
+        default=default_field_visibility_rules,
+        blank=True,
+        help_text=(
+            "Optional field visibility overrides by field key. "
+            "Format: {\"field_key\": [\"role1\", \"role2\"]}."
         ),
     )
     updated_by = models.ForeignKey(

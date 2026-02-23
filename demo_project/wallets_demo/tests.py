@@ -40,6 +40,7 @@ from .models import (
     MerchantWalletCapability,
     OperationCase,
     OperationCaseNote,
+    OperationSetting,
     ReconciliationBreak,
     ReconciliationRun,
     ServiceClassPolicy,
@@ -765,6 +766,27 @@ class CustomerCIFWalletManagementTests(TestCase):
         filtered = list(response.context["customer_cifs"].object_list)
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0].cif_no, "CIF-0030")
+
+    def test_wallet_management_action_matrix_blocks_disallowed_action(self):
+        settings_row = OperationSetting.get_solo()
+        settings_row.action_visibility_rules = {
+            "wallet.toggle_freeze": ["super_admin"],
+        }
+        settings_row.save(update_fields=["action_visibility_rules", "updated_at"])
+
+        response = self.client.post(
+            reverse("wallet_management"),
+            {
+                "form_type": "wallet_toggle_freeze",
+                "holder_scope": "user",
+                "cif_id": self.cif.id,
+                "wallet_slug": "default",
+                "action": "freeze",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.get_wallet("default").refresh_from_db()
+        self.assertFalse(self.user.get_wallet("default").is_frozen)
 
 
 class MobileSelfOnboardingApiTests(TestCase):

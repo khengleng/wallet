@@ -31,6 +31,7 @@
         <p class="text-muted">Leave Merchant Code empty to auto-generate based on prefix
             <code>{{ operation_settings.merchant_id_prefix }}</code>.
         </p>
+        {% if user|can_do_action:"merchant.create" %}
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_create" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -70,6 +71,9 @@
             </div>
             <button class="btn btn-primary" type="submit">Create Merchant</button>
         </form>
+        {% else %}
+        <p class="text-muted">You do not have permission to create merchants.</p>
+        {% endif %}
     </div>
 
     <div class="card">
@@ -99,11 +103,16 @@
                         <td>{{ m.wallet_type }}</td>
                         <td>{% if m.owner %}{{ m.owner.username }}{% else %}-{% endif %}</td>
                         <td>{% if m.service_class %}<code>{{ m.service_class.code }}</code>{% else %}<span class="text-muted">-</span>{% endif %}</td>
-                        <td>{{ m.contact_email|mask_email }} / {{ m.contact_phone|mask_phone }}</td>
+                        <td>
+                            {% if user|can_view_field:"merchant.contact.email" %}{{ m.contact_email|mask_email }}{% else %}****{% endif %}
+                            /
+                            {% if user|can_view_field:"merchant.contact.mobile_no" %}{{ m.contact_phone|mask_phone }}{% else %}****{% endif %}
+                        </td>
                         <td style="font-size:0.78rem;">{% with cap=m.wallet_capability %}B2B:{% if cap.supports_b2b%}Y{% else %}N{% endif %} B2C:{% if cap.supports_b2c %}Y{% else %}N{% endif %} C2B:{% if cap.supports_c2b %}Y{% else %}N{% endif %}{% endwith %}</td>
                         <td>{% with p=m.loyalty_program %}{% if p.is_enabled %}On{% else %}Off{% endif %}{% endwith %}
                         </td>
                         <td>
+                            {% if user|can_do_action:"merchant.create" %}
                             <form method="post" style="display:flex;gap:0.3rem;flex-wrap:wrap;">
                                 {% csrf_token %}<input type="hidden" name="form_type" value="merchant_update" /><input
                                     type="hidden" name="merchant_id" value="{{ m.id }}" />
@@ -124,6 +133,9 @@
                                     placeholder="email" style="max-width:160px;" />
                                 <button class="btn btn-outline" type="submit">Save</button>
                             </form>
+                            {% else %}
+                            <span class="text-muted">No update permission</span>
+                            {% endif %}
                         </td>
                     </tr>
                     {% empty %}<tr>
@@ -270,6 +282,7 @@
 <div class="tab-pane" id="oc-kyb">
     <div class="card">
         <h3>Submit Merchant KYB</h3>
+        {% if user|can_do_action:"merchant.kyb_submit" %}
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="merchant_kyb_submit" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -287,6 +300,9 @@
             </div>
             <button class="btn btn-primary" type="submit">Submit KYB</button>
         </form>
+        {% else %}
+        <p class="text-muted">You do not have permission to submit KYB requests.</p>
+        {% endif %}
     </div>
     <div class="card">
         <h3>KYB Requests</h3>
@@ -314,7 +330,7 @@
                         <td>{{ req.registration_number|default:"-" }}</td>
                         <td>{{ req.maker.username }}</td>
                         <td>{% if req.checker %}{{ req.checker.username }}{% else %}-{% endif %}</td>
-                        <td>{% if req.status == "pending" %}<form method="post" style="display:flex;gap:0.3rem;">{% csrf_token %}<input type="hidden" name="form_type"
+                        <td>{% if req.status == "pending" and user|can_do_action:"merchant.kyb_decide" %}<form method="post" style="display:flex;gap:0.3rem;">{% csrf_token %}<input type="hidden" name="form_type"
                                     value="merchant_kyb_decision" /><input type="hidden" name="kyb_request_id"
                                     value="{{ req.id }}" /><select name="decision">
                                     <option value="approved">Approve</option>
@@ -973,6 +989,7 @@
 
     <div class="card">
         <h3>Create Case (Complaint / Dispute / Refund)</h3>
+        {% if user|can_do_action:"case.create" %}
         <form method="post">
             {% csrf_token %}<input type="hidden" name="form_type" value="case_create" />
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
@@ -994,6 +1011,9 @@
             </div>
             <button class="btn btn-primary" type="submit">Create Case</button>
         </form>
+        {% else %}
+        <p class="text-muted">You do not have permission to create cases.</p>
+        {% endif %}
     </div>
     <div class="card">
         <h3>Open Cases</h3>
@@ -1036,6 +1056,7 @@
                             {% endif %}
                         </td>
                         <td>
+                            {% if user|can_do_action:"case.update" %}
                             <form method="post" style="display:flex;gap:0.3rem;">{% csrf_token %}<input type="hidden"
                                     name="form_type" value="case_update" /><input type="hidden" name="case_id"
                                     value="{{ item.id }}" /><select name="status">{% for value,label in case_status_choices %}<option value="{{ value }}" {% if item.status == value %}
@@ -1047,6 +1068,9 @@
                                 </select><input type="datetime-local" name="sla_due_at" value="{% if item.sla_due_at %}{{ item.sla_due_at|date:'Y-m-d\\TH:i' }}{% endif %}" style="max-width:170px;" /><input type="text" name="note" placeholder="Note"
                                     style="max-width:100px;" /><button class="btn btn-outline"
                                     type="submit">Update</button></form>
+                            {% else %}
+                            <span class="text-muted">No update permission</span>
+                            {% endif %}
                             <a class="btn btn-outline" href="{% url 'case_detail' item.id %}" style="margin-top:0.35rem;">Open 360</a>
                         </td>
                     </tr>
