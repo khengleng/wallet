@@ -41,6 +41,9 @@ class MobileProfileUpdateRequest(BaseModel):
     legal_name: str = Field(default="", max_length=128)
     mobile_no: str = Field(default="", max_length=40)
     profile_picture_url: str = Field(default="", max_length=500)
+    current_transaction_pin: str = Field(default="", max_length=16)
+    transaction_pin: str = Field(default="", max_length=16)
+    transaction_pin_confirm: str = Field(default="", max_length=16)
     preferences: dict = Field(default_factory=dict)
 
 

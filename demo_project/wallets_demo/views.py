@@ -139,6 +139,8 @@ ACCOUNTING_CHECKER_ROLES,
 
 APP_START_MONOTONIC = time.monotonic()
 logger = logging.getLogger(__name__)
+PIN_COMMIT_MAX_FAILED_ATTEMPTS = 5
+PIN_COMMIT_LOCK_SECONDS = 15 * 60
 
 
 def _parse_amount(raw_value: str) -> Decimal:
@@ -834,11 +836,27 @@ def mobile_playground_assistant_action(request):
         )
 
     if execute:
+        if _pin_commit_locked(from_user.id):
+            return _mobile_json_error(
+                "Transaction PIN is temporarily locked due to multiple failed attempts.",
+                code="pin_locked",
+                status=429,
+                metadata={"retry_after_seconds": _pin_commit_lock_remaining_seconds(from_user.id)},
+            )
         provided_pin = str(payload.get("pin") or "").strip()
         if not provided_pin:
             return _mobile_json_error("PIN is required to commit transaction.", code="pin_required", status=403)
         if not _verify_user_transaction_pin(from_user, provided_pin):
+            _pin_commit_fail(from_user.id)
+            if _pin_commit_locked(from_user.id):
+                return _mobile_json_error(
+                    "Transaction PIN is temporarily locked due to multiple failed attempts.",
+                    code="pin_locked",
+                    status=429,
+                    metadata={"retry_after_seconds": _pin_commit_lock_remaining_seconds(from_user.id)},
+                )
             return _mobile_json_error("Invalid transaction PIN.", code="pin_invalid", status=403)
+        _pin_commit_success(from_user.id)
 
     from_wallet = _wallet_for_currency(from_user, currency)
     to_wallet = _wallet_for_currency(to_user, currency) if to_user is not None else None
@@ -1369,6 +1387,37 @@ def _verify_user_transaction_pin(user: User, pin: str) -> bool:
         return check_password(pin, pin_hash)
     except Exception:
         return False
+
+
+def _pin_commit_cache_key(user_id: int) -> str:
+    return f"mobile_pin_commit_failures:{user_id}"
+
+
+def _pin_commit_locked(user_id: int) -> bool:
+    data = cache.get(_pin_commit_cache_key(user_id)) or {}
+    return int(data.get("locked_until", 0) or 0) > int(timezone.now().timestamp())
+
+
+def _pin_commit_lock_remaining_seconds(user_id: int) -> int:
+    data = cache.get(_pin_commit_cache_key(user_id)) or {}
+    remaining = int(data.get("locked_until", 0) or 0) - int(timezone.now().timestamp())
+    return max(remaining, 0)
+
+
+def _pin_commit_fail(user_id: int) -> None:
+    key = _pin_commit_cache_key(user_id)
+    now_ts = int(timezone.now().timestamp())
+    data = cache.get(key) or {}
+    failures = int(data.get("failures", 0) or 0) + 1
+    locked_until = int(data.get("locked_until", 0) or 0)
+    if failures >= PIN_COMMIT_MAX_FAILED_ATTEMPTS:
+        locked_until = now_ts + PIN_COMMIT_LOCK_SECONDS
+        failures = 0
+    cache.set(key, {"failures": failures, "locked_until": locked_until}, timeout=PIN_COMMIT_LOCK_SECONDS)
+
+
+def _pin_commit_success(user_id: int) -> None:
+    cache.delete(_pin_commit_cache_key(user_id))
 
 
 def _sanitize_mobile_preferences(current: dict, incoming: dict) -> dict:

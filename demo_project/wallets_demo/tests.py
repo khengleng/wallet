@@ -4,6 +4,7 @@ import json
 from unittest.mock import patch
 
 from django.contrib.auth.hashers import make_password
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import Client, TestCase, override_settings
@@ -769,6 +770,7 @@ class CustomerCIFWalletManagementTests(TestCase):
 class MobileSelfOnboardingApiTests(TestCase):
     def setUp(self):
         seed_role_groups()
+        cache.clear()
         self.client = Client()
         self.user = User.objects.create_user(
             username="mobile_user",
@@ -942,10 +944,101 @@ class MobileSelfOnboardingApiTests(TestCase):
         self.assertEqual(proposal["prefill"]["currency"], "USD")
         self.assertEqual(proposal["prefill"]["amount"], "25")
 
+    def test_mobile_profile_pin_rotation_requires_current_pin(self):
+        self.client.login(username="mobile_user", password="pass12345")
+        self.client.post(
+            reverse("mobile_self_onboard"),
+            data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"USD"}',
+            content_type="application/json",
+        )
+        set_pin = self.client.post(
+            reverse("mobile_profile"),
+            data=json.dumps({"transaction_pin": "2468", "transaction_pin_confirm": "2468"}),
+            content_type="application/json",
+        )
+        self.assertEqual(set_pin.status_code, 200)
+
+        missing_current = self.client.post(
+            reverse("mobile_profile"),
+            data=json.dumps({"transaction_pin": "8642", "transaction_pin_confirm": "8642"}),
+            content_type="application/json",
+        )
+        self.assertEqual(missing_current.status_code, 403)
+        self.assertEqual(missing_current.json()["error"]["code"], "current_pin_required")
+
+        wrong_current = self.client.post(
+            reverse("mobile_profile"),
+            data=json.dumps(
+                {
+                    "current_transaction_pin": "0000",
+                    "transaction_pin": "8642",
+                    "transaction_pin_confirm": "8642",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(wrong_current.status_code, 403)
+        self.assertEqual(wrong_current.json()["error"]["code"], "current_pin_invalid")
+
+        ok_rotate = self.client.post(
+            reverse("mobile_profile"),
+            data=json.dumps(
+                {
+                    "current_transaction_pin": "2468",
+                    "transaction_pin": "8642",
+                    "transaction_pin_confirm": "8642",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(ok_rotate.status_code, 200)
+        self.assertTrue(ok_rotate.json()["ok"])
+
+    def test_mobile_profile_pin_rotation_lockout_after_failed_attempts(self):
+        self.client.login(username="mobile_user", password="pass12345")
+        self.client.post(
+            reverse("mobile_self_onboard"),
+            data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"USD"}',
+            content_type="application/json",
+        )
+        self.client.post(
+            reverse("mobile_profile"),
+            data=json.dumps({"transaction_pin": "2468", "transaction_pin_confirm": "2468"}),
+            content_type="application/json",
+        )
+
+        for _ in range(5):
+            self.client.post(
+                reverse("mobile_profile"),
+                data=json.dumps(
+                    {
+                        "current_transaction_pin": "0000",
+                        "transaction_pin": "8642",
+                        "transaction_pin_confirm": "8642",
+                    }
+                ),
+                content_type="application/json",
+            )
+        locked = self.client.post(
+            reverse("mobile_profile"),
+            data=json.dumps(
+                {
+                    "current_transaction_pin": "2468",
+                    "transaction_pin": "9753",
+                    "transaction_pin_confirm": "9753",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(locked.status_code, 429)
+        self.assertEqual(locked.json()["error"]["code"], "pin_setup_locked")
+        self.assertIn("retry_after_seconds", locked.json()["error"].get("metadata", {}))
+
 
 class MobileNativeLabPageTests(TestCase):
     def setUp(self):
         seed_role_groups()
+        cache.clear()
         self.client = Client()
         self.user = User.objects.create_user(
             username="native_lab_user",
@@ -1071,6 +1164,48 @@ class MobileNativeLabPageTests(TestCase):
         self.assertEqual(ok_response.status_code, 200)
         self.assertTrue(ok_response.json()["data"]["allowed"])
         self.assertTrue(ok_response.json()["data"]["execute"])
+
+    def test_mobile_playground_transaction_commit_pin_lockout(self):
+        prefs = self.target_user.mobile_preferences if isinstance(self.target_user.mobile_preferences, dict) else {}
+        prefs["transaction_pin_hash"] = make_password("1234")
+        self.target_user.mobile_preferences = prefs
+        self.target_user.save(update_fields=["mobile_preferences"])
+
+        self.client.login(username="native_lab_user", password="pass12345")
+        for _ in range(5):
+            self.client.post(
+                reverse("mobile_playground_assistant_action"),
+                data=json.dumps(
+                    {
+                        "action": "deposit",
+                        "amount": "10",
+                        "currency": "USD",
+                        "from_username": "native_lab_target",
+                        "execute": True,
+                        "pin": "0000",
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        locked_response = self.client.post(
+            reverse("mobile_playground_assistant_action"),
+            data=json.dumps(
+                {
+                    "action": "deposit",
+                    "amount": "10",
+                    "currency": "USD",
+                    "from_username": "native_lab_target",
+                    "execute": True,
+                    "pin": "1234",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(locked_response.status_code, 429)
+        body = locked_response.json()
+        self.assertEqual(body["error"]["code"], "pin_locked")
+        self.assertIn("retry_after_seconds", body["error"].get("metadata", {}))
 
 
 class PolicyHubUpgradeWorkflowTests(TestCase):
