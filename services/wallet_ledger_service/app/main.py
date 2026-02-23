@@ -302,6 +302,7 @@ def deposit_endpoint(
             idempotency_key=idempotency_key,
             metadata=payload.metadata,
         )
+        _inc_counter("deposits_success_total")
         return {
             "account_id": result["account_id"],
             "balance": result["balance"],
@@ -311,8 +312,6 @@ def deposit_endpoint(
     except ValueError as exc:
         _inc_counter("not_found_total")
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    else:
-        _inc_counter("deposits_success_total")
     finally:
         logger.info(
             json.dumps(
@@ -343,6 +342,7 @@ def withdraw_endpoint(
             idempotency_key=idempotency_key,
             metadata=payload.metadata,
         )
+        _inc_counter("withdrawals_success_total")
         return {
             "account_id": result["account_id"],
             "balance": result["balance"],
@@ -357,8 +357,6 @@ def withdraw_endpoint(
     except InsufficientFundsError as exc:
         _inc_counter("insufficient_funds_total")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    else:
-        _inc_counter("withdrawals_success_total")
     finally:
         logger.info(
             json.dumps(
@@ -390,6 +388,7 @@ def transfer_endpoint(
             idempotency_key=idempotency_key,
             metadata=payload.metadata,
         )
+        _inc_counter("transfers_success_total")
         return {
             "from_account_id": result["from_account_id"],
             "to_account_id": result["to_account_id"],
@@ -404,8 +403,6 @@ def transfer_endpoint(
     except InsufficientFundsError as exc:
         _inc_counter("insufficient_funds_total")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    else:
-        _inc_counter("transfers_success_total")
     finally:
         logger.info(
             json.dumps(

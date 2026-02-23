@@ -9,7 +9,6 @@ import logging
 import secrets
 import time
 import re
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -40,6 +39,7 @@ from dj_wallet.utils import get_exchange_service, get_wallet_service
 
 from .fx_sync import sync_external_fx_rates
 from .analytics import track_event
+from . import utils as shared_utils
 from .access_policy import (
     DEFAULT_MENU_ROLE_RULES,
     DEFAULT_SENSITIVE_DOMAIN_RULES,
@@ -47,10 +47,7 @@ from .access_policy import (
 )
 from .release_readiness import release_readiness_snapshot
 from .identity_client import (
-    oidc_auth_url as identity_oidc_auth_url,
     oidc_logout_url as identity_oidc_logout_url,
-    oidc_token_exchange as identity_oidc_token_exchange,
-    oidc_userinfo as identity_oidc_userinfo,
     register_device_session as identity_register_device_session,
 )
 from .keycloak_auth import (
@@ -356,10 +353,7 @@ def _fx_to_base(amount: Decimal, from_currency: str) -> Decimal | None:
 
 
 def _client_ip(request) -> str:
-    forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "")
+    return shared_utils.client_ip(request)
 
 
 def _audit(
@@ -483,119 +477,27 @@ def _should_use_maker_checker(user) -> bool:
 
 
 def _use_keycloak_oidc() -> bool:
-    return getattr(settings, "AUTH_MODE", "local").lower() == "keycloak_oidc"
+    return shared_utils.use_keycloak_oidc()
 
 
 def _keycloak_realm_base_url() -> str:
-    return f"{settings.KEYCLOAK_BASE_URL}/realms/{settings.KEYCLOAK_REALM}"
+    return shared_utils.keycloak_realm_base_url()
 
 
 def _keycloak_auth_url(state: str, nonce: str) -> str:
-    try:
-        return identity_oidc_auth_url(
-            state=state,
-            nonce=nonce,
-            redirect_uri=settings.KEYCLOAK_REDIRECT_URI,
-            scope=settings.KEYCLOAK_SCOPES,
-        )
-    except Exception:
-        query = urlencode(
-            {
-                "client_id": settings.KEYCLOAK_CLIENT_ID,
-                "response_type": "code",
-                "scope": settings.KEYCLOAK_SCOPES,
-                "redirect_uri": settings.KEYCLOAK_REDIRECT_URI,
-                "state": state,
-                "nonce": nonce,
-            }
-        )
-        logger.warning("Identity service auth-url failed; falling back to direct Keycloak.")
-        return f"{_keycloak_realm_base_url()}/protocol/openid-connect/auth?{query}"
+    return shared_utils.keycloak_auth_url(state, nonce)
 
 
 def _keycloak_token_exchange(code: str) -> dict:
-    try:
-        return identity_oidc_token_exchange(
-            code=code,
-            redirect_uri=settings.KEYCLOAK_REDIRECT_URI,
-        )
-    except Exception:
-        data = urlencode(
-            {
-                "grant_type": "authorization_code",
-                "code": code,
-                "client_id": settings.KEYCLOAK_CLIENT_ID,
-                "client_secret": settings.KEYCLOAK_CLIENT_SECRET,
-                "redirect_uri": settings.KEYCLOAK_REDIRECT_URI,
-            }
-        ).encode("utf-8")
-        request = Request(
-            f"{_keycloak_realm_base_url()}/protocol/openid-connect/token",
-            data=data,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            method="POST",
-        )
-        logger.warning("Identity service token exchange failed; falling back to direct Keycloak.")
-        with urlopen(request, timeout=10) as response:
-            return json.loads(response.read())
+    return shared_utils.keycloak_token_exchange(code)
 
 
 def _keycloak_userinfo(access_token: str) -> dict:
-    try:
-        return identity_oidc_userinfo(access_token=access_token)
-    except Exception:
-        request = Request(
-            f"{_keycloak_realm_base_url()}/protocol/openid-connect/userinfo",
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
-        logger.warning("Identity service userinfo failed; falling back to direct Keycloak.")
-        with urlopen(request, timeout=10) as response:
-            return json.loads(response.read())
+    return shared_utils.keycloak_userinfo(access_token)
 
 
 def _find_or_create_user_from_claims(claims: dict) -> User:
-    subject = str(claims.get("sub", "")).strip()
-    preferred = str(claims.get("preferred_username", "")).strip()
-    email = str(claims.get("email", "")).strip().lower()
-    first_name = str(claims.get("given_name", "")).strip()
-    last_name = str(claims.get("family_name", "")).strip()
-
-    if email:
-        existing_by_email = User.objects.filter(email__iexact=email).first()
-        if existing_by_email:
-            user = existing_by_email
-        else:
-            base_username = preferred or email.split("@")[0] or f"user_{subject[:12]}"
-            username = base_username
-            suffix = 1
-            while User.objects.filter(username=username).exists():
-                suffix += 1
-                username = f"{base_username}_{suffix}"
-            user = User.objects.create_user(username=username, email=email)
-    else:
-        base_username = preferred or f"user_{subject[:12]}"
-        user = User.objects.filter(username=base_username).first()
-        if user is None:
-            username = base_username
-            suffix = 1
-            while User.objects.filter(username=username).exists():
-                suffix += 1
-                username = f"{base_username}_{suffix}"
-            user = User.objects.create_user(username=username)
-
-    changed_fields = []
-    if email and user.email != email:
-        user.email = email
-        changed_fields.append("email")
-    if first_name and user.first_name != first_name:
-        user.first_name = first_name
-        changed_fields.append("first_name")
-    if last_name and user.last_name != last_name:
-        user.last_name = last_name
-        changed_fields.append("last_name")
-    if changed_fields:
-        user.save(update_fields=changed_fields)
-    return user
+    return shared_utils.find_or_create_user_from_claims(claims)
 
 
 def _submit_approval_request(

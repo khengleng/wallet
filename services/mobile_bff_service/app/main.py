@@ -29,6 +29,7 @@ app = FastAPI(
     version="1.0.0",
     description="Dedicated mobile channel backend-for-frontend service.",
 )
+http_client: httpx.AsyncClient | None = None
 
 APP_START_MONOTONIC = time.monotonic()
 metrics_lock = Lock()
@@ -40,6 +41,26 @@ metrics_counters = {
     "rate_limited_total": 0,
     "upstream_errors_total": 0,
 }
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global http_client
+    if http_client is None:
+        http_client = httpx.AsyncClient()
+    return http_client
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    _get_http_client()
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    global http_client
+    if http_client is not None:
+        await http_client.aclose()
+        http_client = None
 
 
 def _inc_counter(key: str, value: int = 1) -> None:
@@ -87,8 +108,12 @@ async def _introspect_token(access_token: str) -> dict[str, Any]:
     }
     payload = {"token": access_token}
     try:
-        async with httpx.AsyncClient(timeout=settings.identity_service_timeout_seconds) as client:
-            resp = await client.post(endpoint, headers=headers, json=payload)
+        resp = await _get_http_client().post(
+            endpoint,
+            headers=headers,
+            json=payload,
+            timeout=settings.identity_service_timeout_seconds,
+        )
         resp.raise_for_status()
     except httpx.HTTPError as exc:
         _inc_counter("upstream_errors_total")
@@ -146,14 +171,14 @@ async def _proxy_web(
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     headers["X-Mobile-Channel"] = "mobile-bff"
     try:
-        async with httpx.AsyncClient(timeout=settings.web_service_timeout_seconds) as client:
-            response = await client.request(
-                method=method,
-                url=endpoint,
-                headers=headers,
-                json=payload,
-                params=params,
-            )
+        response = await _get_http_client().request(
+            method=method,
+            url=endpoint,
+            headers=headers,
+            json=payload,
+            params=params,
+            timeout=settings.web_service_timeout_seconds,
+        )
     except httpx.HTTPError as exc:
         _inc_counter("upstream_errors_total")
         raise HTTPException(
@@ -182,14 +207,14 @@ async def _proxy_identity(
         "X-Service-Api-Key": settings.identity_service_api_key,
     }
     try:
-        async with httpx.AsyncClient(timeout=settings.identity_service_timeout_seconds) as client:
-            response = await client.request(
-                method=method,
-                url=endpoint,
-                headers=headers,
-                json=payload,
-                params=params,
-            )
+        response = await _get_http_client().request(
+            method=method,
+            url=endpoint,
+            headers=headers,
+            json=payload,
+            params=params,
+            timeout=settings.identity_service_timeout_seconds,
+        )
     except httpx.HTTPError as exc:
         _inc_counter("upstream_errors_total")
         raise HTTPException(
@@ -274,8 +299,12 @@ async def _openai_personalization(
     }
     endpoint = f"{settings.openai_base_url}/responses"
     try:
-        async with httpx.AsyncClient(timeout=settings.openai_timeout_seconds) as client:
-            response = await client.post(endpoint, headers=headers, json=request_payload)
+        response = await _get_http_client().post(
+            endpoint,
+            headers=headers,
+            json=request_payload,
+            timeout=settings.openai_timeout_seconds,
+        )
         response.raise_for_status()
         body = response.json()
     except Exception:
@@ -348,8 +377,12 @@ async def _openai_assistant_chat(
     }
     endpoint = f"{settings.openai_base_url}/responses"
     try:
-        async with httpx.AsyncClient(timeout=settings.openai_timeout_seconds) as client:
-            response = await client.post(endpoint, headers=headers, json=request_payload)
+        response = await _get_http_client().post(
+            endpoint,
+            headers=headers,
+            json=request_payload,
+            timeout=settings.openai_timeout_seconds,
+        )
         response.raise_for_status()
         body = response.json()
     except Exception:

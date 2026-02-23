@@ -35,6 +35,7 @@ app = FastAPI(
     description="JWT auth, rate-limited gateway for wallet ledger operations.",
 )
 logger = logging.getLogger("api_gateway.audit")
+http_client: httpx.AsyncClient | None = None
 rate_lock = Lock()
 rate_windows: dict[str, deque[float]] = defaultdict(deque)
 circuit_lock = Lock()
@@ -121,6 +122,26 @@ if rate_backend == "redis":
             rate_backend = "memory"
 
 
+def _get_http_client() -> httpx.AsyncClient:
+    global http_client
+    if http_client is None:
+        http_client = httpx.AsyncClient()
+    return http_client
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    _get_http_client()
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    global http_client
+    if http_client is not None:
+        await http_client.aclose()
+        http_client = None
+
+
 def _inc_counter(key: str, value: int = 1) -> None:
     with metrics_lock:
         metrics_counters[key] = int(metrics_counters.get(key, 0)) + value
@@ -204,10 +225,12 @@ async def _decode_keycloak_token(token: str) -> dict[str, Any]:
         "X-Service-Api-Key": settings.identity_service_api_key,
     }
     try:
-        async with httpx.AsyncClient(
-            timeout=settings.identity_service_timeout_seconds
-        ) as client:
-            resp = await client.post(endpoint, json=data, headers=headers)
+        resp = await _get_http_client().post(
+            endpoint,
+            json=data,
+            headers=headers,
+            timeout=settings.identity_service_timeout_seconds,
+        )
         resp.raise_for_status()
     except httpx.HTTPError as exc:
         _audit(
@@ -485,18 +508,18 @@ async def _proxy(
     while True:
         attempt += 1
         try:
-            async with httpx.AsyncClient(timeout=settings.ledger_timeout_seconds) as client:
-                resp = await client.request(
-                    method,
-                    url,
-                    json=payload,
-                    headers=_forward_headers(
-                        method=method,
-                        path=path,
-                        payload=payload,
-                        idempotency_key=idempotency_key,
-                    ),
-                )
+            resp = await _get_http_client().request(
+                method,
+                url,
+                json=payload,
+                headers=_forward_headers(
+                    method=method,
+                    path=path,
+                    payload=payload,
+                    idempotency_key=idempotency_key,
+                ),
+                timeout=settings.ledger_timeout_seconds,
+            )
         except httpx.HTTPError as exc:
             if attempt <= settings.ledger_max_retries:
                 _inc_counter("proxy_retries_total")
@@ -554,14 +577,14 @@ async def _proxy_mobile_bff(
     if payload is not None:
         headers["Content-Type"] = "application/json"
     try:
-        async with httpx.AsyncClient(timeout=settings.mobile_bff_timeout_seconds) as client:
-            resp = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                json=payload,
-                params=params,
-            )
+        resp = await _get_http_client().request(
+            method=method,
+            url=url,
+            headers=headers,
+            json=payload,
+            params=params,
+            timeout=settings.mobile_bff_timeout_seconds,
+        )
     except httpx.HTTPError as exc:
         _inc_counter("upstream_errors_total")
         raise HTTPException(

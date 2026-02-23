@@ -49,6 +49,7 @@ services:
       AUTH_MODE: keycloak_oidc
       IDENTITY_SERVICE_BASE_URL: http://identity-service:8080
       IDENTITY_SERVICE_API_KEY: local-identity-service-key
+      MOBILE_BFF_BASE_URL: http://mobile-bff-service:8080
       INTERNAL_AUTH_MODE: hmac
       LEDGER_BASE_URL: http://wallet-ledger-service:8080
       INTERNAL_AUTH_SHARED_SECRET: local-internal-auth-shared-secret
@@ -63,6 +64,26 @@ services:
       - "8082:8080"
     depends_on:
       - wallet-ledger-service
+      - identity-service
+      - mobile-bff-service
+
+  mobile-bff-service:
+    build:
+      context: ../services/mobile_bff_service
+    environment:
+      ENVIRONMENT: production
+      SERVICE_API_KEY: local-mobile-bff-service-key
+      METRICS_TOKEN: local-metrics-token
+      IDENTITY_SERVICE_BASE_URL: http://identity-service:8080
+      IDENTITY_SERVICE_API_KEY: local-identity-service-key
+      WEB_SERVICE_BASE_URL: http://api:8000
+      OPENAI_API_KEY: ""
+      OPENAI_MODEL: gpt-5-mini
+      OPENAI_BASE_URL: https://api.openai.com/v1
+      OPENAI_TIMEOUT_SECONDS: "10"
+    ports:
+      - "8090:8080"
+    depends_on:
       - identity-service
 
   identity-service:
@@ -166,6 +187,7 @@ services:
       AUTH_MODE: keycloak_oidc
       IDENTITY_SERVICE_BASE_URL: http://identity-service:8080
       IDENTITY_SERVICE_API_KEY: local-identity-service-key
+      MOBILE_BFF_BASE_URL: http://mobile-bff-service:8080
       KEYCLOAK_CLIENT_ID: wallet-web
       KEYCLOAK_REDIRECT_URI: http://localhost:8000/auth/keycloak/callback/
       KEYCLOAK_POST_LOGOUT_REDIRECT_URI: http://localhost:8000/login/

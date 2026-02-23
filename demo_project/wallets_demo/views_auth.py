@@ -25,6 +25,7 @@ from .keycloak_auth import (
     next_introspection_deadline,
     sync_user_roles_from_keycloak_claims,
 )
+from . import utils as shared_utils
 
 
 register = legacy.register
@@ -34,7 +35,7 @@ def portal_login(request):
     if request.user.is_authenticated:
         return redirect("dashboard")
 
-    if legacy._use_keycloak_oidc():
+    if shared_utils.use_keycloak_oidc():
         if request.method != "POST" and request.GET.get("start") != "1":
             return render(
                 request,
@@ -53,12 +54,12 @@ def portal_login(request):
         request.session["oidc_state_history"] = state_history
         request.session["oidc_state"] = state
         request.session["oidc_nonce"] = nonce
-        return redirect(legacy._keycloak_auth_url(state, nonce))
+        return redirect(shared_utils.keycloak_auth_url(state, nonce))
 
     if request.method == "POST":
         username = (request.POST.get("username") or "").strip()
         password = request.POST.get("password") or ""
-        ip = legacy._client_ip(request)
+        ip = shared_utils.client_ip(request)
 
         if legacy._is_locked(username, ip):
             messages.error(
@@ -95,7 +96,7 @@ def portal_login(request):
 
 
 def keycloak_callback(request):
-    if not legacy._use_keycloak_oidc():
+    if not shared_utils.use_keycloak_oidc():
         return redirect("login")
 
     expected_state = request.session.get("oidc_state", "")
@@ -120,12 +121,12 @@ def keycloak_callback(request):
             state_history = [s for s in state_history if s != provided_state]
             request.session["oidc_state_history"] = state_history
         request.session.pop("oidc_nonce", None)
-        token_payload = legacy._keycloak_token_exchange(code)
+        token_payload = shared_utils.keycloak_token_exchange(code)
         access_token = token_payload.get("access_token", "")
         if not access_token:
             raise ValidationError("Missing access token.")
-        claims = legacy._keycloak_userinfo(access_token)
-        user = legacy._find_or_create_user_from_claims(claims)
+        claims = shared_utils.keycloak_userinfo(access_token)
+        user = shared_utils.find_or_create_user_from_claims(claims)
         access_claims = decode_access_token_claims(access_token)
         id_claims = decode_access_token_claims(token_payload.get("id_token", ""))
         introspection_claims: dict = {}
@@ -170,7 +171,7 @@ def keycloak_callback(request):
                     "utf-8"
                 )
             ).hexdigest()[:32],
-            ip_address=legacy._client_ip(request),
+            ip_address=shared_utils.client_ip(request),
             user_agent=request.META.get("HTTP_USER_AGENT", "")[:2048],
             expires_at=expires_at,
         )
@@ -189,7 +190,7 @@ def keycloak_callback(request):
 def portal_logout(request):
     id_token = request.session.get("oidc_id_token", "")
     legacy.auth_logout(request)
-    if legacy._use_keycloak_oidc() and id_token:
+    if shared_utils.use_keycloak_oidc() and id_token:
         post_logout = settings.KEYCLOAK_POST_LOGOUT_REDIRECT_URI or settings.KEYCLOAK_REDIRECT_URI
         try:
             logout_url = identity_oidc_logout_url(
@@ -206,13 +207,13 @@ def portal_logout(request):
                 }
             )
             legacy.logger.warning("Identity service logout-url failed; falling back to direct Keycloak.")
-            logout_url = f"{legacy._keycloak_realm_base_url()}/protocol/openid-connect/logout?{query}"
+            logout_url = f"{shared_utils.keycloak_realm_base_url()}/protocol/openid-connect/logout?{query}"
         return redirect(logout_url)
     return redirect("login")
 
 
 def profile(request):
-    is_keycloak = legacy._use_keycloak_oidc()
+    is_keycloak = shared_utils.use_keycloak_oidc()
     can_edit_profile = not is_keycloak
     can_change_password = not is_keycloak
     password_form = PasswordChangeForm(request.user)
