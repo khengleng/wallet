@@ -15,6 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.conf.urls.i18n import i18n_patterns
 from django.db import connections
 from django.http import JsonResponse
 from django.urls import include, path
@@ -36,6 +37,11 @@ def readyz(_request):
 urlpatterns = [
     path("healthz", healthz),
     path("readyz", readyz),
+    path("i18n/", include("django.conf.urls.i18n")),
+]
+
+urlpatterns += i18n_patterns(
     path("admin/", admin.site.urls),
     path("", include("wallets_demo.urls")),
-]
+    prefix_default_language=False,
+)

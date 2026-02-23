@@ -1,0 +1,229 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-23 19:30+0700\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: km\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+#: wallets_demo/templates/wallets_demo/base.html:497
+msgid "Profile"
+msgstr "ប្រវត្តិរូប"
+
+#: wallets_demo/templates/wallets_demo/base.html:500
+#: wallets_demo/templates/wallets_demo/base.html:618
+msgid "Sign Out"
+msgstr "ចាកចេញ"
+
+#: wallets_demo/templates/wallets_demo/base.html:503
+#: wallets_demo/templates/wallets_demo/login.html:4
+#: wallets_demo/templates/wallets_demo/login.html:9
+#: wallets_demo/templates/wallets_demo/login.html:26
+#: wallets_demo/templates/wallets_demo/register.html:32
+msgid "Login"
+msgstr "ចូលគណនី"
+
+#: wallets_demo/templates/wallets_demo/base.html:504
+#: wallets_demo/templates/wallets_demo/register.html:4
+msgid "Sign Up"
+msgstr "ចុះឈ្មោះ"
+
+#: wallets_demo/templates/wallets_demo/base.html:513
+msgid "Wallet"
+msgstr "កាបូប"
+
+#: wallets_demo/templates/wallets_demo/base.html:515
+msgid "Dashboard"
+msgstr "ផ្ទាំងគ្រប់គ្រង"
+
+#: wallets_demo/templates/wallets_demo/base.html:517
+msgid "Transfer"
+msgstr "ផ្ទេរ"
+
+#: wallets_demo/templates/wallets_demo/base.html:519
+msgid "Deposit"
+msgstr "ដាក់ប្រាក់"
+
+#: wallets_demo/templates/wallets_demo/base.html:521
+msgid "Withdraw"
+msgstr "ដកប្រាក់"
+
+#: wallets_demo/templates/wallets_demo/base.html:523
+msgid "FX Exchange"
+msgstr "ប្តូរប្រាក់ FX"
+
+#: wallets_demo/templates/wallets_demo/base.html:525
+msgid "My Profile"
+msgstr "ប្រវត្តិរូបរបស់ខ្ញុំ"
+
+#: wallets_demo/templates/wallets_demo/base.html:528
+msgid "Mobile Service Playground"
+msgstr "Playground សេវាម៉ូបៃល៍"
+
+#: wallets_demo/templates/wallets_demo/base.html:531
+msgid "Merchant"
+msgstr "ពាណិជ្ជករ"
+
+#: wallets_demo/templates/wallets_demo/base.html:533
+msgid "Merchant Portal"
+msgstr "ផតថលពាណិជ្ជករ"
+
+#: wallets_demo/templates/wallets_demo/base.html:537
+msgid "Wallet Management"
+msgstr "គ្រប់គ្រងកាបូប"
+
+#: wallets_demo/templates/wallets_demo/base.html:541
+msgid "Back Office"
+msgstr "Back Office"
+
+#: wallets_demo/templates/wallets_demo/base.html:543
+msgid "Back Office Home"
+msgstr "ទំព័រដើម Back Office"
+
+#: wallets_demo/templates/wallets_demo/base.html:546
+msgid "Operations"
+msgstr "ប្រតិបត្តិការ"
+
+#: wallets_demo/templates/wallets_demo/base.html:549
+msgid "Merchant Operations"
+msgstr "ប្រតិបត្តិការពាណិជ្ជករ"
+
+#: wallets_demo/templates/wallets_demo/base.html:551
+msgid "Case Management"
+msgstr "គ្រប់គ្រងករណី"
+
+#: wallets_demo/templates/wallets_demo/base.html:555
+msgid "Operations Queue"
+msgstr "ជួរប្រតិបត្តិការ"
+
+#: wallets_demo/templates/wallets_demo/base.html:560
+msgid "Finance"
+msgstr "ហិរញ្ញវត្ថុ"
+
+#: wallets_demo/templates/wallets_demo/base.html:563
+msgid "Treasury Management"
+msgstr "គ្រប់គ្រងរតនាគារ"
+
+#: wallets_demo/templates/wallets_demo/base.html:567
+msgid "Settlement Management"
+msgstr "គ្រប់គ្រងសម្របសម្រួល"
+
+#: wallets_demo/templates/wallets_demo/base.html:571
+msgid "Reconciliation Management"
+msgstr "គ្រប់គ្រងផ្ទៀងផ្ទាត់"
+
+#: wallets_demo/templates/wallets_demo/base.html:575
+msgid "Operations Reports"
+msgstr "របាយការណ៍ប្រតិបត្តិការ"
+
+#: wallets_demo/templates/wallets_demo/base.html:579
+msgid "Accounting Management"
+msgstr "គ្រប់គ្រងគណនេយ្យ"
+
+#: wallets_demo/templates/wallets_demo/base.html:583
+msgid "FX Rate Management"
+msgstr "គ្រប់គ្រងអត្រាប្តូរប្រាក់ FX"
+
+#: wallets_demo/templates/wallets_demo/base.html:588
+msgid "Governance"
+msgstr "អភិបាលកិច្ច"
+
+#: wallets_demo/templates/wallets_demo/base.html:591
+msgid "Approval Matrix"
+msgstr "ម៉ាទ្រីសអនុម័ត"
+
+#: wallets_demo/templates/wallets_demo/base.html:595
+msgid "Policy Hub"
+msgstr "មជ្ឈមណ្ឌលគោលការណ៍"
+
+#: wallets_demo/templates/wallets_demo/base.html:599
+msgid "Documents Center"
+msgstr "មជ្ឈមណ្ឌលឯកសារ"
+
+#: wallets_demo/templates/wallets_demo/base.html:603
+msgid "Access Control (RBAC)"
+msgstr "ការគ្រប់គ្រងសិទ្ធិ (RBAC)"
+
+#: wallets_demo/templates/wallets_demo/base.html:607
+msgid "System Settings"
+msgstr "ការកំណត់ប្រព័ន្ធ"
+
+#: wallets_demo/templates/wallets_demo/base.html:614
+msgid "Signed in as"
+msgstr "បានចូលជា"
+
+#: wallets_demo/templates/wallets_demo/base.html:643
+msgid "Built with Django & dj-wallet."
+msgstr "បង្កើតដោយ Django និង dj-wallet។"
+
+#: wallets_demo/templates/wallets_demo/base.html:644
+msgid "Release"
+msgstr "កំណែ"
+
+#: wallets_demo/templates/wallets_demo/login.html:10
+msgid "Access your virtual wallet."
+msgstr "ចូលប្រើកាបូបនិម្មិតរបស់អ្នក។"
+
+#: wallets_demo/templates/wallets_demo/login.html:13
+msgid "Use your corporate identity provider to continue."
+msgstr "ប្រើអ្នកផ្តល់អត្តសញ្ញាណសាជីវកម្មរបស់អ្នកដើម្បីបន្ត។"
+
+#: wallets_demo/templates/wallets_demo/login.html:14
+msgid "Continue with SSO"
+msgstr "បន្តជាមួយ SSO"
+
+#: wallets_demo/templates/wallets_demo/login.html:19
+#: wallets_demo/templates/wallets_demo/register.html:16
+msgid "Username"
+msgstr "ឈ្មោះអ្នកប្រើ"
+
+#: wallets_demo/templates/wallets_demo/login.html:20
+msgid "admin, alice, bob, or charlie"
+msgstr "admin, alice, bob ឬ charlie"
+
+#: wallets_demo/templates/wallets_demo/login.html:23
+#: wallets_demo/templates/wallets_demo/register.html:24
+msgid "Password"
+msgstr "ពាក្យសម្ងាត់"
+
+#: wallets_demo/templates/wallets_demo/login.html:24
+msgid "admin123 or password123"
+msgstr "admin123 ឬ password123"
+
+#: wallets_demo/templates/wallets_demo/login.html:32
+msgid "Don't have an account?"
+msgstr "មិនទាន់មានគណនីមែនទេ?"
+
+#: wallets_demo/templates/wallets_demo/login.html:33
+msgid "Sign up"
+msgstr "ចុះឈ្មោះ"
+
+#: wallets_demo/templates/wallets_demo/register.html:9
+msgid "Join DJ Wallet"
+msgstr "ចូលរួម DJ Wallet"
+
+#: wallets_demo/templates/wallets_demo/register.html:10
+msgid "Start managing your virtual funds today."
+msgstr "ចាប់ផ្តើមគ្រប់គ្រងមូលនិធិនិម្មិតរបស់អ្នកថ្ងៃនេះ។"
+
+#: wallets_demo/templates/wallets_demo/register.html:20
+msgid "Email"
+msgstr "អ៊ីមែល"
+
+#: wallets_demo/templates/wallets_demo/register.html:27
+msgid "Create Account"
+msgstr "បង្កើតគណនី"
+
+#: wallets_demo/templates/wallets_demo/register.html:31
+msgid "Already have an account?"
+msgstr "មានគណនីរួចហើយមែនទេ?"

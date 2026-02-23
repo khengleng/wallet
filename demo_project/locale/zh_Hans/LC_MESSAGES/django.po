@@ -1,0 +1,229 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-02-23 19:30+0700\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+#: wallets_demo/templates/wallets_demo/base.html:497
+msgid "Profile"
+msgstr "个人资料"
+
+#: wallets_demo/templates/wallets_demo/base.html:500
+#: wallets_demo/templates/wallets_demo/base.html:618
+msgid "Sign Out"
+msgstr "退出登录"
+
+#: wallets_demo/templates/wallets_demo/base.html:503
+#: wallets_demo/templates/wallets_demo/login.html:4
+#: wallets_demo/templates/wallets_demo/login.html:9
+#: wallets_demo/templates/wallets_demo/login.html:26
+#: wallets_demo/templates/wallets_demo/register.html:32
+msgid "Login"
+msgstr "登录"
+
+#: wallets_demo/templates/wallets_demo/base.html:504
+#: wallets_demo/templates/wallets_demo/register.html:4
+msgid "Sign Up"
+msgstr "注册"
+
+#: wallets_demo/templates/wallets_demo/base.html:513
+msgid "Wallet"
+msgstr "钱包"
+
+#: wallets_demo/templates/wallets_demo/base.html:515
+msgid "Dashboard"
+msgstr "仪表盘"
+
+#: wallets_demo/templates/wallets_demo/base.html:517
+msgid "Transfer"
+msgstr "转账"
+
+#: wallets_demo/templates/wallets_demo/base.html:519
+msgid "Deposit"
+msgstr "存款"
+
+#: wallets_demo/templates/wallets_demo/base.html:521
+msgid "Withdraw"
+msgstr "提现"
+
+#: wallets_demo/templates/wallets_demo/base.html:523
+msgid "FX Exchange"
+msgstr "外汇兑换"
+
+#: wallets_demo/templates/wallets_demo/base.html:525
+msgid "My Profile"
+msgstr "我的资料"
+
+#: wallets_demo/templates/wallets_demo/base.html:528
+msgid "Mobile Service Playground"
+msgstr "移动服务沙盒"
+
+#: wallets_demo/templates/wallets_demo/base.html:531
+msgid "Merchant"
+msgstr "商户"
+
+#: wallets_demo/templates/wallets_demo/base.html:533
+msgid "Merchant Portal"
+msgstr "商户门户"
+
+#: wallets_demo/templates/wallets_demo/base.html:537
+msgid "Wallet Management"
+msgstr "钱包管理"
+
+#: wallets_demo/templates/wallets_demo/base.html:541
+msgid "Back Office"
+msgstr "后台运营"
+
+#: wallets_demo/templates/wallets_demo/base.html:543
+msgid "Back Office Home"
+msgstr "后台首页"
+
+#: wallets_demo/templates/wallets_demo/base.html:546
+msgid "Operations"
+msgstr "运营"
+
+#: wallets_demo/templates/wallets_demo/base.html:549
+msgid "Merchant Operations"
+msgstr "商户运营"
+
+#: wallets_demo/templates/wallets_demo/base.html:551
+msgid "Case Management"
+msgstr "工单管理"
+
+#: wallets_demo/templates/wallets_demo/base.html:555
+msgid "Operations Queue"
+msgstr "运营队列"
+
+#: wallets_demo/templates/wallets_demo/base.html:560
+msgid "Finance"
+msgstr "财务"
+
+#: wallets_demo/templates/wallets_demo/base.html:563
+msgid "Treasury Management"
+msgstr "资金管理"
+
+#: wallets_demo/templates/wallets_demo/base.html:567
+msgid "Settlement Management"
+msgstr "清结算管理"
+
+#: wallets_demo/templates/wallets_demo/base.html:571
+msgid "Reconciliation Management"
+msgstr "对账管理"
+
+#: wallets_demo/templates/wallets_demo/base.html:575
+msgid "Operations Reports"
+msgstr "运营报表"
+
+#: wallets_demo/templates/wallets_demo/base.html:579
+msgid "Accounting Management"
+msgstr "会计管理"
+
+#: wallets_demo/templates/wallets_demo/base.html:583
+msgid "FX Rate Management"
+msgstr "汇率管理"
+
+#: wallets_demo/templates/wallets_demo/base.html:588
+msgid "Governance"
+msgstr "治理"
+
+#: wallets_demo/templates/wallets_demo/base.html:591
+msgid "Approval Matrix"
+msgstr "审批矩阵"
+
+#: wallets_demo/templates/wallets_demo/base.html:595
+msgid "Policy Hub"
+msgstr "策略中心"
+
+#: wallets_demo/templates/wallets_demo/base.html:599
+msgid "Documents Center"
+msgstr "文档中心"
+
+#: wallets_demo/templates/wallets_demo/base.html:603
+msgid "Access Control (RBAC)"
+msgstr "访问控制 (RBAC)"
+
+#: wallets_demo/templates/wallets_demo/base.html:607
+msgid "System Settings"
+msgstr "系统设置"
+
+#: wallets_demo/templates/wallets_demo/base.html:614
+msgid "Signed in as"
+msgstr "当前登录"
+
+#: wallets_demo/templates/wallets_demo/base.html:643
+msgid "Built with Django & dj-wallet."
+msgstr "基于 Django 与 dj-wallet 构建。"
+
+#: wallets_demo/templates/wallets_demo/base.html:644
+msgid "Release"
+msgstr "版本"
+
+#: wallets_demo/templates/wallets_demo/login.html:10
+msgid "Access your virtual wallet."
+msgstr "访问您的虚拟钱包。"
+
+#: wallets_demo/templates/wallets_demo/login.html:13
+msgid "Use your corporate identity provider to continue."
+msgstr "使用企业身份提供商继续。"
+
+#: wallets_demo/templates/wallets_demo/login.html:14
+msgid "Continue with SSO"
+msgstr "使用 SSO 继续"
+
+#: wallets_demo/templates/wallets_demo/login.html:19
+#: wallets_demo/templates/wallets_demo/register.html:16
+msgid "Username"
+msgstr "用户名"
+
+#: wallets_demo/templates/wallets_demo/login.html:20
+msgid "admin, alice, bob, or charlie"
+msgstr "admin、alice、bob 或 charlie"
+
+#: wallets_demo/templates/wallets_demo/login.html:23
+#: wallets_demo/templates/wallets_demo/register.html:24
+msgid "Password"
+msgstr "密码"
+
+#: wallets_demo/templates/wallets_demo/login.html:24
+msgid "admin123 or password123"
+msgstr "admin123 或 password123"
+
+#: wallets_demo/templates/wallets_demo/login.html:32
+msgid "Don't have an account?"
+msgstr "还没有账号？"
+
+#: wallets_demo/templates/wallets_demo/login.html:33
+msgid "Sign up"
+msgstr "注册"
+
+#: wallets_demo/templates/wallets_demo/register.html:9
+msgid "Join DJ Wallet"
+msgstr "加入 DJ Wallet"
+
+#: wallets_demo/templates/wallets_demo/register.html:10
+msgid "Start managing your virtual funds today."
+msgstr "立即开始管理您的虚拟资金。"
+
+#: wallets_demo/templates/wallets_demo/register.html:20
+msgid "Email"
+msgstr "邮箱"
+
+#: wallets_demo/templates/wallets_demo/register.html:27
+msgid "Create Account"
+msgstr "创建账号"
+
+#: wallets_demo/templates/wallets_demo/register.html:31
+msgid "Already have an account?"
+msgstr "已有账号？"
