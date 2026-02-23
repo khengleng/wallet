@@ -1,0 +1,155 @@
+{% extends 'wallets_demo/base.html' %}
+
+{% block title %}Operations Reports - DJ Wallet{% endblock %}
+
+{% block extra_style %}
+<style>
+  .report-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.9rem;
+    margin-top: 0.9rem;
+  }
+  .report-kpi {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.9rem;
+    background: #fff;
+  }
+  .report-kpi .label {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+  }
+  .report-kpi .value {
+    margin-top: 0.35rem;
+    font-size: 1.6rem;
+    font-weight: 700;
+  }
+  .report-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  .status-chip {
+    font-size: 0.75rem;
+    border-radius: 9999px;
+    padding: 0.2rem 0.55rem;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Business Operations Reports</h2>
+  <p class="text-muted">
+    Live operational snapshot for cases, settlements, payouts, reconciliation, approvals, and onboarding.
+  </p>
+  <div class="report-kpi-grid">
+    <div class="report-kpi"><div class="label">Open Cases</div><div class="value">{{ kpis.cases_open }}</div></div>
+    <div class="report-kpi"><div class="label">New Cases (24h)</div><div class="value">{{ kpis.cases_new_24h }}</div></div>
+    <div class="report-kpi"><div class="label">Resolved Cases (24h)</div><div class="value">{{ kpis.cases_resolved_24h }}</div></div>
+    <div class="report-kpi"><div class="label">Pending Settlements</div><div class="value">{{ kpis.settlements_pending }}</div></div>
+    <div class="report-kpi"><div class="label">Failed Payouts</div><div class="value">{{ kpis.payouts_failed }}</div></div>
+    <div class="report-kpi"><div class="label">Open Reconciliation Breaks</div><div class="value">{{ kpis.recon_breaks_open }}</div></div>
+    <div class="report-kpi"><div class="label">Pending Approvals</div><div class="value">{{ kpis.pending_approvals }}</div></div>
+    <div class="report-kpi"><div class="label">Pending KYC CIF</div><div class="value">{{ kpis.customers_pending_kyc }}</div></div>
+    <div class="report-kpi"><div class="label">Total Wallets</div><div class="value">{{ kpis.total_wallets }}</div></div>
+    <div class="report-kpi"><div class="label">Total Merchants</div><div class="value">{{ kpis.total_merchants }}</div></div>
+  </div>
+</div>
+
+<div class="report-grid">
+  <div class="card">
+    <h3>Case Status Distribution</h3>
+    <table>
+      <thead><tr><th>Status</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for row in case_status_counts %}
+        <tr><td><span class="status-chip">{{ row.status }}</span></td><td>{{ row.total }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" class="text-muted">No case data yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Settlement Status Distribution</h3>
+    <table>
+      <thead><tr><th>Status</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for row in settlement_status_counts %}
+        <tr><td><span class="status-chip">{{ row.status }}</span></td><td>{{ row.total }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" class="text-muted">No settlement data yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Payout Status Distribution</h3>
+    <table>
+      <thead><tr><th>Status</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for row in payout_status_counts %}
+        <tr><td><span class="status-chip">{{ row.status }}</span></td><td>{{ row.total }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" class="text-muted">No payout data yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Reconciliation Break Status</h3>
+    <table>
+      <thead><tr><th>Status</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for row in reconciliation_status_counts %}
+        <tr><td><span class="status-chip">{{ row.status }}</span></td><td>{{ row.total }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" class="text-muted">No reconciliation data yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Top Case Types (Last 7 Days)</h3>
+    <table>
+      <thead><tr><th>Case Type</th><th>Total</th></tr></thead>
+      <tbody>
+        {% for row in top_case_types_7d %}
+        <tr><td>{{ row.case_type|upper }}</td><td>{{ row.total }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" class="text-muted">No cases in the last 7 days.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Recent Audit Trail</h3>
+    <table>
+      <thead><tr><th>When</th><th>Actor</th><th>Action</th></tr></thead>
+      <tbody>
+        {% for event in recent_audit_events %}
+        <tr>
+          <td>{{ event.created_at|date:"Y-m-d H:i:s" }}</td>
+          <td>{{ event.actor.username|default:"system" }}</td>
+          <td>{{ event.action }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3" class="text-muted">No audit events yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

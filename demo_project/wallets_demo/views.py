@@ -6517,6 +6517,26 @@ def operations_settings(request):
         key: list(current_field_rules.get(key) or list(default_roles))
         for key, default_roles in DEFAULT_FIELD_ROLE_RULES.items()
     }
+    grouped_action_rules = {}
+    for key in sorted(merged_action_rules.keys()):
+        scope = key.split(".", 1)[0]
+        grouped_action_rules.setdefault(scope, []).append(
+            {
+                "key": key,
+                "roles": merged_action_rules.get(key, []),
+                "defaults": list(DEFAULT_ACTION_ROLE_RULES.get(key, ())),
+            }
+        )
+    grouped_field_rules = {}
+    for key in sorted(merged_field_rules.keys()):
+        scope = key.split(".", 1)[0]
+        grouped_field_rules.setdefault(scope, []).append(
+            {
+                "key": key,
+                "roles": merged_field_rules.get(key, []),
+                "defaults": list(DEFAULT_FIELD_ROLE_RULES.get(key, ())),
+            }
+        )
 
     if request.method == "POST":
         try:
@@ -6648,8 +6668,86 @@ def operations_settings(request):
             "default_action_rules": DEFAULT_ACTION_ROLE_RULES,
             "field_rules": merged_field_rules,
             "default_field_rules": DEFAULT_FIELD_ROLE_RULES,
+            "action_rule_groups": sorted(grouped_action_rules.items(), key=lambda item: item[0]),
+            "field_rule_groups": sorted(grouped_field_rules.items(), key=lambda item: item[0]),
+            "action_rule_count": len(merged_action_rules),
+            "field_rule_count": len(merged_field_rules),
         },
     )
+
+
+@login_required
+def operations_reports(request):
+    if not user_has_any_role(
+        request.user, ("super_admin", "admin", "operation", "finance", "risk", "treasury")
+    ):
+        raise PermissionDenied("You do not have access to operational reports.")
+
+    now = timezone.now()
+    last_24h = now - timedelta(hours=24)
+    last_7d = now - timedelta(days=7)
+
+    case_status_counts = list(
+        OperationCase.objects.values("status").annotate(total=Count("id")).order_by("status")
+    )
+    settlement_status_counts = list(
+        MerchantSettlementRecord.objects.values("status").annotate(total=Count("id")).order_by("status")
+    )
+    payout_status_counts = list(
+        SettlementPayout.objects.values("status").annotate(total=Count("id")).order_by("status")
+    )
+    reconciliation_status_counts = list(
+        ReconciliationBreak.objects.values("status").annotate(total=Count("id")).order_by("status")
+    )
+    top_case_types_7d = list(
+        OperationCase.objects.filter(created_at__gte=last_7d)
+        .values("case_type")
+        .annotate(total=Count("id"))
+        .order_by("-total", "case_type")[:5]
+    )
+    recent_audit_events = list(
+        BackofficeAuditLog.objects.select_related("actor").order_by("-created_at")[:20]
+    )
+
+    context = {
+        "kpis": {
+            "cases_open": OperationCase.objects.filter(
+                status__in=[
+                    OperationCase.STATUS_OPEN,
+                    OperationCase.STATUS_IN_PROGRESS,
+                    OperationCase.STATUS_ESCALATED,
+                ]
+            ).count(),
+            "cases_new_24h": OperationCase.objects.filter(created_at__gte=last_24h).count(),
+            "cases_resolved_24h": OperationCase.objects.filter(
+                resolved_at__gte=last_24h
+            ).count(),
+            "settlements_pending": MerchantSettlementRecord.objects.filter(
+                status=MerchantSettlementRecord.STATUS_DRAFT
+            ).count(),
+            "payouts_failed": SettlementPayout.objects.filter(
+                status=SettlementPayout.STATUS_FAILED
+            ).count(),
+            "recon_breaks_open": ReconciliationBreak.objects.filter(
+                status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW]
+            ).count(),
+            "pending_approvals": ApprovalRequest.objects.filter(
+                status=ApprovalRequest.STATUS_PENDING
+            ).count(),
+            "customers_pending_kyc": CustomerCIF.objects.filter(
+                status=CustomerCIF.STATUS_PENDING_KYC
+            ).count(),
+            "total_wallets": Wallet.objects.count(),
+            "total_merchants": Merchant.objects.count(),
+        },
+        "case_status_counts": case_status_counts,
+        "settlement_status_counts": settlement_status_counts,
+        "payout_status_counts": payout_status_counts,
+        "reconciliation_status_counts": reconciliation_status_counts,
+        "top_case_types_7d": top_case_types_7d,
+        "recent_audit_events": recent_audit_events,
+    }
+    return render(request, "wallets_demo/operations_reports.html", context)
 
 
 @login_required

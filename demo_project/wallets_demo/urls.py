@@ -36,6 +36,7 @@ urlpatterns = [
     path('backoffice/documents/', views_operations.documents_center, name='documents_center'),
     path('backoffice/settlements/', views_operations.settlement_operations, name='settlement_operations'),
     path('backoffice/reconciliation/', views_operations.reconciliation_workbench, name='reconciliation_workbench'),
+    path('backoffice/reports/', views_operations.operations_reports, name='operations_reports'),
     path('backoffice/settings/', views_operations.operations_settings, name='operations_settings'),
     path('backoffice/policy-hub/', views_operations.policy_hub, name='policy_hub'),
     path('backoffice/operations/', views_operations.operations_center, name='operations_center'),

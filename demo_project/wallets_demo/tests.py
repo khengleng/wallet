@@ -2261,3 +2261,41 @@ class BackofficeRbacUiMatrixTests(TestCase):
         self.assertEqual(case_response.status_code, 200)
         self.assertContains(case_response, "Sensitive case description value")
         self.assertContains(case_response, "Sensitive case note value")
+
+
+class OperationsSettingsAndReportsUiTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.super_admin = User.objects.create_user(
+            username="ops_super_admin",
+            email="ops_super_admin@example.com",
+            password="pass12345",
+        )
+        self.customer_service = User.objects.create_user(
+            username="ops_cs",
+            email="ops_cs@example.com",
+            password="pass12345",
+        )
+        assign_roles(self.super_admin, ["super_admin"])
+        assign_roles(self.customer_service, ["customer_service"])
+
+    def test_super_admin_can_view_grouped_system_settings_matrix(self):
+        self.client.login(username="ops_super_admin", password="pass12345")
+        response = self.client.get(reverse("operations_settings"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Authorization Policy Matrix")
+        self.assertContains(response, "Action Permissions")
+        self.assertContains(response, "Field Visibility")
+
+    def test_reports_visible_for_super_admin_and_blocked_for_customer_service(self):
+        self.client.login(username="ops_super_admin", password="pass12345")
+        ok_response = self.client.get(reverse("operations_reports"))
+        self.assertEqual(ok_response.status_code, 200)
+        self.assertContains(ok_response, "Business Operations Reports")
+        self.assertContains(ok_response, "Recent Audit Trail")
+
+        self.client.logout()
+        self.client.login(username="ops_cs", password="pass12345")
+        denied_response = self.client.get(reverse("operations_reports"))
+        self.assertEqual(denied_response.status_code, 403)

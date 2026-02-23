@@ -23,6 +23,7 @@ DEFAULT_MENU_ROLE_RULES: dict[str, tuple[str, ...]] = {
     "accounting_dashboard": ("finance", "treasury", "admin", "super_admin"),
     "settlement_operations": ("super_admin", "admin", "operation", "finance", "treasury", "risk"),
     "reconciliation_workbench": ("super_admin", "admin", "operation", "finance", "risk", "treasury"),
+    "operations_reports": ("super_admin", "admin", "operation", "finance", "risk", "treasury"),
     "approval_matrix": ("super_admin", "admin", "risk", "finance", "operation", "treasury"),
     "documents_center": ("super_admin", "admin", "operation", "risk", "finance", "customer_service", "sales", "treasury"),
     "fx_management": ("finance", "treasury", "admin", "super_admin"),

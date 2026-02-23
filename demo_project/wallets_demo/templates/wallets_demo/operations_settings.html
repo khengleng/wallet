@@ -1,164 +1,274 @@
 {% extends 'wallets_demo/base.html' %}
 {% load rbac_tags %}
 
-{% block title %}System Setting - DJ Wallet{% endblock %}
+{% block title %}System Settings - DJ Wallet{% endblock %}
+
+{% block extra_style %}
+<style>
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+  }
+  .matrix-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+  .matrix-toolbar input,
+  .matrix-toolbar select {
+    max-width: 360px;
+  }
+  .matrix-row {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.8rem;
+    margin-bottom: 0.7rem;
+    background: #fff;
+  }
+  .matrix-row .rule-key {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.82rem;
+    color: #0f172a;
+    margin-bottom: 0.4rem;
+  }
+  .matrix-row small {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--text-muted);
+  }
+  .matrix-group-title {
+    margin: 1.2rem 0 0.6rem;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #334155;
+  }
+  .badge-soft {
+    display: inline-block;
+    font-size: 0.72rem;
+    border: 1px solid var(--border);
+    border-radius: 9999px;
+    padding: 0.2rem 0.5rem;
+    color: var(--text-muted);
+  }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h2>System Setting</h2>
-    <p class="text-muted">Configure base references and service-specific transaction prefixes for operations go-live.
-    </p>
+  <h2>System Settings</h2>
+  <p class="text-muted">
+    Centralized Day-1 operation setup for IDs, currencies, menu visibility, sensitive data masking, and authorization policy matrix.
+  </p>
+  <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:0.6rem;">
+    <span class="badge-soft">{{ action_rule_count }} action rules</span>
+    <span class="badge-soft">{{ field_rule_count }} field visibility rules</span>
+    <span class="badge-soft">{{ menu_rules|length }} menu rules</span>
+    <span class="badge-soft">{{ sensitive_domain_rules|length }} sensitive domains</span>
+  </div>
 </div>
 
-<div class="card">
-    <h3>Core Prefix Settings</h3>
-    <form method="post">
-        {% csrf_token %}
-        <div class="form-group">
-            <label>Organization Name</label>
-            <input type="text" name="organization_name" maxlength="128"
-                value="{{ operation_settings.organization_name }}" required />
-        </div>
-        <div class="form-group"><label>Merchant ID Prefix</label><input type="text" name="merchant_id_prefix"
-                value="{{ operation_settings.merchant_id_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>CIF ID Prefix</label><input type="text" name="cif_id_prefix"
-                value="{{ operation_settings.cif_id_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>Wallet ID Prefix</label><input type="text" name="wallet_id_prefix"
-                value="{{ operation_settings.wallet_id_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>Default Transaction ID Prefix</label><input type="text"
-                name="transaction_id_prefix" value="{{ operation_settings.transaction_id_prefix }}" maxlength="16"
-                required /></div>
-        <div class="form-group"><label>Journal Entry Prefix</label><input type="text" name="journal_entry_prefix"
-                value="{{ operation_settings.journal_entry_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>Case Prefix</label><input type="text" name="case_no_prefix"
-                value="{{ operation_settings.case_no_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>Settlement Prefix</label><input type="text" name="settlement_no_prefix"
-                value="{{ operation_settings.settlement_no_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>Payout Prefix</label><input type="text" name="payout_ref_prefix"
-                value="{{ operation_settings.payout_ref_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>Reconciliation Prefix</label><input type="text" name="recon_no_prefix"
-                value="{{ operation_settings.recon_no_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>Chargeback Prefix</label><input type="text" name="chargeback_no_prefix"
-                value="{{ operation_settings.chargeback_no_prefix }}" maxlength="16" required /></div>
-        <div class="form-group"><label>Access Review Prefix</label><input type="text" name="access_review_no_prefix"
-                value="{{ operation_settings.access_review_no_prefix }}" maxlength="16" required /></div>
+<form method="post">
+  {% csrf_token %}
 
-        <h3 style="margin-top:1.5rem;">Transaction Prefix by Service Type</h3>
-        <p class="text-muted">Each service/flow can have its own transaction prefix.</p>
-        {% for service_key, prefix in service_prefixes.items %}
-        <div class="form-group">
-            <label>{{ service_key|upper }} Prefix</label>
-            <input type="text" name="service_prefix_{{ service_key }}" value="{{ prefix }}" maxlength="16" required />
-        </div>
-        {% endfor %}
+  <div class="card">
+    <h3>Core Platform Prefixes</h3>
+    <div class="settings-grid">
+      <div class="form-group"><label>Organization Name</label><input type="text" name="organization_name" maxlength="128" value="{{ operation_settings.organization_name }}" required></div>
+      <div class="form-group"><label>Merchant ID Prefix</label><input type="text" name="merchant_id_prefix" value="{{ operation_settings.merchant_id_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>CIF ID Prefix</label><input type="text" name="cif_id_prefix" value="{{ operation_settings.cif_id_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Wallet ID Prefix</label><input type="text" name="wallet_id_prefix" value="{{ operation_settings.wallet_id_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Default Transaction ID Prefix</label><input type="text" name="transaction_id_prefix" value="{{ operation_settings.transaction_id_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Journal Entry Prefix</label><input type="text" name="journal_entry_prefix" value="{{ operation_settings.journal_entry_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Case Prefix</label><input type="text" name="case_no_prefix" value="{{ operation_settings.case_no_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Settlement Prefix</label><input type="text" name="settlement_no_prefix" value="{{ operation_settings.settlement_no_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Payout Prefix</label><input type="text" name="payout_ref_prefix" value="{{ operation_settings.payout_ref_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Reconciliation Prefix</label><input type="text" name="recon_no_prefix" value="{{ operation_settings.recon_no_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Chargeback Prefix</label><input type="text" name="chargeback_no_prefix" value="{{ operation_settings.chargeback_no_prefix }}" maxlength="16" required></div>
+      <div class="form-group"><label>Access Review Prefix</label><input type="text" name="access_review_no_prefix" value="{{ operation_settings.access_review_no_prefix }}" maxlength="16" required></div>
+    </div>
+  </div>
 
-        <h3 style="margin-top:1.5rem;">Active Currencies</h3>
-        <p class="text-muted">Select which currencies are available on this platform for wallets, deposits, transfers,
-            and FX.</p>
-        <div
-            style="display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:0.75rem; margin-bottom:1.25rem;">
-            {% for code, name in all_currencies %}
-            <label
-                style="display:flex; align-items:center; gap:0.5rem; padding:0.6rem 0.75rem; border:1px solid var(--border); border-radius:0.5rem; cursor:pointer; transition:background 0.15s; {% if code in active_currencies %}background:rgba(99,102,241,0.08); border-color:var(--primary);{% endif %}">
-                <input type="checkbox" name="enabled_currencies" value="{{ code }}" {% if code in active_currencies%}checked{% endif %} style="width:auto; accent-color:var(--primary);" />
-                <span><strong>{{ code }}</strong>&nbsp;<span class="text-muted" style="font-size:0.8rem;">{{ name}}</span></span>
-            </label>
+  <div class="card">
+    <h3>Transaction Prefix by Service Type</h3>
+    <div class="settings-grid">
+      {% for service_key, prefix in service_prefixes.items %}
+      <div class="form-group">
+        <label>{{ service_key|upper }} Prefix</label>
+        <input type="text" name="service_prefix_{{ service_key }}" value="{{ prefix }}" maxlength="16" required>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Active Currencies</h3>
+    <p class="text-muted">Select currencies available for wallet opening, transfer, settlement, and FX.</p>
+    <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:0.75rem;">
+      {% for code, name in all_currencies %}
+      <label style="display:flex; align-items:center; gap:0.55rem; border:1px solid var(--border); border-radius:10px; padding:0.55rem 0.7rem; {% if code in active_currencies %}background:rgba(99,102,241,0.08); border-color:var(--primary);{% endif %}">
+        <input type="checkbox" name="enabled_currencies" value="{{ code }}" {% if code in active_currencies %}checked{% endif %} style="width:auto;">
+        <span><strong>{{ code }}</strong> <span class="text-muted" style="font-size:0.8rem;">{{ name }}</span></span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Menu Visibility Rules</h3>
+    <p class="text-muted">Comma-separated roles per menu key. Unauthorized users will not see the menu.</p>
+    <div class="settings-grid">
+      {% for menu_key, roles in menu_rules.items %}
+      <div class="form-group">
+        <label>{{ menu_key }}</label>
+        <input type="text" name="menu_roles_{{ menu_key }}" value="{{ roles|join:', ' }}">
+        <small class="text-muted">Default: {{ default_menu_rules|get_item:menu_key|join:", " }}</small>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Sensitive Data Visibility</h3>
+    <div class="form-group">
+      <label>Global Sensitive Data Roles</label>
+      <input type="text" name="sensitive_data_roles" value="{{ sensitive_data_roles|join:', ' }}">
+      <small class="text-muted">Default: {{ default_sensitive_roles|join:", " }}</small>
+    </div>
+    <div class="settings-grid">
+      {% for domain_key, roles in sensitive_domain_rules.items %}
+      <div class="form-group">
+        <label>{{ domain_key }}</label>
+        <input type="text" name="sensitive_roles_{{ domain_key }}" value="{{ roles|join:', ' }}">
+        <small class="text-muted">Default: {{ default_sensitive_domain_rules|get_item:domain_key|join:", " }}</small>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Authorization Policy Matrix</h3>
+    <p class="text-muted">Manage granular access for actions and fields with filtering support.</p>
+
+    <div class="tab-container">
+      <div class="tab-bar">
+        <button type="button" class="tab-btn active" data-tab="sys-actions" onclick="switchTab(this, 'sys-actions')">Action Permissions</button>
+        <button type="button" class="tab-btn" data-tab="sys-fields" onclick="switchTab(this, 'sys-fields')">Field Visibility</button>
+      </div>
+
+      <div class="tab-pane active" id="sys-actions">
+        <div class="matrix-toolbar">
+          <input id="actionRuleSearch" type="text" placeholder="Search action key or role (e.g. settlement, risk)">
+          <select id="actionScopeFilter">
+            <option value="">All scopes</option>
+            {% for group_name, rows in action_rule_groups %}
+            <option value="{{ group_name }}">{{ group_name }}</option>
             {% endfor %}
+          </select>
         </div>
-
-        <h3 style="margin-top:1.5rem;">Menu Visibility Rules (Configurable)</h3>
-        <p class="text-muted">Comma-separated roles per menu key. Example: <code>super_admin,admin,operation</code>.
-        </p>
-        {% for menu_key, roles in menu_rules.items %}
-        <div class="form-group">
-            <label>{{ menu_key }}</label>
-            <input type="text" name="menu_roles_{{ menu_key }}" value="{{ roles|join:', ' }}" />
-            <small class="text-muted">Default: {{ default_menu_rules|get_item:menu_key|join:", " }}</small>
-        </div>
-        {% endfor %}
-
-        <h3 style="margin-top:1.5rem;">Sensitive Data Visibility</h3>
-        <p class="text-muted">Only these roles can view sensitive amounts/balances. Others will see masked values.</p>
-        <div class="form-group">
-            <label>Sensitive Data Roles</label>
-            <input type="text" name="sensitive_data_roles" value="{{ sensitive_data_roles|join:', ' }}" />
-            <small class="text-muted">Default: {{ default_sensitive_roles|join:", " }}</small>
-        </div>
-
-        <h4 style="margin-top:1rem;">Sensitive Visibility by Domain</h4>
-        <p class="text-muted">Granular restriction per sensitive domain (comma-separated roles).</p>
-        {% for domain_key, roles in sensitive_domain_rules.items %}
-        <div class="form-group">
-            <label>{{ domain_key }}</label>
-            <input type="text" name="sensitive_roles_{{ domain_key }}" value="{{ roles|join:', ' }}" />
-            <small class="text-muted">Default: {{ default_sensitive_domain_rules|get_item:domain_key|join:", " }}</small>
+        {% for group_name, rows in action_rule_groups %}
+        <h4 class="matrix-group-title action-group" data-group="{{ group_name }}">{{ group_name }}</h4>
+        {% for row in rows %}
+        <div class="matrix-row action-row" data-group="{{ group_name }}" data-search="{{ row.key }} {{ row.roles|join:' ' }}">
+          <div class="rule-key">{{ row.key }}</div>
+          <input type="text" name="action_roles_{{ row.key }}" value="{{ row.roles|join:', ' }}">
+          <small>Default: {{ row.defaults|join:", " }}</small>
         </div>
         {% endfor %}
+        {% endfor %}
+      </div>
 
-        <h3 style="margin-top:1.5rem;">Authorization Policy Matrix</h3>
-        <p class="text-muted">Centralized RBAC-by-config for actions and field-level visibility across modules.</p>
-
-        <h4 style="margin-top:1rem;">Action Permissions (who can do)</h4>
-        <p class="text-muted">Action key → roles. Any role not listed will not see or execute that action.</p>
-        {% for action_key, roles in action_rules.items %}
-        <div class="form-group">
-            <label>{{ action_key }}</label>
-            <input type="text" name="action_roles_{{ action_key }}" value="{{ roles|join:', ' }}" />
-            <small class="text-muted">Default: {{ default_action_rules|get_item:action_key|join:", " }}</small>
+      <div class="tab-pane" id="sys-fields">
+        <div class="matrix-toolbar">
+          <input id="fieldRuleSearch" type="text" placeholder="Search field key or role (e.g. wallet.customer, risk)">
+          <select id="fieldScopeFilter">
+            <option value="">All scopes</option>
+            {% for group_name, rows in field_rule_groups %}
+            <option value="{{ group_name }}">{{ group_name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% for group_name, rows in field_rule_groups %}
+        <h4 class="matrix-group-title field-group" data-group="{{ group_name }}">{{ group_name }}</h4>
+        {% for row in rows %}
+        <div class="matrix-row field-row" data-group="{{ group_name }}" data-search="{{ row.key }} {{ row.roles|join:' ' }}">
+          <div class="rule-key">{{ row.key }}</div>
+          <input type="text" name="field_roles_{{ row.key }}" value="{{ row.roles|join:', ' }}">
+          <small>Default: {{ row.defaults|join:", " }}</small>
         </div>
         {% endfor %}
-
-        <h4 style="margin-top:1rem;">Field Visibility (who can view)</h4>
-        <p class="text-muted">Field key → roles. Unauthorized roles see masked or hidden field content.</p>
-        {% for field_key, roles in field_rules.items %}
-        <div class="form-group">
-            <label>{{ field_key }}</label>
-            <input type="text" name="field_roles_{{ field_key }}" value="{{ roles|join:', ' }}" />
-            <small class="text-muted">Default: {{ default_field_rules|get_item:field_key|join:", " }}</small>
-        </div>
         {% endfor %}
+      </div>
+    </div>
+  </div>
 
-        <button type="submit" class="btn btn-primary">Save System Setting</button>
-    </form>
-</div>
+  <div class="card">
+    <button type="submit" class="btn btn-primary">Save System Settings</button>
+  </div>
+</form>
 
-<div class="card">
+<div class="settings-grid">
+  <div class="card">
     <h3>Reference Preview</h3>
     <table>
-        <thead>
-            <tr>
-                <th>Reference</th>
-                <th>Sample</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for label, sample in preview.items %}
-            <tr>
-                <td>{{ label }}</td>
-                <td><code>{{ sample }}</code></td>
-            </tr>
-            {% endfor %}
-        </tbody>
+      <thead><tr><th>Reference</th><th>Sample</th></tr></thead>
+      <tbody>
+        {% for label, sample in preview.items %}
+        <tr><td>{{ label }}</td><td><code>{{ sample }}</code></td></tr>
+        {% endfor %}
+      </tbody>
     </table>
-</div>
-
-<div class="card">
+  </div>
+  <div class="card">
     <h3>Service Transaction Preview</h3>
     <table>
-        <thead>
-            <tr>
-                <th>Service Type</th>
-                <th>Sample Transaction ID</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for service_key, sample in preview_service_txn.items %}
-            <tr>
-                <td>{{ service_key|upper }}</td>
-                <td><code>{{ sample }}</code></td>
-            </tr>
-            {% endfor %}
-        </tbody>
+      <thead><tr><th>Service Type</th><th>Sample Transaction ID</th></tr></thead>
+      <tbody>
+        {% for service_key, sample in preview_service_txn.items %}
+        <tr><td>{{ service_key|upper }}</td><td><code>{{ sample }}</code></td></tr>
+        {% endfor %}
+      </tbody>
     </table>
+  </div>
 </div>
+
+<script>
+  function applyRuleFilter(searchInputId, scopeSelectId, rowSelector, groupSelector) {
+    const searchTerm = (document.getElementById(searchInputId)?.value || "").toLowerCase().trim();
+    const scope = (document.getElementById(scopeSelectId)?.value || "").toLowerCase().trim();
+    const rows = document.querySelectorAll(rowSelector);
+    rows.forEach((row) => {
+      const rowScope = (row.dataset.group || "").toLowerCase();
+      const haystack = (row.dataset.search || "").toLowerCase();
+      const matchesSearch = !searchTerm || haystack.includes(searchTerm);
+      const matchesScope = !scope || rowScope === scope;
+      row.style.display = matchesSearch && matchesScope ? "" : "none";
+    });
+    const groups = document.querySelectorAll(groupSelector);
+    groups.forEach((title) => {
+      const group = (title.dataset.group || "").toLowerCase();
+      const visibleRows = document.querySelectorAll(`${rowSelector}[data-group="${group}"]:not([style*="display: none"])`);
+      title.style.display = visibleRows.length ? "" : "none";
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    const bind = (searchId, scopeId, rowSelector, groupSelector) => {
+      const searchEl = document.getElementById(searchId);
+      const scopeEl = document.getElementById(scopeId);
+      if (searchEl) {
+        searchEl.addEventListener("input", () => applyRuleFilter(searchId, scopeId, rowSelector, groupSelector));
+      }
+      if (scopeEl) {
+        scopeEl.addEventListener("change", () => applyRuleFilter(searchId, scopeId, rowSelector, groupSelector));
+      }
+      applyRuleFilter(searchId, scopeId, rowSelector, groupSelector);
+    };
+    bind("actionRuleSearch", "actionScopeFilter", ".action-row", ".action-group");
+    bind("fieldRuleSearch", "fieldScopeFilter", ".field-row", ".field-group");
+  });
+</script>
 {% endblock %}

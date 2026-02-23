@@ -7,6 +7,7 @@ approval_matrix = legacy.approval_matrix
 documents_center = legacy.documents_center
 settlement_operations = legacy.settlement_operations
 reconciliation_workbench = legacy.reconciliation_workbench
+operations_reports = legacy.operations_reports
 operations_settings = legacy.operations_settings
 policy_hub = legacy.policy_hub
 operations_center = legacy.operations_center
