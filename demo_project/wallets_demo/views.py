@@ -18,6 +18,7 @@ from django.contrib.auth import authenticate, login, logout as auth_logout
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import PasswordChangeForm
+from django.contrib.auth.hashers import check_password
 from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
@@ -832,6 +833,13 @@ def mobile_playground_assistant_action(request):
             }
         )
 
+    if execute:
+        provided_pin = str(payload.get("pin") or "").strip()
+        if not provided_pin:
+            return _mobile_json_error("PIN is required to commit transaction.", code="pin_required", status=403)
+        if not _verify_user_transaction_pin(from_user, provided_pin):
+            return _mobile_json_error("Invalid transaction PIN.", code="pin_invalid", status=403)
+
     from_wallet = _wallet_for_currency(from_user, currency)
     to_wallet = _wallet_for_currency(to_user, currency) if to_user is not None else None
     total_required = amount
@@ -1324,6 +1332,8 @@ def _serialize_wallet_for_mobile(wallet: Wallet) -> dict:
 
 def _serialize_mobile_profile(user: User, customer_cif: CustomerCIF | None) -> dict:
     mobile_preferences = user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {}
+    safe_preferences = dict(mobile_preferences)
+    safe_preferences.pop("transaction_pin_hash", None)
     return {
         "user": {
             "username": user.username,
@@ -1332,7 +1342,8 @@ def _serialize_mobile_profile(user: User, customer_cif: CustomerCIF | None) -> d
             "last_name": user.last_name,
             "wallet_type": user.wallet_type,
             "profile_picture_url": user.profile_picture_url,
-            "preferences": mobile_preferences,
+            "preferences": safe_preferences,
+            "transaction_pin_configured": bool(mobile_preferences.get("transaction_pin_hash")),
         },
         "cif": {
             "cif_no": customer_cif.cif_no,
@@ -1347,6 +1358,17 @@ def _serialize_mobile_profile(user: User, customer_cif: CustomerCIF | None) -> d
         if customer_cif
         else None,
     }
+
+
+def _verify_user_transaction_pin(user: User, pin: str) -> bool:
+    mobile_preferences = user.mobile_preferences if isinstance(user.mobile_preferences, dict) else {}
+    pin_hash = str(mobile_preferences.get("transaction_pin_hash") or "").strip()
+    if not pin_hash:
+        return False
+    try:
+        return check_password(pin, pin_hash)
+    except Exception:
+        return False
 
 
 def _sanitize_mobile_preferences(current: dict, incoming: dict) -> dict:

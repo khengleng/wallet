@@ -125,6 +125,12 @@
     max-height: 310px;
     overflow: auto;
   }
+  .tx-sheet {
+    border: 1px solid #dbe3ee;
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+    background: #f8fbff;
+  }
 
   @media (max-width: 1080px) {
     .lab-grid { grid-template-columns: 1fr; }
@@ -201,6 +207,9 @@
         <div class="form-group"><label>Legal Name</label><input id="pf-legal" type="text" /></div>
         <div class="form-group"><label>Mobile No</label><input id="pf-mobile" type="text" /></div>
         <div class="form-group"><label>Profile Picture URL</label><input id="pf-avatar" type="url" /></div>
+        <div class="form-group"><label>Transaction PIN (4-8 digits)</label><input id="pf-pin" type="password" inputmode="numeric" placeholder="Set/rotate PIN" /></div>
+        <div class="form-group"><label>Confirm PIN</label><input id="pf-pin-confirm" type="password" inputmode="numeric" placeholder="Confirm PIN" /></div>
+        <div id="pf-pin-status" class="text-muted" style="font-size:0.82rem; margin-bottom:0.45rem;">PIN status: unknown</div>
         <button id="btn-save-profile" class="btn btn-primary" style="width:100%;">Save Profile</button>
       </div>
 
@@ -281,6 +290,32 @@
       </div>
     </div>
     <div class="card">
+      <h3>Transaction Commit Sheet</h3>
+      <p class="text-muted">Assistant transaction requests open this secure form. Review, preview, then commit with PIN.</p>
+      <div id="tx-sheet-status" class="text-muted" style="margin-bottom:0.6rem;">Waiting for assistant transaction request.</div>
+      <div class="tx-sheet">
+        <div class="form-group">
+          <label>Action</label>
+          <select id="tx-action">
+            <option value="transfer">transfer</option>
+            <option value="deposit">deposit</option>
+            <option value="withdraw">withdraw</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Amount</label><input id="tx-amount" type="text" value="0" /></div>
+        <div class="form-group"><label>Currency</label><input id="tx-currency" type="text" value="USD" /></div>
+        <div class="form-group"><label>From Username</label><input id="tx-from-username" type="text" /></div>
+        <div class="form-group"><label>To Username (transfer only)</label><input id="tx-to-username" type="text" /></div>
+        <div class="form-group"><label>Description</label><input id="tx-description" type="text" value="assistant_transfer" /></div>
+        <div class="form-group"><label>Transaction PIN</label><input id="tx-pin" type="password" inputmode="numeric" placeholder="PIN required for commit" /></div>
+        <div class="flex gap-2">
+          <button id="btn-tx-preview" class="btn btn-outline" type="button">Preview</button>
+          <button id="btn-tx-commit" class="btn btn-primary" type="button">Commit Transaction</button>
+          <button id="btn-tx-reset" class="btn btn-outline" type="button">Reset</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
       <h3>Assistant Diagnostics</h3>
       <p class="text-muted">Check token/session state, channel connectivity, and AI readiness.</p>
       <button id="btn-run-diagnostics" class="btn btn-primary" type="button">Run Diagnostics</button>
@@ -305,6 +340,8 @@
     const personaPanelEl = document.getElementById("session-impersonation-panel");
     const personaSelectEl = document.getElementById("persona-select");
     const personaStatusEl = document.getElementById("persona-status");
+    const pinStatusEl = document.getElementById("pf-pin-status");
+    const txSheetStatusEl = document.getElementById("tx-sheet-status");
 
     function getOverrideToken() {
       return (overrideTokenEl.value || "").trim();
@@ -352,6 +389,9 @@
 
     function setPersonaStatus(text) {
       personaStatusEl.textContent = text;
+    }
+    function setTxSheetStatus(text) {
+      txSheetStatusEl.textContent = text;
     }
 
     function updateModePanels() {
@@ -437,6 +477,10 @@
         document.getElementById("pf-legal").value = cif.legal_name || "";
         document.getElementById("pf-mobile").value = cif.mobile_no || "";
         document.getElementById("pf-avatar").value = user.profile_picture_url || "";
+        document.getElementById("pf-pin").value = "";
+        document.getElementById("pf-pin-confirm").value = "";
+        pinStatusEl.textContent = "PIN status: " + (user.transaction_pin_configured ? "configured" : "not configured");
+        document.getElementById("tx-from-username").value = user.username || "";
         setOutput(p);
       } catch (err) {
         setOutput({ error: normalizeError(err) });
@@ -450,6 +494,8 @@
         legal_name: document.getElementById("pf-legal").value.trim(),
         mobile_no: document.getElementById("pf-mobile").value.trim(),
         profile_picture_url: document.getElementById("pf-avatar").value.trim(),
+        transaction_pin: document.getElementById("pf-pin").value.trim(),
+        transaction_pin_confirm: document.getElementById("pf-pin-confirm").value.trim(),
       };
       try {
         let p;
@@ -475,9 +521,69 @@
           });
         }
         setOutput(p);
+        pinStatusEl.textContent = "PIN status: " + (((p.data || {}).user || {}).transaction_pin_configured ? "configured" : "not configured");
+        document.getElementById("pf-pin").value = "";
+        document.getElementById("pf-pin-confirm").value = "";
       } catch (err) {
         setOutput({ error: normalizeError(err) });
       }
+    }
+
+    function txPayload(execute) {
+      return {
+        action: (document.getElementById("tx-action").value || "").trim().toLowerCase(),
+        amount: (document.getElementById("tx-amount").value || "").trim(),
+        currency: (document.getElementById("tx-currency").value || "").trim().toUpperCase(),
+        from_username: (document.getElementById("tx-from-username").value || "").trim(),
+        to_username: (document.getElementById("tx-to-username").value || "").trim(),
+        description: (document.getElementById("tx-description").value || "").trim() || "assistant_txn",
+        execute: !!execute,
+        pin: (document.getElementById("tx-pin").value || "").trim(),
+      };
+    }
+
+    async function runTxAction(execute) {
+      const payload = txPayload(execute);
+      if (execute && !payload.pin) {
+        setOutput({ error: "PIN is required for commit." });
+        setTxSheetStatus("Commit blocked: PIN required.");
+        return;
+      }
+      try {
+        const body = await callJson("/api/playground/assistant/action/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": csrfToken
+          },
+          body: JSON.stringify(payload)
+        });
+        setOutput(body);
+        const data = (body || {}).data || {};
+        if (data.allowed && data.execute) {
+          setTxSheetStatus("Transaction committed successfully.");
+          document.getElementById("tx-pin").value = "";
+        } else if (data.allowed) {
+          setTxSheetStatus("Preview passed. Fee: " + (data.tariff_fee || "0"));
+        } else {
+          setTxSheetStatus("Blocked: " + (data.reason || "policy or balance check failed"));
+        }
+      } catch (err) {
+        setTxSheetStatus("Transaction call failed.");
+        setOutput({ error: normalizeError(err) });
+      }
+    }
+
+    function openTxSheetFromProposal(proposal) {
+      if (!proposal || proposal.kind !== "transaction_request") return;
+      const prefill = proposal.prefill || {};
+      document.getElementById("tx-action").value = (prefill.action || "transfer").toLowerCase();
+      document.getElementById("tx-amount").value = prefill.amount || "0";
+      document.getElementById("tx-currency").value = (prefill.currency || "USD").toUpperCase();
+      document.getElementById("tx-from-username").value = prefill.from_username || "";
+      document.getElementById("tx-to-username").value = prefill.to_username || "";
+      document.getElementById("tx-description").value = prefill.description || "assistant_txn";
+      setTxSheetStatus("Assistant prepared transaction. Review and commit with PIN.");
     }
 
     async function saveSignals() {
@@ -593,7 +699,12 @@
           })
         });
         const reply = ((((body || {}).data || {}).assistant || {}).reply) || "No reply";
+        const proposal = ((((body || {}).data || {}).assistant || {}).action_proposal) || null;
         appendChat("bot", reply);
+        if (proposal) {
+          openTxSheetFromProposal(proposal);
+          appendChat("bot", "I prepared a transaction sheet. Please review and commit with PIN.");
+        }
         setOutput(body);
       } catch (err) {
         appendChat("bot", "Assistant call failed.");
@@ -748,6 +859,18 @@
     document.getElementById("btn-chat-send").addEventListener("click", sendChat);
     document.getElementById("btn-assistant-send").addEventListener("click", sendChat);
     document.getElementById("btn-run-diagnostics").addEventListener("click", runDiagnostics);
+    document.getElementById("btn-tx-preview").addEventListener("click", function() { runTxAction(false); });
+    document.getElementById("btn-tx-commit").addEventListener("click", function() { runTxAction(true); });
+    document.getElementById("btn-tx-reset").addEventListener("click", function() {
+      document.getElementById("tx-action").value = "transfer";
+      document.getElementById("tx-amount").value = "0";
+      document.getElementById("tx-currency").value = "USD";
+      document.getElementById("tx-from-username").value = "";
+      document.getElementById("tx-to-username").value = "";
+      document.getElementById("tx-description").value = "assistant_transfer";
+      document.getElementById("tx-pin").value = "";
+      setTxSheetStatus("Transaction sheet reset.");
+    });
     document.getElementById("btn-assistant-clear").addEventListener("click", function() {
       const log = document.getElementById("chat-log");
       log.innerHTML = '<div class="chat-msg bot">Assistant ready. Ask anything about wallet usage.</div>';

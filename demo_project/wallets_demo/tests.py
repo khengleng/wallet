@@ -3,6 +3,7 @@ import io
 import json
 from unittest.mock import patch
 
+from django.contrib.auth.hashers import make_password
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import Client, TestCase, override_settings
@@ -916,6 +917,31 @@ class MobileSelfOnboardingApiTests(TestCase):
         self.assertFalse(response.json()["ok"])
         self.assertEqual(response.json()["error"]["code"], "message_required")
 
+    @patch("wallets_demo.views_mobile._openai_assistant_fallback")
+    def test_mobile_assistant_chat_returns_transaction_action_proposal(self, openai_fallback_mock):
+        self.client.login(username="mobile_user", password="pass12345")
+        openai_fallback_mock.return_value = {
+            "enabled": True,
+            "status": "ok",
+            "reply": "I can help you transfer funds.",
+            "suggested_actions": ["transfer_funds"],
+        }
+        response = self.client.post(
+            reverse("mobile_assistant_chat"),
+            data=json.dumps({"message": "Please transfer 25 USD to alice"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        assistant = body["data"]["assistant"]
+        self.assertEqual(assistant["status"], "ok")
+        proposal = assistant.get("action_proposal")
+        self.assertIsInstance(proposal, dict)
+        self.assertEqual(proposal["kind"], "transaction_request")
+        self.assertEqual(proposal["prefill"]["action"], "transfer")
+        self.assertEqual(proposal["prefill"]["currency"], "USD")
+        self.assertEqual(proposal["prefill"]["amount"], "25")
+
 
 class MobileNativeLabPageTests(TestCase):
     def setUp(self):
@@ -987,6 +1013,64 @@ class MobileNativeLabPageTests(TestCase):
         clear_response = self.client.delete(reverse("mobile_playground_impersonation"))
         self.assertEqual(clear_response.status_code, 200)
         self.assertFalse(clear_response.json()["data"]["impersonation_enabled"])
+
+    def test_mobile_playground_transaction_commit_requires_valid_pin(self):
+        prefs = self.target_user.mobile_preferences if isinstance(self.target_user.mobile_preferences, dict) else {}
+        prefs["transaction_pin_hash"] = make_password("1234")
+        self.target_user.mobile_preferences = prefs
+        self.target_user.save(update_fields=["mobile_preferences"])
+
+        self.client.login(username="native_lab_user", password="pass12345")
+        no_pin_response = self.client.post(
+            reverse("mobile_playground_assistant_action"),
+            data=json.dumps(
+                {
+                    "action": "deposit",
+                    "amount": "10",
+                    "currency": "USD",
+                    "from_username": "native_lab_target",
+                    "execute": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(no_pin_response.status_code, 403)
+        self.assertEqual(no_pin_response.json()["error"]["code"], "pin_required")
+
+        wrong_pin_response = self.client.post(
+            reverse("mobile_playground_assistant_action"),
+            data=json.dumps(
+                {
+                    "action": "deposit",
+                    "amount": "10",
+                    "currency": "USD",
+                    "from_username": "native_lab_target",
+                    "execute": True,
+                    "pin": "0000",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(wrong_pin_response.status_code, 403)
+        self.assertEqual(wrong_pin_response.json()["error"]["code"], "pin_invalid")
+
+        ok_response = self.client.post(
+            reverse("mobile_playground_assistant_action"),
+            data=json.dumps(
+                {
+                    "action": "deposit",
+                    "amount": "10",
+                    "currency": "USD",
+                    "from_username": "native_lab_target",
+                    "execute": True,
+                    "pin": "1234",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(ok_response.status_code, 200)
+        self.assertTrue(ok_response.json()["data"]["allowed"])
+        self.assertTrue(ok_response.json()["data"]["execute"])
 
 
 class PolicyHubUpgradeWorkflowTests(TestCase):

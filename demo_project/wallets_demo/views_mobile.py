@@ -4,8 +4,10 @@ import json
 import logging
 from urllib.request import Request, urlopen
 import re
+from decimal import Decimal
 
 from django.conf import settings
+from django.contrib.auth.hashers import make_password
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
@@ -125,6 +127,63 @@ def _openai_assistant_fallback(*, user, message: str, context: dict) -> dict:
             ),
             "suggested_actions": ["retry", "check_openai_key", "contact_ops_admin"],
         }
+
+
+def _extract_transaction_proposal(*, user, message: str) -> dict | None:
+    text = str(message or "").strip()
+    lowered = text.lower()
+    action = ""
+    if any(token in lowered for token in ["transfer", "send"]):
+        action = "transfer"
+    elif any(token in lowered for token in ["withdraw", "cash out"]):
+        action = "withdraw"
+    elif any(token in lowered for token in ["deposit", "top up", "add money"]):
+        action = "deposit"
+    if not action:
+        return None
+
+    amount_match = re.search(r"(\d+(?:\.\d{1,2})?)", text)
+    amount = str(Decimal(amount_match.group(1))) if amount_match else "0"
+    currency_match = re.search(r"\b(USD|KHR|THB|SGD|EUR|GBP|JPY|AUD|MYR|VND)\b", text.upper())
+    currency = currency_match.group(1) if currency_match else "USD"
+    to_username = ""
+    if action == "transfer":
+        to_match = re.search(r"\bto\s+([a-zA-Z0-9._-]{3,64})\b", text, flags=re.IGNORECASE)
+        if to_match:
+            to_username = to_match.group(1)
+
+    return {
+        "kind": "transaction_request",
+        "requires_pin": True,
+        "next_step": "open_transaction_sheet",
+        "prefill": {
+            "action": action,
+            "amount": amount,
+            "currency": currency,
+            "from_username": user.username,
+            "to_username": to_username,
+            "description": f"assistant_{action}",
+        },
+    }
+
+
+def _inject_action_proposal(*, body: dict, user, message: str) -> dict:
+    if not isinstance(body, dict):
+        body = {}
+    data = body.get("data")
+    if not isinstance(data, dict):
+        data = {}
+        body["data"] = data
+    assistant = data.get("assistant")
+    if not isinstance(assistant, dict):
+        assistant = {"enabled": True, "status": "ok", "reply": ""}
+        data["assistant"] = assistant
+    if assistant.get("action_proposal"):
+        return body
+    proposal = _extract_transaction_proposal(user=user, message=message)
+    if proposal is not None:
+        assistant["action_proposal"] = proposal
+    return body
 
 
 @login_required
@@ -263,7 +322,13 @@ def mobile_assistant_chat(request):
             context=payload.get("context", {}),
         )
         if fallback.get("enabled"):
-            return JsonResponse({"ok": True, "data": {"assistant": fallback}})
+            return JsonResponse(
+                _inject_action_proposal(
+                    body={"ok": True, "data": {"assistant": fallback}},
+                    user=user,
+                    message=message,
+                )
+            )
         return JsonResponse(
             {
                 "ok": True,
@@ -303,6 +368,7 @@ def mobile_assistant_chat(request):
             raw = resp.read().decode("utf-8")
             status_code = int(getattr(resp, "status", 200) or 200)
         body = json.loads(raw or "{}")
+        body = _inject_action_proposal(body=body, user=user, message=message)
         return JsonResponse(body, status=status_code)
     except Exception as exc:
         logger.warning("mobile_assistant_chat proxy failed: %s", exc)
@@ -312,7 +378,13 @@ def mobile_assistant_chat(request):
             context=payload.get("context", {}),
         )
         if fallback.get("enabled"):
-            return JsonResponse({"ok": True, "data": {"assistant": fallback}})
+            return JsonResponse(
+                _inject_action_proposal(
+                    body={"ok": True, "data": {"assistant": fallback}},
+                    user=user,
+                    message=message,
+                )
+            )
 
     return JsonResponse(
         {
@@ -410,6 +482,8 @@ def mobile_profile(request):
     profile_picture_url = str(
         payload.get("profile_picture_url", user.profile_picture_url) or ""
     ).strip()
+    transaction_pin = str(payload.get("transaction_pin") or "").strip()
+    transaction_pin_confirm = str(payload.get("transaction_pin_confirm") or "").strip()
     incoming_preferences = payload.get("preferences")
     if incoming_preferences is None:
         incoming_preferences = {}
@@ -436,6 +510,11 @@ def mobile_profile(request):
             "profile_picture_url must be a valid HTTP/HTTPS URL.",
             code="invalid_profile_picture_url",
         )
+    if transaction_pin or transaction_pin_confirm:
+        if transaction_pin != transaction_pin_confirm:
+            return legacy._mobile_json_error("PIN confirmation does not match.", code="pin_mismatch")
+        if not re.fullmatch(r"\d{4,8}", transaction_pin):
+            return legacy._mobile_json_error("PIN must be 4-8 digits.", code="invalid_pin")
     if incoming_preferences:
         try:
             normalized_preferences = legacy._sanitize_mobile_preferences(
@@ -452,6 +531,8 @@ def mobile_profile(request):
     user.first_name = first_name
     user.last_name = last_name
     user.profile_picture_url = profile_picture_url
+    if transaction_pin:
+        normalized_preferences["transaction_pin_hash"] = make_password(transaction_pin)
     user.mobile_preferences = normalized_preferences
     user.save(update_fields=["first_name", "last_name", "profile_picture_url", "mobile_preferences"])
 
