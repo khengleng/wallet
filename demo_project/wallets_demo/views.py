@@ -427,6 +427,22 @@ def _require_action_permission(user, action_key: str) -> None:
         raise PermissionDenied(f"Action '{action_key}' is not allowed for your role.")
 
 
+def _require_form_action_permission(
+    user,
+    form_type: str,
+    *,
+    fallback_action_key: str = "",
+) -> None:
+    normalized_form_type = (form_type or "").strip().lower()
+    if normalized_form_type:
+        action_key = f"form.{normalized_form_type}"
+        if action_key in DEFAULT_ACTION_ROLE_RULES:
+            _require_action_permission(user, action_key)
+            return
+    if fallback_action_key:
+        _require_action_permission(user, fallback_action_key)
+
+
 def _is_locked(username: str, ip: str) -> bool:
     if getattr(settings, "LOGIN_LOCKOUT_USE_CACHE", True):
         data = cache.get(f"login_lockout:v1:{username}:{ip}") or {}
@@ -1863,6 +1879,7 @@ def treasury_dashboard(request):
     try:
         if request.method == "POST":
             form_type = (request.POST.get("form_type") or "treasury_transfer_request").strip().lower()
+            _require_form_action_permission(request.user, form_type)
             if form_type == "treasury_account_upsert":
                 _require_role_or_perm(
                     request.user,
@@ -2788,6 +2805,7 @@ def accounting_dashboard(request):
 
     if request.method == "POST":
         form_type = request.POST.get("form_type")
+        _require_form_action_permission(request.user, form_type)
         if form_type == "period_governance":
             try:
                 _require_role_or_perm(
@@ -3386,6 +3404,7 @@ def operations_center(request):
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
+        _require_form_action_permission(request.user, form_type)
         try:
             if form_type == "merchant_create":
                 _require_action_permission(request.user, "merchant.create")
@@ -5352,6 +5371,7 @@ def settlement_operations(request):
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
+        _require_form_action_permission(request.user, form_type)
         try:
             if form_type == "batch_generate":
                 _require_role_or_perm(
@@ -5593,6 +5613,7 @@ def reconciliation_workbench(request):
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
+        _require_form_action_permission(request.user, form_type)
         try:
             if form_type == "reconciliation_run_create":
                 _require_role_or_perm(request.user, roles=("super_admin", "admin", "finance", "risk", "operation"))
@@ -5844,6 +5865,7 @@ def merchant_portal(request):
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
+        _require_form_action_permission(request.user, form_type)
         try:
             merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
             if not can_manage_all and merchant.owner_id != request.user.id:
@@ -5936,6 +5958,7 @@ def wallet_management(request):
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
+        _require_form_action_permission(request.user, form_type)
         try:
             wallet_service = get_wallet_service()
             if form_type == "wallet_open_user":
@@ -6488,6 +6511,7 @@ def operations_settings(request):
 
     if request.method == "POST":
         try:
+            _require_action_permission(request.user, "settings.manage")
             settings_row.organization_name = (request.POST.get("organization_name") or "").strip() or "DJ Wallet"
             for field in prefix_fields:
                 raw_value = request.POST.get(field) or getattr(settings_row, field)
@@ -6627,6 +6651,7 @@ def policy_hub(request):
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
+        _require_form_action_permission(request.user, form_type)
         try:
             if form_type == "policy_upsert":
                 policy_id = (request.POST.get("policy_id") or "").strip()
@@ -7084,7 +7109,8 @@ def approval_matrix(request):
         raise PermissionDenied("You do not have access to approval matrix.")
 
     if request.method == "POST":
-        form_type = (request.POST.get("form_type") or "upsert").strip().lower()
+        form_type = (request.POST.get("form_type") or "approval_rule_upsert").strip().lower()
+        _require_form_action_permission(request.user, form_type, fallback_action_key="rbac.manage")
         try:
             if form_type == "toggle":
                 rule = ApprovalMatrixRule.objects.get(id=request.POST.get("rule_id"))
@@ -7143,6 +7169,7 @@ def documents_center(request):
     if request.method == "POST":
         try:
             form_type = (request.POST.get("form_type") or "document_upload").strip().lower()
+            _require_form_action_permission(request.user, form_type)
             if form_type == "document_upload":
                 title = (request.POST.get("title") or "").strip()
                 if not title:
@@ -7226,6 +7253,7 @@ def case_detail(request, case_id: int):
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
+        _require_form_action_permission(request.user, form_type)
         try:
             if form_type == "case_update":
                 _require_action_permission(request.user, "case.update")
