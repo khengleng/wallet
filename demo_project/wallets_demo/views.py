@@ -17,7 +17,6 @@ from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.hashers import check_password
-from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
 from django.core.paginator import Paginator
 from django.core.cache import cache
@@ -213,6 +212,114 @@ def _tenant_scoped_merchants(request):
     qs = Merchant.objects.all()
     if tenant is not None:
         qs = qs.filter(tenant=tenant)
+    return qs
+
+
+def _tenant_scoped_customer_cifs(request):
+    tenant = _request_tenant(request)
+    qs = CustomerCIF.objects.select_related("user", "service_class")
+    if tenant is not None:
+        qs = qs.filter(tenant=tenant)
+    return qs
+
+
+def _tenant_scoped_cases(request):
+    tenant = _request_tenant(request)
+    qs = OperationCase.objects.select_related("customer", "merchant", "assigned_to", "created_by")
+    if tenant is not None:
+        qs = qs.filter(
+            Q(customer__tenant=tenant)
+            | Q(merchant__tenant=tenant)
+            | Q(created_by__tenant=tenant)
+            | Q(assigned_to__tenant=tenant)
+        ).distinct()
+    return qs
+
+
+def _tenant_scoped_settlements(request):
+    tenant = _request_tenant(request)
+    qs = MerchantSettlementRecord.objects.select_related("merchant")
+    if tenant is not None:
+        qs = qs.filter(merchant__tenant=tenant)
+    return qs
+
+
+def _tenant_scoped_payouts(request):
+    tenant = _request_tenant(request)
+    qs = SettlementPayout.objects.select_related("settlement", "settlement__merchant")
+    if tenant is not None:
+        qs = qs.filter(settlement__merchant__tenant=tenant)
+    return qs
+
+
+def _tenant_scoped_settlement_exceptions(request):
+    tenant = _request_tenant(request)
+    qs = SettlementException.objects.select_related(
+        "settlement",
+        "payout",
+        "batch_file",
+        "assigned_to",
+        "created_by",
+        "resolved_by",
+    )
+    if tenant is not None:
+        qs = qs.filter(
+            Q(settlement__merchant__tenant=tenant)
+            | Q(payout__settlement__merchant__tenant=tenant)
+            | Q(created_by__tenant=tenant)
+            | Q(assigned_to__tenant=tenant)
+        ).distinct()
+    return qs
+
+
+def _tenant_scoped_reconciliation_runs(request):
+    tenant = _request_tenant(request)
+    qs = ReconciliationRun.objects.select_related("created_by")
+    if tenant is not None:
+        qs = qs.filter(created_by__tenant=tenant)
+    return qs
+
+
+def _tenant_scoped_reconciliation_breaks(request):
+    tenant = _request_tenant(request)
+    qs = ReconciliationBreak.objects.select_related(
+        "run",
+        "merchant",
+        "assigned_to",
+        "resolved_by",
+        "resolution_requested_by",
+        "resolution_checker",
+    )
+    if tenant is not None:
+        qs = qs.filter(
+            Q(merchant__tenant=tenant)
+            | Q(run__created_by__tenant=tenant)
+            | Q(assigned_to__tenant=tenant)
+        ).distinct()
+    return qs
+
+
+def _tenant_scoped_business_documents(request):
+    tenant = _request_tenant(request)
+    qs = BusinessDocument.objects.select_related(
+        "uploaded_by",
+        "merchant",
+        "customer",
+        "case",
+        "chargeback",
+        "refund_request",
+        "kyb_request",
+    )
+    if tenant is not None:
+        qs = qs.filter(
+            Q(merchant__tenant=tenant)
+            | Q(customer__tenant=tenant)
+            | Q(case__customer__tenant=tenant)
+            | Q(uploaded_by__tenant=tenant)
+            | Q(refund_request__merchant__tenant=tenant)
+            | Q(chargeback__merchant__tenant=tenant)
+            | Q(kyb_request__merchant__tenant=tenant)
+        ).distinct()
     return qs
 
 
@@ -1868,7 +1975,13 @@ def approval_decision(request, request_id: int):
 
     decision = request.POST.get("decision")
     checker_note = request.POST.get("checker_note", "")
-    approval_request = get_object_or_404(ApprovalRequest, id=request_id)
+    tenant = _require_request_tenant(request)
+    approval_request = get_object_or_404(
+        ApprovalRequest.objects.filter(
+            Q(source_user__tenant=tenant) | Q(maker__tenant=tenant) | Q(checker__tenant=tenant)
+        ).distinct(),
+        id=request_id,
+    )
 
     try:
         if decision == "approve":
@@ -1903,6 +2016,11 @@ def treasury_dashboard(request):
     if not user_has_any_role(request.user, BACKOFFICE_ROLES):
         raise PermissionDenied("You do not have access to treasury.")
     _require_menu_access(request.user, "treasury_dashboard")
+    tenant = _require_request_tenant(request)
+    tenant_treasury_qs = TreasuryTransferRequest.objects.filter(
+        Q(maker__tenant=tenant)
+        | Q(checker__tenant=tenant)
+    ).distinct()
 
     try:
         if request.method == "POST":
@@ -2009,7 +2127,7 @@ def treasury_dashboard(request):
                     )
                 today = timezone.localdate()
                 day_outflow = (
-                    TreasuryTransferRequest.objects.filter(
+                    tenant_treasury_qs.filter(
                         from_account=from_account,
                         created_at__date=today,
                         status__in=[
@@ -2052,10 +2170,10 @@ def treasury_dashboard(request):
         accounts = TreasuryAccount.objects.filter(is_active=True).order_by("name")
         all_accounts = TreasuryAccount.objects.order_by("name")
         treasury_policy = TreasuryPolicy.get_solo()
-        pending_requests = TreasuryTransferRequest.objects.filter(
+        pending_requests = tenant_treasury_qs.filter(
             status=TreasuryTransferRequest.STATUS_PENDING
         )[:25]
-        my_requests = TreasuryTransferRequest.objects.filter(maker=request.user)[:25]
+        my_requests = tenant_treasury_qs.filter(maker=request.user)[:25]
         return render(
             request,
             "wallets_demo/treasury.html",
@@ -2084,8 +2202,14 @@ def treasury_decision(request, request_id: int):
         return redirect("treasury_dashboard")
     if not user_has_any_role(request.user, CHECKER_ROLES):
         raise PermissionDenied("You do not have checker role.")
+    tenant = _require_request_tenant(request)
 
-    req = get_object_or_404(TreasuryTransferRequest, id=request_id)
+    req = get_object_or_404(
+        TreasuryTransferRequest.objects.filter(
+            Q(maker__tenant=tenant) | Q(checker__tenant=tenant)
+        ).distinct(),
+        id=request_id,
+    )
     dynamic_required_role = _approval_required_checker_role(
         APPROVAL_WORKFLOW_TREASURY,
         currency=req.from_account.currency,
@@ -5602,6 +5726,14 @@ def settlement_operations(request):
     if not user_has_any_role(request.user, roles):
         raise PermissionDenied("You do not have access to settlement operations.")
     _require_menu_access(request.user, "settlement_operations")
+    _require_request_tenant(request)
+    tenant_settlements_qs = _tenant_scoped_settlements(request)
+    tenant_payouts_qs = _tenant_scoped_payouts(request)
+    tenant_exceptions_qs = _tenant_scoped_settlement_exceptions(request)
+    tenant_users_qs = _tenant_scoped_users(request)
+    tenant_batches_qs = SettlementBatchFile.objects.select_related("created_by", "approved_by").filter(
+        created_by__in=tenant_users_qs
+    )
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -5625,7 +5757,7 @@ def settlement_operations(request):
                     raise ValidationError("Period start cannot be after period end.")
 
                 payouts = list(
-                    SettlementPayout.objects.select_related("settlement", "settlement__merchant").filter(
+                    tenant_payouts_qs.filter(
                         currency=currency,
                         status=SettlementPayout.STATUS_PENDING,
                         settlement__status=MerchantSettlementRecord.STATUS_POSTED,
@@ -5707,7 +5839,7 @@ def settlement_operations(request):
                     request.user,
                     roles=("super_admin", "admin", "finance", "treasury", "risk", "operation"),
                 )
-                batch = SettlementBatchFile.objects.get(id=request.POST.get("batch_id"))
+                batch = tenant_batches_qs.get(id=request.POST.get("batch_id"))
                 action = (request.POST.get("action") or "").strip().lower()
                 now = timezone.now()
                 if action == "approve":
@@ -5719,13 +5851,13 @@ def settlement_operations(request):
                 elif action == "process":
                     batch.status = SettlementBatchFile.STATUS_PROCESSED
                     payout_ids = list(
-                        SettlementPayout.objects.filter(
+                        tenant_payouts_qs.filter(
                             payout_reference__in=[
                                 row["payout_reference"] for row in batch.payload_json.get("rows", [])
                             ]
                         ).values_list("id", flat=True)
                     )
-                    for payout in SettlementPayout.objects.select_related("settlement").filter(id__in=payout_ids):
+                    for payout in tenant_payouts_qs.select_related("settlement").filter(id__in=payout_ids):
                         payout.status = SettlementPayout.STATUS_SETTLED
                         payout.settled_at = now
                         payout.sent_at = payout.sent_at or now
@@ -5770,11 +5902,11 @@ def settlement_operations(request):
                     request.user,
                     roles=("super_admin", "admin", "finance", "treasury", "risk", "operation"),
                 )
-                settlement = MerchantSettlementRecord.objects.filter(
+                settlement = tenant_settlements_qs.filter(
                     id=request.POST.get("settlement_id")
                 ).first()
-                payout = SettlementPayout.objects.filter(id=request.POST.get("payout_id")).first()
-                batch = SettlementBatchFile.objects.filter(id=request.POST.get("batch_id")).first()
+                payout = tenant_payouts_qs.filter(id=request.POST.get("payout_id")).first()
+                batch = tenant_batches_qs.filter(id=request.POST.get("batch_id")).first()
                 exception = SettlementException.objects.create(
                     settlement=settlement,
                     payout=payout,
@@ -5783,7 +5915,7 @@ def settlement_operations(request):
                     severity=(request.POST.get("severity") or "medium").strip(),
                     status=SettlementException.STATUS_OPEN,
                     detail=(request.POST.get("detail") or "").strip(),
-                    assigned_to=User.objects.filter(id=request.POST.get("assigned_to")).first(),
+                    assigned_to=tenant_users_qs.filter(id=request.POST.get("assigned_to")).first(),
                     created_by=request.user,
                 )
                 messages.success(request, f"Settlement exception #{exception.id} created.")
@@ -5794,7 +5926,7 @@ def settlement_operations(request):
                     request.user,
                     roles=("super_admin", "admin", "finance", "treasury", "risk", "operation"),
                 )
-                exception = SettlementException.objects.get(id=request.POST.get("exception_id"))
+                exception = tenant_exceptions_qs.get(id=request.POST.get("exception_id"))
                 status = (request.POST.get("status") or "").strip().lower()
                 if status not in {
                     SettlementException.STATUS_OPEN,
@@ -5803,7 +5935,7 @@ def settlement_operations(request):
                 }:
                     raise ValidationError("Invalid exception status.")
                 exception.status = status
-                exception.assigned_to = User.objects.filter(id=request.POST.get("assigned_to")).first()
+                exception.assigned_to = tenant_users_qs.filter(id=request.POST.get("assigned_to")).first()
                 exception.detail = (request.POST.get("detail") or exception.detail).strip()
                 if status == SettlementException.STATUS_RESOLVED:
                     exception.resolved_by = request.user
@@ -5828,13 +5960,11 @@ def settlement_operations(request):
         "wallets_demo/settlement_operations.html",
         {
             "supported_currencies": _supported_currencies(),
-            "settlements": MerchantSettlementRecord.objects.select_related("merchant").order_by("-created_at")[:200],
-            "payouts": SettlementPayout.objects.select_related("settlement", "settlement__merchant").order_by("-created_at")[:200],
-            "batches": SettlementBatchFile.objects.select_related("created_by", "approved_by").order_by("-created_at")[:200],
-            "exceptions": SettlementException.objects.select_related(
-                "settlement", "payout", "batch_file", "assigned_to", "created_by", "resolved_by"
-            ).order_by("-created_at")[:200],
-            "users": User.objects.order_by("username")[:300],
+            "settlements": tenant_settlements_qs.order_by("-created_at")[:200],
+            "payouts": tenant_payouts_qs.order_by("-created_at")[:200],
+            "batches": tenant_batches_qs.order_by("-created_at")[:200],
+            "exceptions": tenant_exceptions_qs.order_by("-created_at")[:200],
+            "users": tenant_users_qs.order_by("username")[:300],
         },
     )
 
@@ -5845,6 +5975,10 @@ def reconciliation_workbench(request):
     if not user_has_any_role(request.user, roles):
         raise PermissionDenied("You do not have access to reconciliation workbench.")
     _require_menu_access(request.user, "reconciliation_workbench")
+    _require_request_tenant(request)
+    tenant_runs_qs = _tenant_scoped_reconciliation_runs(request)
+    tenant_breaks_qs = _tenant_scoped_reconciliation_breaks(request)
+    tenant_users_qs = _tenant_scoped_users(request)
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -5864,6 +5998,7 @@ def reconciliation_workbench(request):
                 if period_start > period_end:
                     raise ValidationError("Reconciliation start date cannot be after end date.")
                 internal_qs = MerchantCashflowEvent.objects.filter(
+                    merchant__in=_tenant_scoped_merchants(request),
                     currency=currency,
                     created_at__date__gte=period_start,
                     created_at__date__lte=period_end,
@@ -5912,7 +6047,7 @@ def reconciliation_workbench(request):
 
             if form_type == "reconciliation_match_update":
                 _require_role_or_perm(request.user, roles=roles)
-                recon_break = ReconciliationBreak.objects.get(id=request.POST.get("break_id"))
+                recon_break = tenant_breaks_qs.get(id=request.POST.get("break_id"))
                 recon_break.break_category = (request.POST.get("break_category") or recon_break.break_category).strip()
                 recon_break.internal_txn_ref = (request.POST.get("internal_txn_ref") or "").strip()
                 recon_break.external_txn_ref = (request.POST.get("external_txn_ref") or "").strip()
@@ -5943,7 +6078,7 @@ def reconciliation_workbench(request):
 
             if form_type == "reconciliation_resolution_request":
                 _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "finance", "treasury"))
-                recon_break = ReconciliationBreak.objects.get(id=request.POST.get("break_id"))
+                recon_break = tenant_breaks_qs.get(id=request.POST.get("break_id"))
                 if recon_break.resolution_status == ReconciliationBreak.RESOLUTION_PENDING:
                     raise ValidationError("Resolution request already pending checker decision.")
                 recon_break.resolution_status = ReconciliationBreak.RESOLUTION_PENDING
@@ -5972,7 +6107,7 @@ def reconciliation_workbench(request):
 
             if form_type == "reconciliation_resolution_decision":
                 _require_role_or_perm(request.user, roles=("super_admin", "admin", "risk", "finance"))
-                recon_break = ReconciliationBreak.objects.get(id=request.POST.get("break_id"))
+                recon_break = tenant_breaks_qs.get(id=request.POST.get("break_id"))
                 decision = (request.POST.get("decision") or "").strip().lower()
                 if recon_break.resolution_status != ReconciliationBreak.RESOLUTION_PENDING:
                     raise ValidationError("Resolution is not pending checker decision.")
@@ -6021,7 +6156,7 @@ def reconciliation_workbench(request):
 
             if form_type == "reconciliation_evidence_add":
                 _require_role_or_perm(request.user, roles=roles)
-                recon_break = ReconciliationBreak.objects.select_related("merchant").get(
+                recon_break = tenant_breaks_qs.select_related("merchant").get(
                     id=request.POST.get("break_id")
                 )
                 title = (request.POST.get("title") or "").strip()
@@ -6056,11 +6191,13 @@ def reconciliation_workbench(request):
         except Exception as exc:
             messages.error(request, f"Reconciliation workbench operation failed: {exc}")
 
-    runs = ReconciliationRun.objects.select_related("created_by").order_by("-created_at")[:150]
-    breaks = ReconciliationBreak.objects.select_related(
-        "run", "merchant", "assigned_to", "resolved_by", "resolution_requested_by", "resolution_checker"
-    ).order_by("-created_at")[:250]
-    evidences = ReconciliationEvidence.objects.select_related("recon_break", "uploaded_by").order_by("-created_at")[:300]
+    runs = tenant_runs_qs.order_by("-created_at")[:150]
+    breaks = tenant_breaks_qs.order_by("-created_at")[:250]
+    evidences = (
+        ReconciliationEvidence.objects.select_related("recon_break", "uploaded_by")
+        .filter(recon_break__in=breaks)
+        .order_by("-created_at")[:300]
+    )
     evidence_map: dict[int, list[ReconciliationEvidence]] = {}
     for ev in evidences:
         evidence_map.setdefault(ev.recon_break_id, []).append(ev)
@@ -6074,7 +6211,7 @@ def reconciliation_workbench(request):
             "breaks": breaks,
             "evidences": evidences,
             "evidence_map": evidence_map,
-            "users": User.objects.order_by("username")[:300],
+            "users": tenant_users_qs.order_by("username")[:300],
             "break_categories": ReconciliationBreak.CATEGORY_CHOICES,
             "resolution_status_choices": ReconciliationBreak.RESOLUTION_CHOICES,
         },
@@ -6576,23 +6713,25 @@ def wallet_management(request):
 
     user_ct = ContentType.objects.get_for_model(User)
     merchant_ct = ContentType.objects.get_for_model(Merchant)
+    tenant_user_ids = list(users_qs.values_list("id", flat=True))
+    tenant_merchant_ids = list(merchants_qs.values_list("id", flat=True))
     user_wallets = (
-        Wallet.objects.filter(holder_type=user_ct)
+        Wallet.objects.filter(holder_type=user_ct, holder_id__in=tenant_user_ids)
         .select_related()
         .order_by("-id")[:200]
     )
     merchant_wallets = (
-        Wallet.objects.filter(holder_type=merchant_ct)
+        Wallet.objects.filter(holder_type=merchant_ct, holder_id__in=tenant_merchant_ids)
         .select_related()
         .order_by("-id")[:200]
     )
-    user_map = {u.id: u for u in User.objects.filter(id__in=[w.holder_id for w in user_wallets])}
+    user_map = {u.id: u for u in users_qs.filter(id__in=[w.holder_id for w in user_wallets])}
     cif_map = {
         cif.user_id: cif
-        for cif in CustomerCIF.objects.filter(user_id__in=[w.holder_id for w in user_wallets])
+        for cif in cifs_scoped_qs.filter(user_id__in=[w.holder_id for w in user_wallets])
     }
     merchant_map = {
-        m.id: m for m in Merchant.objects.filter(id__in=[w.holder_id for w in merchant_wallets])
+        m.id: m for m in merchants_qs.filter(id__in=[w.holder_id for w in merchant_wallets])
     }
 
     return render(
@@ -6600,14 +6739,14 @@ def wallet_management(request):
         "wallets_demo/wallet_management.html",
         {
             "can_manage_wallet_management": True,
-            "users": User.objects.order_by("username")[:300],
-            "users_for_cif": User.objects.order_by("username")[:300],
+            "users": users_qs.order_by("username")[:300],
+            "users_for_cif": users_qs.order_by("username")[:300],
             "customer_cifs": cifs_page,
             "cif_status_choices": CustomerCIF.STATUS_CHOICES,
             "selected_cif_status": cif_status,
             "cif_query": cif_query,
             "operation_settings": _operation_settings(),
-            "merchants": Merchant.objects.order_by("code")[:200],
+            "merchants": merchants_qs.order_by("code")[:200],
             "customer_service_class_policies": ServiceClassPolicy.objects.filter(
                 entity_type=ServiceClassPolicy.ENTITY_CUSTOMER
             ).order_by("code"),
@@ -6655,9 +6794,11 @@ def rbac_management(request):
     if not user_has_any_role(request.user, RBAC_ADMIN_ROLES):
         raise PermissionDenied("You do not have access to RBAC management.")
     _require_menu_access(request.user, "rbac_management")
+    _require_request_tenant(request)
+    tenant_users_qs = _tenant_scoped_users(request).prefetch_related("groups")
 
     if request.method == "POST":
-        target_user = get_object_or_404(User, id=request.POST.get("user_id"))
+        target_user = get_object_or_404(tenant_users_qs, id=request.POST.get("user_id"))
         selected_roles = [
             role_name
             for role_name in ROLE_DEFINITIONS.keys()
@@ -6675,16 +6816,14 @@ def rbac_management(request):
         )
         return redirect("rbac_management")
 
-    users = User.objects.prefetch_related("groups").order_by("username")
+    users = tenant_users_qs.order_by("username")
     role_items = sorted(ROLE_DEFINITIONS.items(), key=lambda item: item[0])
     total_users = users.count()
     users_with_roles = users.filter(groups__isnull=False).distinct().count()
     users_without_roles = max(total_users - users_with_roles, 0)
     role_user_counts = {
-        row["name"]: row["user_count"]
-        for row in Group.objects.filter(name__in=ROLE_DEFINITIONS.keys())
-        .annotate(user_count=Count("user"))
-        .values("name", "user_count")
+        role_name: users.filter(groups__name=role_name).distinct().count()
+        for role_name in ROLE_DEFINITIONS.keys()
     }
     role_metrics = [
         {
@@ -6945,63 +7084,76 @@ def operations_reports(request):
     ):
         raise PermissionDenied("You do not have access to operational reports.")
     _require_menu_access(request.user, "operations_reports")
+    tenant = _require_request_tenant(request)
+    tenant_cases_qs = _tenant_scoped_cases(request)
+    tenant_settlements_qs = _tenant_scoped_settlements(request)
+    tenant_payouts_qs = _tenant_scoped_payouts(request)
+    tenant_recon_breaks_qs = _tenant_scoped_reconciliation_breaks(request)
+    tenant_audit_qs = BackofficeAuditLog.objects.select_related("actor").filter(actor__tenant=tenant)
+    tenant_cif_qs = _tenant_scoped_customer_cifs(request)
+    tenant_merchants_qs = _tenant_scoped_merchants(request)
+    tenant_wallets_qs = Wallet.objects.filter(
+        Q(holder_type=ContentType.objects.get_for_model(User), holder_id__in=_tenant_scoped_users(request).values("id"))
+        | Q(holder_type=ContentType.objects.get_for_model(Merchant), holder_id__in=tenant_merchants_qs.values("id"))
+    ).distinct()
 
     now = timezone.now()
     last_24h = now - timedelta(hours=24)
     last_7d = now - timedelta(days=7)
 
     case_status_counts = list(
-        OperationCase.objects.values("status").annotate(total=Count("id")).order_by("status")
+        tenant_cases_qs.values("status").annotate(total=Count("id")).order_by("status")
     )
     settlement_status_counts = list(
-        MerchantSettlementRecord.objects.values("status").annotate(total=Count("id")).order_by("status")
+        tenant_settlements_qs.values("status").annotate(total=Count("id")).order_by("status")
     )
     payout_status_counts = list(
-        SettlementPayout.objects.values("status").annotate(total=Count("id")).order_by("status")
+        tenant_payouts_qs.values("status").annotate(total=Count("id")).order_by("status")
     )
     reconciliation_status_counts = list(
-        ReconciliationBreak.objects.values("status").annotate(total=Count("id")).order_by("status")
+        tenant_recon_breaks_qs.values("status").annotate(total=Count("id")).order_by("status")
     )
     top_case_types_7d = list(
-        OperationCase.objects.filter(created_at__gte=last_7d)
+        tenant_cases_qs.filter(created_at__gte=last_7d)
         .values("case_type")
         .annotate(total=Count("id"))
         .order_by("-total", "case_type")[:5]
     )
     recent_audit_events = list(
-        BackofficeAuditLog.objects.select_related("actor").order_by("-created_at")[:20]
+        tenant_audit_qs.order_by("-created_at")[:20]
     )
 
     context = {
         "kpis": {
-            "cases_open": OperationCase.objects.filter(
+            "cases_open": tenant_cases_qs.filter(
                 status__in=[
                     OperationCase.STATUS_OPEN,
                     OperationCase.STATUS_IN_PROGRESS,
                     OperationCase.STATUS_ESCALATED,
                 ]
             ).count(),
-            "cases_new_24h": OperationCase.objects.filter(created_at__gte=last_24h).count(),
-            "cases_resolved_24h": OperationCase.objects.filter(
+            "cases_new_24h": tenant_cases_qs.filter(created_at__gte=last_24h).count(),
+            "cases_resolved_24h": tenant_cases_qs.filter(
                 resolved_at__gte=last_24h
             ).count(),
-            "settlements_pending": MerchantSettlementRecord.objects.filter(
+            "settlements_pending": tenant_settlements_qs.filter(
                 status=MerchantSettlementRecord.STATUS_DRAFT
             ).count(),
-            "payouts_failed": SettlementPayout.objects.filter(
+            "payouts_failed": tenant_payouts_qs.filter(
                 status=SettlementPayout.STATUS_FAILED
             ).count(),
-            "recon_breaks_open": ReconciliationBreak.objects.filter(
+            "recon_breaks_open": tenant_recon_breaks_qs.filter(
                 status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW]
             ).count(),
             "pending_approvals": ApprovalRequest.objects.filter(
+                Q(source_user__tenant=tenant) | Q(maker__tenant=tenant) | Q(checker__tenant=tenant),
                 status=ApprovalRequest.STATUS_PENDING
-            ).count(),
-            "customers_pending_kyc": CustomerCIF.objects.filter(
+            ).distinct().count(),
+            "customers_pending_kyc": tenant_cif_qs.filter(
                 status=CustomerCIF.STATUS_PENDING_KYC
             ).count(),
-            "total_wallets": Wallet.objects.count(),
-            "total_merchants": Merchant.objects.count(),
+            "total_wallets": tenant_wallets_qs.count(),
+            "total_merchants": tenant_merchants_qs.count(),
         },
         "case_status_counts": case_status_counts,
         "settlement_status_counts": settlement_status_counts,
@@ -7315,13 +7467,14 @@ def ops_work_queue(request):
     if not user_has_any_role(request.user, operation_roles):
         raise PermissionDenied("You do not have access to operation work queue.")
     _require_menu_access(request.user, "ops_work_queue")
+    tenant = _require_request_tenant(request)
 
     queue_type = (request.GET.get("type") or "all").strip().lower()
     items: list[dict] = []
 
     treasury_pending = TreasuryTransferRequest.objects.select_related(
         "maker", "from_account", "to_account"
-    ).filter(status=TreasuryTransferRequest.STATUS_PENDING)
+    ).filter(status=TreasuryTransferRequest.STATUS_PENDING, maker__tenant=tenant)
     for req in treasury_pending[:150]:
         required_role = req.required_checker_role or _approval_required_checker_role(
             APPROVAL_WORKFLOW_TREASURY,
@@ -7343,7 +7496,8 @@ def ops_work_queue(request):
         )
 
     kyb_pending = MerchantKYBRequest.objects.select_related("merchant", "maker").filter(
-        status=MerchantKYBRequest.STATUS_PENDING
+        status=MerchantKYBRequest.STATUS_PENDING,
+        merchant__tenant=tenant,
     )
     for req in kyb_pending[:150]:
         items.append(
@@ -7364,7 +7518,8 @@ def ops_work_queue(request):
         )
 
     refund_pending = DisputeRefundRequest.objects.select_related("case", "merchant", "maker").filter(
-        status=DisputeRefundRequest.STATUS_PENDING
+        status=DisputeRefundRequest.STATUS_PENDING,
+        merchant__tenant=tenant,
     )
     now_ts = timezone.now()
     for req in refund_pending[:150]:
@@ -7391,8 +7546,11 @@ def ops_work_queue(request):
             }
         )
 
-    payout_pending = SettlementPayout.objects.select_related("settlement", "settlement__merchant", "initiated_by").filter(
-        status__in=(SettlementPayout.STATUS_PENDING, SettlementPayout.STATUS_SENT)
+    payout_pending = SettlementPayout.objects.select_related(
+        "settlement", "settlement__merchant", "initiated_by"
+    ).filter(
+        status__in=(SettlementPayout.STATUS_PENDING, SettlementPayout.STATUS_SENT),
+        settlement__merchant__tenant=tenant,
     )
     for req in payout_pending[:150]:
         items.append(
@@ -7417,7 +7575,8 @@ def ops_work_queue(request):
         )
 
     backdate_pending = JournalBackdateApproval.objects.select_related("entry", "maker").filter(
-        status=JournalBackdateApproval.STATUS_PENDING
+        status=JournalBackdateApproval.STATUS_PENDING,
+        maker__tenant=tenant,
     )
     for req in backdate_pending[:150]:
         items.append(
@@ -7444,7 +7603,7 @@ def ops_work_queue(request):
         "entry",
         "maker",
         "source_entry",
-    ).filter(status=JournalEntryApproval.STATUS_PENDING)
+    ).filter(status=JournalEntryApproval.STATUS_PENDING, maker__tenant=tenant)
     for req in journal_approvals_pending[:150]:
         items.append(
             {
@@ -7550,6 +7709,13 @@ def documents_center(request):
     if not user_has_any_role(request.user, ("super_admin", "admin", "operation", "risk", "finance", "customer_service", "sales", "treasury")):
         raise PermissionDenied("You do not have access to documents center.")
     _require_menu_access(request.user, "documents_center")
+    _require_request_tenant(request)
+    tenant_cases_qs = _tenant_scoped_cases(request)
+    tenant_merchants_qs = _tenant_scoped_merchants(request)
+    tenant_users_qs = _tenant_scoped_users(request)
+    tenant_refunds_qs = DisputeRefundRequest.objects.filter(merchant__in=tenant_merchants_qs)
+    tenant_kyb_qs = MerchantKYBRequest.objects.filter(merchant__in=tenant_merchants_qs)
+    tenant_chargebacks_qs = ChargebackCase.objects.filter(merchant__in=tenant_merchants_qs)
 
     if request.method == "POST":
         try:
@@ -7577,12 +7743,12 @@ def documents_center(request):
                 chargeback_id = (request.POST.get("chargeback_id") or "").strip()
                 refund_id = (request.POST.get("refund_request_id") or "").strip()
                 kyb_id = (request.POST.get("kyb_request_id") or "").strip()
-                doc.case = OperationCase.objects.filter(id=case_id).first() if case_id else None
-                doc.merchant = Merchant.objects.filter(id=merchant_id).first() if merchant_id else None
-                doc.customer = User.objects.filter(id=customer_id).first() if customer_id else None
-                doc.chargeback = ChargebackCase.objects.filter(id=chargeback_id).first() if chargeback_id else None
-                doc.refund_request = DisputeRefundRequest.objects.filter(id=refund_id).first() if refund_id else None
-                doc.kyb_request = MerchantKYBRequest.objects.filter(id=kyb_id).first() if kyb_id else None
+                doc.case = tenant_cases_qs.filter(id=case_id).first() if case_id else None
+                doc.merchant = tenant_merchants_qs.filter(id=merchant_id).first() if merchant_id else None
+                doc.customer = tenant_users_qs.filter(id=customer_id).first() if customer_id else None
+                doc.chargeback = tenant_chargebacks_qs.filter(id=chargeback_id).first() if chargeback_id else None
+                doc.refund_request = tenant_refunds_qs.filter(id=refund_id).first() if refund_id else None
+                doc.kyb_request = tenant_kyb_qs.filter(id=kyb_id).first() if kyb_id else None
                 doc.metadata_json = {
                     "note": (request.POST.get("note") or "").strip(),
                 }
@@ -7595,9 +7761,7 @@ def documents_center(request):
 
     module_filter = (request.GET.get("module") or "").strip()
     query = (request.GET.get("q") or "").strip()
-    docs = BusinessDocument.objects.select_related(
-        "uploaded_by", "merchant", "customer", "case", "chargeback", "refund_request", "kyb_request"
-    ).order_by("-created_at")
+    docs = _tenant_scoped_business_documents(request).order_by("-created_at")
     if module_filter:
         docs = docs.filter(source_module=module_filter)
     if query:
@@ -7615,12 +7779,12 @@ def documents_center(request):
             "module_filter": module_filter,
             "query": query,
             "source_choices": BusinessDocument.SOURCE_CHOICES,
-            "merchants": Merchant.objects.order_by("code")[:200],
-            "users": User.objects.order_by("username")[:300],
-            "cases": OperationCase.objects.order_by("-created_at")[:200],
-            "chargebacks": ChargebackCase.objects.order_by("-created_at")[:200],
-            "refund_requests": DisputeRefundRequest.objects.order_by("-created_at")[:200],
-            "kyb_requests": MerchantKYBRequest.objects.order_by("-created_at")[:200],
+            "merchants": tenant_merchants_qs.order_by("code")[:200],
+            "users": tenant_users_qs.order_by("username")[:300],
+            "cases": tenant_cases_qs.order_by("-created_at")[:200],
+            "chargebacks": tenant_chargebacks_qs.order_by("-created_at")[:200],
+            "refund_requests": tenant_refunds_qs.order_by("-created_at")[:200],
+            "kyb_requests": tenant_kyb_qs.order_by("-created_at")[:200],
         },
     )
 
@@ -7630,9 +7794,12 @@ def case_detail(request, case_id: int):
     operation_roles = ("super_admin", "admin", "operation", "customer_service", "risk", "finance", "sales", "treasury")
     if not user_has_any_role(request.user, operation_roles):
         raise PermissionDenied("You do not have access to case management.")
+    _require_request_tenant(request)
+    tenant_cases_qs = _tenant_scoped_cases(request)
+    tenant_users_qs = _tenant_scoped_users(request)
 
     case = get_object_or_404(
-        OperationCase.objects.select_related("customer", "merchant", "assigned_to", "created_by"),
+        tenant_cases_qs,
         id=case_id,
     )
 
@@ -7648,7 +7815,7 @@ def case_detail(request, case_id: int):
                 case.title = (request.POST.get("title") or case.title).strip() or case.title
                 case.description = (request.POST.get("description") or case.description).strip()
                 assigned_user_id = request.POST.get("assigned_to")
-                case.assigned_to = User.objects.filter(id=assigned_user_id).first() if assigned_user_id else None
+                case.assigned_to = tenant_users_qs.filter(id=assigned_user_id).first() if assigned_user_id else None
                 sla_due_at_raw = request.POST.get("sla_due_at")
                 if sla_due_at_raw is not None:
                     case.sla_due_at = _parse_optional_datetime(sla_due_at_raw)
@@ -7742,7 +7909,7 @@ def case_detail(request, case_id: int):
             "alerts": alerts,
             "documents": documents,
             "linked_cashflows": linked_cashflows,
-            "users": User.objects.order_by("username")[:300],
+            "users": tenant_users_qs.order_by("username")[:300],
             "case_priority_choices": OperationCase.PRIORITY_CHOICES,
             "case_status_choices": OperationCase.STATUS_CHOICES,
         },

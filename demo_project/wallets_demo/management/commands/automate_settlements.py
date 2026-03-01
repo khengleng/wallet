@@ -11,6 +11,7 @@ from wallets_demo.models import (
     MerchantCashflowEvent,
     MerchantSettlementRecord,
     SettlementPayout,
+    Tenant,
     User,
 )
 
@@ -34,6 +35,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--actor-username", required=True)
+        parser.add_argument("--tenant-code", help="Optional tenant code; defaults to actor tenant.")
         parser.add_argument("--period-start", help="YYYY-MM-DD")
         parser.add_argument("--period-end", help="YYYY-MM-DD")
         parser.add_argument("--currency", help="Optional currency filter")
@@ -44,6 +46,14 @@ class Command(BaseCommand):
         actor = User.objects.filter(username=options["actor_username"]).first()
         if actor is None:
             raise CommandError("Actor user not found.")
+        tenant_code = (options.get("tenant_code") or "").strip().lower()
+        tenant = None
+        if tenant_code:
+            tenant = Tenant.objects.filter(code__iexact=tenant_code, is_active=True).first()
+            if tenant is None:
+                raise CommandError("Tenant not found for --tenant-code.")
+        elif actor.tenant_id:
+            tenant = actor.tenant
 
         today = timezone.localdate()
         period_start = _parse_date(options.get("period_start"), today - timedelta(days=1))
@@ -56,6 +66,8 @@ class Command(BaseCommand):
             created_at__date__gte=period_start,
             created_at__date__lte=period_end,
         ).order_by("merchant_id", "currency", "created_at", "id")
+        if tenant is not None:
+            qs = qs.filter(merchant__tenant=tenant)
         if options.get("currency"):
             qs = qs.filter(currency=options["currency"].upper())
 

@@ -112,6 +112,11 @@ class MultiTenantIsolationTests(TestCase):
         self.tenant_b = Tenant.objects.create(code="tenant_b", name="Tenant B")
         self.admin_a = User.objects.create_user(username="tenant_admin_a", password="pass12345", tenant=self.tenant_a)
         self.admin_b = User.objects.create_user(username="tenant_admin_b", password="pass12345", tenant=self.tenant_b)
+        self.user_a = User.objects.create_user(
+            username="tenant_user_a",
+            password="pass12345",
+            tenant=self.tenant_a,
+        )
         assign_roles(self.admin_a, ["admin"])
         assign_roles(self.admin_b, ["admin"])
         self.merchant_b = Merchant.objects.create(
@@ -131,6 +136,26 @@ class MultiTenantIsolationTests(TestCase):
         prefs["transaction_pin_hash"] = make_password("1234")
         self.user_b.mobile_preferences = prefs
         self.user_b.save(update_fields=["mobile_preferences"])
+        self.case_b = OperationCase.objects.create(
+            case_no="MT-CASE-B-1",
+            case_type=OperationCase.TYPE_DISPUTE,
+            priority=OperationCase.PRIORITY_MEDIUM,
+            status=OperationCase.STATUS_OPEN,
+            title="Tenant B Case",
+            customer=self.user_b,
+            merchant=self.merchant_b,
+            created_by=self.admin_b,
+        )
+        self.case_a = OperationCase.objects.create(
+            case_no="MT-CASE-A-1",
+            case_type=OperationCase.TYPE_COMPLAINT,
+            priority=OperationCase.PRIORITY_MEDIUM,
+            status=OperationCase.STATUS_OPEN,
+            title="Tenant A Case",
+            customer=self.user_a,
+            merchant=None,
+            created_by=self.admin_a,
+        )
 
     def test_operations_center_blocks_cross_tenant_merchant_mutation(self):
         self.client.login(username="tenant_admin_a", password="pass12345")
@@ -166,6 +191,20 @@ class MultiTenantIsolationTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["error"]["code"], "user_not_found")
+
+    def test_case_detail_blocks_cross_tenant_case(self):
+        self.client.login(username="tenant_admin_a", password="pass12345")
+        response = self.client.get(
+            reverse("case_detail", kwargs={"case_id": self.case_b.id}),
+            HTTP_X_TENANT_CODE="tenant_a",
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_operations_reports_scopes_kpis_by_tenant(self):
+        self.client.login(username="tenant_admin_a", password="pass12345")
+        response = self.client.get(reverse("operations_reports"), HTTP_X_TENANT_CODE="tenant_a")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["kpis"]["cases_open"], 1)
 
 class TreasuryWorkflowTests(TestCase):
     def setUp(self):

@@ -4,12 +4,14 @@ from datetime import timedelta
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from wallets_demo.models import (
     JournalEntryApproval,
     ReconciliationBreak,
     SettlementException,
+    Tenant,
     TransactionMonitoringAlert,
     User,
 )
@@ -23,6 +25,7 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--actor-username", required=True)
+        parser.add_argument("--tenant-code", help="Optional tenant code; defaults to actor tenant.")
         parser.add_argument("--journal-hours", type=int, default=8)
         parser.add_argument("--settlement-exception-hours", type=int, default=12)
         parser.add_argument("--reconciliation-break-hours", type=int, default=12)
@@ -66,6 +69,14 @@ class Command(BaseCommand):
         actor = User.objects.filter(username=options["actor_username"]).first()
         if actor is None:
             raise CommandError("Actor user not found.")
+        tenant_code = (options.get("tenant_code") or "").strip().lower()
+        tenant = None
+        if tenant_code:
+            tenant = Tenant.objects.filter(code__iexact=tenant_code, is_active=True).first()
+            if tenant is None:
+                raise CommandError("Tenant not found for --tenant-code.")
+        elif actor.tenant_id:
+            tenant = actor.tenant
 
         now = timezone.now()
         dry_run = bool(options["dry_run"])
@@ -87,6 +98,8 @@ class Command(BaseCommand):
             status=JournalEntryApproval.STATUS_PENDING,
             created_at__lt=journal_cutoff,
         )
+        if tenant is not None:
+            stale_journal = stale_journal.filter(maker__tenant=tenant)
         for approval in stale_journal:
             note = (
                 f"SLA breach: journal approval #{approval.id} "
@@ -116,6 +129,12 @@ class Command(BaseCommand):
             status__in=(SettlementException.STATUS_OPEN, SettlementException.STATUS_IN_REVIEW),
             created_at__lt=settlement_cutoff,
         )
+        if tenant is not None:
+            stale_exceptions = stale_exceptions.filter(
+                Q(settlement__merchant__tenant=tenant)
+                | Q(payout__settlement__merchant__tenant=tenant)
+                | Q(created_by__tenant=tenant)
+            ).distinct()
         for ex in stale_exceptions:
             merchant = None
             if ex.settlement_id:
@@ -147,6 +166,10 @@ class Command(BaseCommand):
             status__in=(ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW),
             created_at__lt=recon_cutoff,
         )
+        if tenant is not None:
+            stale_recon = stale_recon.filter(
+                Q(merchant__tenant=tenant) | Q(run__created_by__tenant=tenant)
+            ).distinct()
         for br in stale_recon:
             note = (
                 f"SLA breach: reconciliation break #{br.id} "
