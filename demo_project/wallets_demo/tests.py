@@ -1,6 +1,9 @@
 from decimal import Decimal
+import hashlib
+import hmac
 import io
 import json
+import time
 from unittest.mock import patch
 
 from django.contrib.auth.hashers import make_password
@@ -45,10 +48,12 @@ from .models import (
     ServiceClassPolicy,
     SettlementException,
     SettlementPayout,
+    Tenant,
     TransactionMonitoringAlert,
     TreasuryAccount,
     TreasuryTransferRequest,
     User,
+    FLOW_C2B,
     WALLET_TYPE_CUSTOMER,
 )
 from .rbac import assign_roles, seed_role_groups
@@ -97,6 +102,70 @@ class RBACMakerCheckerTests(TestCase):
         self.maker.refresh_from_db()
         self.assertEqual(float(self.maker.balance), 125.0)
 
+
+@override_settings(MULTITENANCY_ENABLED=True, MULTITENANCY_DEFAULT_TENANT_CODE="tenant_a")
+class MultiTenantIsolationTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.tenant_a = Tenant.objects.create(code="tenant_a", name="Tenant A")
+        self.tenant_b = Tenant.objects.create(code="tenant_b", name="Tenant B")
+        self.admin_a = User.objects.create_user(username="tenant_admin_a", password="pass12345", tenant=self.tenant_a)
+        self.admin_b = User.objects.create_user(username="tenant_admin_b", password="pass12345", tenant=self.tenant_b)
+        assign_roles(self.admin_a, ["admin"])
+        assign_roles(self.admin_b, ["admin"])
+        self.merchant_b = Merchant.objects.create(
+            tenant=self.tenant_b,
+            code="MT-B-001",
+            name="Merchant B",
+            created_by=self.admin_b,
+            updated_by=self.admin_b,
+            owner=self.admin_b,
+        )
+        self.user_b = User.objects.create_user(
+            username="tenant_user_b",
+            password="pass12345",
+            tenant=self.tenant_b,
+        )
+        prefs = self.user_b.mobile_preferences if isinstance(self.user_b.mobile_preferences, dict) else {}
+        prefs["transaction_pin_hash"] = make_password("1234")
+        self.user_b.mobile_preferences = prefs
+        self.user_b.save(update_fields=["mobile_preferences"])
+
+    def test_operations_center_blocks_cross_tenant_merchant_mutation(self):
+        self.client.login(username="tenant_admin_a", password="pass12345")
+        response = self.client.post(
+            reverse("operations_center"),
+            {
+                "form_type": "merchant_update",
+                "merchant_id": self.merchant_b.id,
+                "status": Merchant.STATUS_SUSPENDED,
+            },
+            HTTP_X_TENANT_CODE="tenant_a",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.merchant_b.refresh_from_db()
+        self.assertEqual(self.merchant_b.status, Merchant.STATUS_ACTIVE)
+
+    def test_playground_action_hides_cross_tenant_user(self):
+        self.client.login(username="tenant_admin_a", password="pass12345")
+        response = self.client.post(
+            reverse("mobile_portal:playground_assistant_action"),
+            data=json.dumps(
+                {
+                    "action": "deposit",
+                    "amount": "10",
+                    "currency": "USD",
+                    "from_username": self.user_b.username,
+                    "execute": True,
+                    "pin": "1234",
+                }
+            ),
+            content_type="application/json",
+            HTTP_X_TENANT_CODE="tenant_a",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "user_not_found")
 
 class TreasuryWorkflowTests(TestCase):
     def setUp(self):
@@ -1879,6 +1948,154 @@ class OperationalHardeningTests(TestCase):
         self.assertTrue(
             AccessReviewRecord.objects.filter(user=checker_user, issue_type="segregation_of_duty").exists()
         )
+
+
+@override_settings(MULTITENANCY_ENABLED=True, MULTITENANCY_DEFAULT_TENANT_CODE="default")
+class OpenApiMerchantIntegrationTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.tenant, _ = Tenant.objects.get_or_create(code="default", defaults={"name": "Default"})
+        self.admin = User.objects.create_user(username="open_admin", password="pass12345", tenant=self.tenant)
+        self.owner = User.objects.create_user(username="open_owner", password="pass12345", tenant=self.tenant)
+        self.customer = User.objects.create_user(username="open_customer", password="pass12345", tenant=self.tenant)
+        assign_roles(self.admin, ["admin"])
+        self.customer.deposit(Decimal("200.00"))
+        self.merchant = Merchant.objects.create(
+            code="MOPEN01",
+            name="Open API Merchant",
+            tenant=self.tenant,
+            owner=self.owner,
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+        MerchantWalletCapability.objects.create(merchant=self.merchant, supports_c2b=True, supports_b2c=True)
+        MerchantRiskProfile.objects.create(
+            merchant=self.merchant,
+            daily_txn_limit=10000,
+            daily_amount_limit=Decimal("9999999"),
+            single_txn_limit=Decimal("999999"),
+            reserve_ratio_bps=0,
+            require_manual_review_above=Decimal("0"),
+            updated_by=self.admin,
+        )
+        self.credential = MerchantApiCredential.objects.create(
+            merchant=self.merchant,
+            key_id="mk_open_1",
+            secret_hash="open-secret",
+            scopes_csv="wallet:read,payment:write,payout:write",
+            sandbox_enabled=True,
+            live_enabled=False,
+            is_active=True,
+            created_by=self.admin,
+            updated_by=self.admin,
+        )
+
+    def _signed_headers(self, payload: dict | None = None, *, environment: str = "sandbox", nonce: str | None = None):
+        payload = payload or {}
+        raw = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        ts = int(time.time())
+        used_nonce = nonce or f"nonce-{ts}"
+        body_hash = hashlib.sha256(raw).hexdigest()
+        signature = hmac.new(
+            self.credential.secret_hash.encode("utf-8"),
+            f"{ts}:{used_nonce}:{body_hash}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return (
+            raw,
+            {
+                "HTTP_X_API_KEY": self.credential.key_id,
+                "HTTP_X_NONCE": used_nonce,
+                "HTTP_X_TIMESTAMP": str(ts),
+                "HTTP_X_SIGNATURE": signature,
+                "HTTP_X_TENANT_CODE": self.tenant.code,
+                "HTTP_X_ENVIRONMENT": environment,
+            },
+        )
+
+    def test_open_api_docs_endpoint(self):
+        response = self.client.get(reverse("open_api:docs"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/open-api/v1/payments/c2b/")
+
+    def test_sandbox_c2b_does_not_mutate_live_wallets(self):
+        payload = {
+            "customer_username": self.customer.username,
+            "amount": "12.00",
+            "currency": "USD",
+            "reference": "SBOX-001",
+        }
+        raw, headers = self._signed_headers(payload, environment="sandbox")
+        response = self.client.post(
+            reverse("open_api:sandbox_payment_c2b"),
+            data=raw,
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"]["status"], "sandbox_simulated")
+        self.assertEqual(MerchantCashflowEvent.objects.count(), 0)
+
+    def test_live_mode_is_blocked_when_not_enabled(self):
+        payload = {
+            "customer_username": self.customer.username,
+            "amount": "10.00",
+            "currency": "USD",
+            "reference": "LIVE-BLOCK",
+        }
+        raw, headers = self._signed_headers(payload, environment="live")
+        response = self.client.post(
+            reverse("open_api:payment_c2b"),
+            data=raw,
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "forbidden")
+
+    def test_live_c2b_executes_when_enabled(self):
+        self.credential.live_enabled = True
+        self.credential.save(update_fields=["live_enabled", "updated_at"])
+        payload = {
+            "customer_username": self.customer.username,
+            "amount": "15.00",
+            "currency": "USD",
+            "reference": "LIVE-C2B-1",
+            "note": "integration run",
+        }
+        raw, headers = self._signed_headers(payload, environment="live")
+        response = self.client.post(
+            reverse("open_api:payment_c2b"),
+            data=raw,
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        event = MerchantCashflowEvent.objects.get(reference="LIVE-C2B-1")
+        self.assertEqual(event.flow_type, FLOW_C2B)
+
+    def test_open_api_nonce_replay_is_blocked(self):
+        payload = {
+            "amount": "9.00",
+            "currency": "USD",
+        }
+        raw, headers = self._signed_headers(payload, environment="sandbox", nonce="replay-1")
+        first = self.client.post(
+            reverse("open_api:sandbox_payout_b2c"),
+            data=raw,
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        second = self.client.post(
+            reverse("open_api:sandbox_payout_b2c"),
+            data=raw,
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(second.status_code, 403)
+        self.assertEqual(second.json()["error"]["code"], "forbidden")
 
 
 class OpsWorkflowEscalationCommandTests(TestCase):

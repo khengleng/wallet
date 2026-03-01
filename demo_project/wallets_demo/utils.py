@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 
 from .identity_client import (
     oidc_auth_url as identity_oidc_auth_url,
@@ -15,6 +16,7 @@ from .identity_client import (
     oidc_userinfo as identity_oidc_userinfo,
 )
 from .models import User
+from .tenant_context import get_current_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +104,9 @@ def find_or_create_user_from_claims(claims: dict) -> User:
     first_name = str(claims.get("given_name", "")).strip()
     last_name = str(claims.get("family_name", "")).strip()
 
+    tenant = get_current_tenant()
+    tenant_id = tenant.id if tenant is not None else None
+
     if email:
         existing_by_email = User.objects.filter(email__iexact=email).first()
         if existing_by_email:
@@ -113,7 +118,7 @@ def find_or_create_user_from_claims(claims: dict) -> User:
             while User.objects.filter(username=username).exists():
                 suffix += 1
                 username = f"{base_username}_{suffix}"
-            user = User.objects.create_user(username=username, email=email)
+            user = User.objects.create_user(username=username, email=email, tenant_id=tenant_id)
     else:
         base_username = preferred or f"user_{subject[:12]}"
         user = User.objects.filter(username=base_username).first()
@@ -123,9 +128,14 @@ def find_or_create_user_from_claims(claims: dict) -> User:
             while User.objects.filter(username=username).exists():
                 suffix += 1
                 username = f"{base_username}_{suffix}"
-            user = User.objects.create_user(username=username)
+            user = User.objects.create_user(username=username, tenant_id=tenant_id)
 
     changed_fields = []
+    if tenant_id and user.tenant_id is None:
+        user.tenant_id = tenant_id
+        changed_fields.append("tenant")
+    if tenant_id and user.tenant_id and user.tenant_id != tenant_id:
+        raise ValidationError("Identity tenant does not match user tenant.")
     if email and user.email != email:
         user.email = email
         changed_fields.append("email")

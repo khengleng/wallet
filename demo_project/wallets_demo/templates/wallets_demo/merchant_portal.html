@@ -35,6 +35,7 @@
     {% with cred=credential_map|get_item:m.id %}
     <h4>API & Webhook</h4>
     {% if cred %}
+    <p class="text-muted">Open API docs: <code>/open-api/v1/docs/</code> | Sandbox: {% if cred.sandbox_enabled %}enabled{% else %}disabled{% endif %} | Live: {% if cred.live_enabled %}enabled{% else %}disabled{% endif %}</p>
     {% if user|can_do_action:"merchant.portal_api_update" %}
     <form method="post">
         {% csrf_token %}
@@ -45,6 +46,8 @@
                 value="{{ cred.scopes_csv }}" /></div>
         <div class="form-group"><label>Webhook URL</label><input type="url" name="webhook_url"
                 value="{% if user|can_view_field:'merchant.api.webhook_url' %}{{ cred.webhook_url }}{% endif %}" {% if not user|can_view_field:'merchant.api.webhook_url' %}placeholder="Hidden by policy"{% endif %} /></div>
+        <label style="margin-bottom:1rem;display:flex;gap:0.5rem;"><input type="checkbox" name="sandbox_enabled" {% if cred.sandbox_enabled %}checked{% endif %} /> Sandbox Enabled</label>
+        <label style="margin-bottom:1rem;display:flex;gap:0.5rem;"><input type="checkbox" name="live_enabled" {% if cred.live_enabled %}checked{% endif %} /> Live Enabled</label>
         <button class="btn btn-primary" type="submit">Save API Settings</button>
     </form>
     {% else %}

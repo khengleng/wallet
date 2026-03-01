@@ -6,6 +6,7 @@ from . import views_operations
 
 urlpatterns = [
     path("mobile-portal/", include(("wallets_demo.mobile_portal_urls", "mobile_portal"), namespace="mobile_portal")),
+    path("open-api/v1/", include(("wallets_demo.open_api_urls", "open_api"), namespace="open_api")),
     path('', views.dashboard, name='dashboard'),
     path('version', views.version_info, name='version_info'),
     path('metrics', views.metrics, name='metrics'),

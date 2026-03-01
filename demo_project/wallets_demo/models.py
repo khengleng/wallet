@@ -99,12 +99,46 @@ WALLET_TYPE_CHOICES = (
     (WALLET_TYPE_GOVERNMENT, "Government"),
 )
 
+
+class Tenant(models.Model):
+    code = models.CharField(max_length=48, unique=True, db_index=True)
+    name = models.CharField(max_length=128)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("code",)
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
 class User(WalletMixin, AbstractUser):
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="users",
+    )
     wallet_type = models.CharField(
         max_length=1, choices=WALLET_TYPE_CHOICES, default=WALLET_TYPE_CUSTOMER
     )
     profile_picture_url = models.URLField(blank=True, default="")
     mobile_preferences = models.JSONField(default=default_mobile_user_preferences, blank=True)
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            default_code = str(getattr(settings, "MULTITENANCY_DEFAULT_TENANT_CODE", "default")).strip().lower()
+            if default_code:
+                try:
+                    default_tenant = Tenant.objects.filter(code=default_code).first()
+                    if default_tenant is not None:
+                        self.tenant = default_tenant
+                except Exception:
+                    pass
+        super().save(*args, **kwargs)
 
     @property
     def role_names(self) -> list[str]:
@@ -1044,6 +1078,13 @@ class Merchant(WalletMixin, models.Model):
     )
 
     code = models.CharField(max_length=40, unique=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="merchants",
+    )
     name = models.CharField(max_length=128)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ACTIVE)
     settlement_currency = models.CharField(max_length=12, default="USD")
@@ -1088,6 +1129,14 @@ class Merchant(WalletMixin, models.Model):
 
     class Meta:
         ordering = ("code",)
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            if self.owner_id and self.owner.tenant_id:
+                self.tenant_id = self.owner.tenant_id
+            elif self.created_by_id and self.created_by.tenant_id:
+                self.tenant_id = self.created_by.tenant_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.code} - {self.name}"
@@ -1367,6 +1416,8 @@ class MerchantApiCredential(models.Model):
     secret_hash = models.CharField(max_length=128)
     scopes_csv = models.CharField(max_length=255, blank=True, default="wallet:read,payout:read,webhook:write")
     webhook_url = models.URLField(blank=True, default="")
+    sandbox_enabled = models.BooleanField(default=True)
+    live_enabled = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
     last_rotated_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
@@ -2435,6 +2486,13 @@ class CustomerCIF(models.Model):
     )
 
     cif_no = models.CharField(max_length=40, unique=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="customer_cifs",
+    )
     user = models.OneToOneField(
         User, on_delete=models.PROTECT, related_name="customer_cif"
     )
@@ -2464,6 +2522,10 @@ class CustomerCIF(models.Model):
             current = CustomerCIF.objects.filter(pk=self.pk).values_list("cif_no", flat=True).first()
             if current and current != self.cif_no:
                 raise ValidationError("CIF number is immutable and cannot be changed.")
+        if self.user_id and self.tenant_id is None:
+            self.tenant_id = self.user.tenant_id
+        if self.user_id and self.user.tenant_id and self.tenant_id and self.user.tenant_id != self.tenant_id:
+            raise ValidationError("Customer CIF tenant must match user tenant.")
         super().save(*args, **kwargs)
 
     def __str__(self):

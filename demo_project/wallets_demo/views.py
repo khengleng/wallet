@@ -54,6 +54,7 @@ from .keycloak_auth import (
     introspect_access_token,
 )
 from .models import (
+    AnalyticsEvent,
     ApprovalRequest,
     AccessReviewRecord,
     ApprovalMatrixRule,
@@ -95,6 +96,7 @@ from .models import (
     SettlementBatchFile,
     SettlementException,
     TariffRule,
+    Tenant,
     TreasuryAccount,
     TreasuryPolicy,
     TreasuryTransferRequest,
@@ -179,6 +181,47 @@ def _supported_currencies() -> list[str]:
     if row.enabled_currencies:
         return [c.upper() for c in row.enabled_currencies if c]
     return list(getattr(settings, "SUPPORTED_CURRENCIES", ["USD"]))
+
+
+def _request_tenant(request) -> Tenant | None:
+    tenant = getattr(request, "tenant", None)
+    if tenant is not None:
+        return tenant
+    user = getattr(request, "user", None)
+    if getattr(user, "is_authenticated", False):
+        return getattr(user, "tenant", None)
+    return None
+
+
+def _require_request_tenant(request) -> Tenant:
+    tenant = _request_tenant(request)
+    if tenant is None:
+        raise PermissionDenied("Tenant context is required.")
+    return tenant
+
+
+def _tenant_scoped_users(request):
+    tenant = _request_tenant(request)
+    qs = User.objects.all()
+    if tenant is not None:
+        qs = qs.filter(tenant=tenant)
+    return qs
+
+
+def _tenant_scoped_merchants(request):
+    tenant = _request_tenant(request)
+    qs = Merchant.objects.all()
+    if tenant is not None:
+        qs = qs.filter(tenant=tenant)
+    return qs
+
+
+def _enforce_tenant_access(request, *, user: User | None = None, merchant: Merchant | None = None) -> None:
+    tenant = _require_request_tenant(request)
+    if user is not None and user.tenant_id and user.tenant_id != tenant.id:
+        raise PermissionDenied("Cross-tenant user access is not allowed.")
+    if merchant is not None and merchant.tenant_id and merchant.tenant_id != tenant.id:
+        raise PermissionDenied("Cross-tenant merchant access is not allowed.")
 
 
 def _normalize_currency(raw_value: str | None) -> str:
@@ -644,7 +687,11 @@ def mobile_playground_impersonation(request):
         if not username:
             return _mobile_json_error("username is required.", code="username_required")
 
-        target = User.objects.filter(username=username, is_active=True).first()
+        target_qs = User.objects.filter(username=username, is_active=True)
+        tenant = _request_tenant(request)
+        if tenant is not None:
+            target_qs = target_qs.filter(tenant=tenant)
+        target = target_qs.first()
         if target is None:
             return _mobile_json_error("username not found.", code="user_not_found", status=404)
 
@@ -678,10 +725,11 @@ def mobile_playground_personas(request):
         return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
 
     personas: list[dict] = []
-    cifs = (
-        CustomerCIF.objects.select_related("user", "service_class")
-        .order_by("-updated_at", "-id")[:25]
-    )
+    tenant = _request_tenant(request)
+    cifs_qs = CustomerCIF.objects.select_related("user", "service_class")
+    if tenant is not None:
+        cifs_qs = cifs_qs.filter(tenant=tenant)
+    cifs = cifs_qs.order_by("-updated_at", "-id")[:25]
     for cif in cifs:
         personas.append(
             {
@@ -791,6 +839,7 @@ def mobile_playground_policy_tariff_simulate(request):
 def mobile_playground_assistant_action(request):
     if not _has_playground_access(request.user):
         return _playground_forbidden()
+    _require_request_tenant(request)
     if request.method != "POST":
         return _mobile_json_error("Method not allowed.", status=405, code="method_not_allowed")
     try:
@@ -811,8 +860,9 @@ def mobile_playground_assistant_action(request):
     actor = request.user
     from_username = str(payload.get("from_username") or actor.username).strip()
     to_username = str(payload.get("to_username") or "").strip()
+    users_qs = _tenant_scoped_users(request)
     try:
-        from_user = User.objects.get(username=from_username)
+        from_user = users_qs.get(username=from_username)
     except User.DoesNotExist:
         return _mobile_json_error("from_username not found.", code="user_not_found")
     to_user = None
@@ -820,7 +870,7 @@ def mobile_playground_assistant_action(request):
         if not to_username:
             return _mobile_json_error("to_username is required for transfer.", code="to_user_required")
         try:
-            to_user = User.objects.get(username=to_username)
+            to_user = users_qs.get(username=to_username)
         except User.DoesNotExist:
             return _mobile_json_error("to_username not found.", code="user_not_found")
 
@@ -1211,12 +1261,18 @@ def _mobile_json_error(
 
 
 def _mobile_current_user(request) -> User | None:
+    request_tenant = _request_tenant(request)
     user = getattr(request, "user", None)
     if user is not None and user.is_authenticated:
+        if request_tenant is not None and user.tenant_id and user.tenant_id != request_tenant.id:
+            return None
         if _has_playground_access(user):
             impersonate_user_id = request.session.get(MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY)
             if impersonate_user_id:
-                impersonated_user = User.objects.filter(id=impersonate_user_id, is_active=True).first()
+                qs = User.objects.filter(id=impersonate_user_id, is_active=True)
+                if request_tenant is not None:
+                    qs = qs.filter(tenant=request_tenant)
+                impersonated_user = qs.first()
                 if impersonated_user is not None:
                     return impersonated_user
                 request.session.pop(MOBILE_PLAYGROUND_IMPERSONATE_SESSION_KEY, None)
@@ -1260,6 +1316,12 @@ def _mobile_current_user(request) -> User | None:
             return None
     if resolved_user is None or not resolved_user.is_active:
         return None
+    if request_tenant is not None:
+        if resolved_user.tenant_id and resolved_user.tenant_id != request_tenant.id:
+            return None
+        if resolved_user.tenant_id is None:
+            resolved_user.tenant = request_tenant
+            resolved_user.save(update_fields=["tenant"])
     return resolved_user
 
 
@@ -2251,6 +2313,8 @@ def _enforce_merchant_risk_limits(
     *,
     actor: User,
 ):
+    # Serialize limit checks per merchant to avoid race-condition overshoots.
+    Merchant.objects.select_for_update().filter(id=merchant.id).exists()
     profile = _merchant_risk_profile(merchant)
     if amount > profile.single_txn_limit:
         raise ValidationError(
@@ -3376,6 +3440,9 @@ def operations_center(request):
     if not user_has_any_role(request.user, operation_roles):
         raise PermissionDenied("You do not have access to operations center.")
     _require_menu_access(request.user, "operations_center")
+    tenant = _require_request_tenant(request)
+    users_qs = _tenant_scoped_users(request)
+    merchants_qs = _tenant_scoped_merchants(request)
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -3388,12 +3455,13 @@ def operations_center(request):
                 name = (request.POST.get("merchant_name") or "").strip()
                 settlement_currency = _normalize_currency(request.POST.get("settlement_currency"))
                 owner_id = request.POST.get("owner_user_id")
-                owner = User.objects.filter(id=owner_id).first() if owner_id else None
+                owner = users_qs.filter(id=owner_id).first() if owner_id else None
                 if not name:
                     raise ValidationError("Merchant name is required.")
                 if not code:
                     code = _new_merchant_code()
                 merchant = Merchant.objects.create(
+                    tenant=tenant,
                     code=code,
                     name=name,
                     settlement_currency=settlement_currency,
@@ -3453,7 +3521,7 @@ def operations_center(request):
 
             if form_type == "merchant_update":
                 _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "sales", "finance"))
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 merchant.status = (request.POST.get("status") or merchant.status).strip()
                 merchant.wallet_type = (
                     request.POST.get("wallet_type") or merchant.wallet_type
@@ -3462,7 +3530,7 @@ def operations_center(request):
                 merchant.contact_email = (request.POST.get("contact_email") or merchant.contact_email).strip()
                 merchant.contact_phone = (request.POST.get("contact_phone") or merchant.contact_phone).strip()
                 owner_id = request.POST.get("owner_user_id")
-                merchant.owner = User.objects.filter(id=owner_id).first() if owner_id else None
+                merchant.owner = users_qs.filter(id=owner_id).first() if owner_id else None
                 merchant.updated_by = request.user
                 merchant.save(
                     update_fields=[
@@ -3514,7 +3582,7 @@ def operations_center(request):
                     request.user,
                     roles=("super_admin", "admin", "operation", "sales", "finance", "customer_service"),
                 )
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 legal_name = (request.POST.get("legal_name") or "").strip()
                 if not legal_name:
                     raise ValidationError("Legal name is required for KYB.")
@@ -3597,7 +3665,7 @@ def operations_center(request):
                     request.user,
                     roles=("super_admin", "admin", "operation", "finance"),
                 )
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 flow_type = (request.POST.get("flow_type") or FLOW_B2C).strip().lower()
                 rule, _created = MerchantFeeRule.objects.get_or_create(
                     merchant=merchant,
@@ -3627,7 +3695,7 @@ def operations_center(request):
                     request.user,
                     roles=("super_admin", "admin", "risk", "operation", "finance"),
                 )
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 profile, _created = MerchantRiskProfile.objects.get_or_create(
                     merchant=merchant,
                     defaults={"updated_by": request.user},
@@ -3664,7 +3732,7 @@ def operations_center(request):
                     request.user,
                     roles=("super_admin", "admin", "operation", "finance"),
                 )
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 webhook_url = (request.POST.get("webhook_url") or "").strip()
                 scopes_csv = (request.POST.get("scopes_csv") or "wallet:read,payout:read,webhook:write").strip()
                 credential, created = MerchantApiCredential.objects.get_or_create(
@@ -3679,10 +3747,13 @@ def operations_center(request):
                     },
                 )
                 raw_secret = secrets.token_urlsafe(32)
-                credential.secret_hash = _hash_api_secret(raw_secret)
+                signing_secret = _hash_api_secret(raw_secret)
+                credential.secret_hash = signing_secret
                 credential.key_id = f"mk_{secrets.token_hex(8)}"
                 credential.scopes_csv = scopes_csv
                 credential.webhook_url = webhook_url
+                credential.sandbox_enabled = request.POST.get("sandbox_enabled") == "on"
+                credential.live_enabled = request.POST.get("live_enabled") == "on"
                 credential.is_active = request.POST.get("is_active") == "on"
                 credential.last_rotated_at = timezone.now()
                 credential.updated_by = request.user
@@ -3698,7 +3769,10 @@ def operations_center(request):
                 )
                 messages.success(
                     request,
-                    f"Credential rotated for {merchant.code}. Key ID: {credential.key_id}, Secret: {raw_secret}",
+                    (
+                        f"Credential rotated for {merchant.code}. "
+                        f"Key ID: {credential.key_id}, Signing Secret: {signing_secret}"
+                    ),
                 )
                 return redirect("operations_center")
 
@@ -3707,7 +3781,7 @@ def operations_center(request):
                     request.user,
                     roles=("super_admin", "admin", "finance", "treasury", "operation"),
                 )
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 currency = _normalize_currency(request.POST.get("currency"))
                 period_start = _parse_iso_date(
                     request.POST.get("period_start"),
@@ -3719,37 +3793,55 @@ def operations_center(request):
                 )
                 if period_start > period_end:
                     raise ValidationError("Settlement start date cannot be after end date.")
-                events = list(
-                    MerchantCashflowEvent.objects.filter(
+                with transaction.atomic():
+                    # Lock merchant to serialize settlement runs per merchant.
+                    Merchant.objects.select_for_update().filter(id=merchant.id).exists()
+                    existing_settlement = MerchantSettlementRecord.objects.filter(
                         merchant=merchant,
                         currency=currency,
+                        period_start=period_start,
+                        period_end=period_end,
+                    ).first()
+                    if existing_settlement is not None:
+                        raise ValidationError(
+                            f"Settlement already exists for period: {existing_settlement.settlement_no}."
+                        )
+                    events = list(
+                        MerchantCashflowEvent.objects.select_for_update()
+                        .filter(
+                            merchant=merchant,
+                            currency=currency,
+                            settled_at__isnull=True,
+                            created_at__date__gte=period_start,
+                            created_at__date__lte=period_end,
+                        )
+                        .order_by("created_at", "id")
+                    )
+                    if not events:
+                        raise ValidationError("No unsettled cashflow events found for selected period.")
+                    gross_amount = sum((evt.amount for evt in events), Decimal("0.00"))
+                    fee_amount = sum((evt.fee_amount for evt in events), Decimal("0.00"))
+                    net_amount = sum((evt.net_amount for evt in events), Decimal("0.00"))
+                    settlement = MerchantSettlementRecord.objects.create(
+                        merchant=merchant,
+                        settlement_no=_new_settlement_no(),
+                        currency=currency,
+                        period_start=period_start,
+                        period_end=period_end,
+                        gross_amount=gross_amount,
+                        fee_amount=fee_amount,
+                        net_amount=net_amount,
+                        event_count=len(events),
+                        created_by=request.user,
+                    )
+                    now = timezone.now()
+                    MerchantCashflowEvent.objects.filter(
+                        id__in=[evt.id for evt in events],
                         settled_at__isnull=True,
-                        created_at__date__gte=period_start,
-                        created_at__date__lte=period_end,
-                    ).order_by("created_at", "id")
-                )
-                if not events:
-                    raise ValidationError("No unsettled cashflow events found for selected period.")
-                gross_amount = sum((evt.amount for evt in events), Decimal("0.00"))
-                fee_amount = sum((evt.fee_amount for evt in events), Decimal("0.00"))
-                net_amount = sum((evt.net_amount for evt in events), Decimal("0.00"))
-                settlement = MerchantSettlementRecord.objects.create(
-                    merchant=merchant,
-                    settlement_no=_new_settlement_no(),
-                    currency=currency,
-                    period_start=period_start,
-                    period_end=period_end,
-                    gross_amount=gross_amount,
-                    fee_amount=fee_amount,
-                    net_amount=net_amount,
-                    event_count=len(events),
-                    created_by=request.user,
-                )
-                now = timezone.now()
-                MerchantCashflowEvent.objects.filter(id__in=[evt.id for evt in events]).update(
-                    settlement_reference=settlement.settlement_no,
-                    settled_at=now,
-                )
+                    ).update(
+                        settlement_reference=settlement.settlement_no,
+                        settled_at=now,
+                    )
                 _audit(
                     request,
                     "merchant.settlement.create",
@@ -3806,7 +3898,7 @@ def operations_center(request):
                 )
                 settlement = MerchantSettlementRecord.objects.get(
                     id=request.POST.get("settlement_id")
-                )
+                , merchant__tenant=tenant)
                 status = (request.POST.get("status") or "").strip().lower()
                 if status not in {
                     MerchantSettlementRecord.STATUS_DRAFT,
@@ -3856,6 +3948,8 @@ def operations_center(request):
                 )
                 case = OperationCase.objects.select_related("merchant", "customer").get(
                     id=request.POST.get("case_id")
+                    ,
+                    merchant__tenant=tenant,
                 )
                 merchant = case.merchant
                 if merchant is None:
@@ -3901,7 +3995,7 @@ def operations_center(request):
                 )
                 refund = DisputeRefundRequest.objects.select_related(
                     "merchant", "customer", "case"
-                ).get(id=request.POST.get("refund_request_id"))
+                ).get(id=request.POST.get("refund_request_id"), merchant__tenant=tenant)
                 _enforce_approval_matrix_checker(
                     request.user,
                     APPROVAL_WORKFLOW_REFUND,
@@ -4057,6 +4151,8 @@ def operations_center(request):
                 )
                 settlement = MerchantSettlementRecord.objects.select_related("merchant").get(
                     id=request.POST.get("settlement_id")
+                    ,
+                    merchant__tenant=tenant,
                 )
                 if settlement.status not in {
                     MerchantSettlementRecord.STATUS_POSTED,
@@ -4109,6 +4205,8 @@ def operations_center(request):
                 )
                 payout = SettlementPayout.objects.select_related("settlement").get(
                     id=request.POST.get("payout_id")
+                    ,
+                    settlement__merchant__tenant=tenant,
                 )
                 _enforce_approval_matrix_checker(
                     request.user,
@@ -4543,7 +4641,7 @@ def operations_center(request):
                     request.user,
                     roles=("super_admin", "admin", "risk", "operation"),
                 )
-                target_user = User.objects.get(id=request.POST.get("user_id"))
+                target_user = users_qs.get(id=request.POST.get("user_id"))
                 score = Decimal(request.POST.get("score") or "0")
                 if score >= Decimal("0.90"):
                     status = SanctionScreeningRecord.STATUS_CONFIRMED_MATCH
@@ -4615,6 +4713,8 @@ def operations_center(request):
                     roles=("super_admin", "admin", "operation", "finance", "risk"),
                 )
                 credential = MerchantApiCredential.objects.get(id=request.POST.get("credential_id"))
+                if credential.merchant.tenant_id != tenant.id:
+                    raise PermissionDenied("Cross-tenant credential access is not allowed.")
                 nonce = (request.POST.get("nonce") or "").strip()
                 payload = (request.POST.get("payload") or "").strip()
                 signature = (request.POST.get("signature") or "").strip()
@@ -4744,7 +4844,7 @@ def operations_center(request):
             if form_type == "case_create":
                 _require_action_permission(request.user, "case.create")
                 _require_role_or_perm(request.user, roles=operation_roles)
-                customer = User.objects.get(id=request.POST.get("case_customer_id"))
+                customer = users_qs.get(id=request.POST.get("case_customer_id"))
                 merchant_id = request.POST.get("case_merchant_id")
                 merchant = Merchant.objects.filter(id=merchant_id).first() if merchant_id else None
                 title = (request.POST.get("case_title") or "").strip()
@@ -4789,7 +4889,7 @@ def operations_center(request):
 
             if form_type == "user_wallet_type_update":
                 _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "customer_service"))
-                target_user = User.objects.get(id=request.POST.get("user_id"))
+                target_user = users_qs.get(id=request.POST.get("user_id"))
                 wallet_type = (request.POST.get("wallet_type") or target_user.wallet_type).strip().upper()
                 if wallet_type not in {
                     WALLET_TYPE_PERSONAL,
@@ -4866,8 +4966,8 @@ def operations_center(request):
 
             if form_type == "loyalty_event_create":
                 _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "customer_service", "sales", "finance"))
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
-                customer = User.objects.get(id=request.POST.get("customer_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
+                customer = users_qs.get(id=request.POST.get("customer_id"))
                 program, _program_created = MerchantLoyaltyProgram.objects.get_or_create(
                     merchant=merchant
                 )
@@ -4954,7 +5054,7 @@ def operations_center(request):
 
             if form_type == "cashflow_event_create":
                 _require_role_or_perm(request.user, roles=("super_admin", "admin", "operation", "finance", "risk"))
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 capability, _created = MerchantWalletCapability.objects.get_or_create(merchant=merchant)
                 flow_type = (request.POST.get("flow_type") or FLOW_B2C).strip().lower()
                 if not capability.supports_flow(flow_type):
@@ -4972,11 +5072,11 @@ def operations_center(request):
                 if flow_type in (FLOW_B2C, FLOW_C2B, FLOW_P2G, FLOW_G2P):
                     if not user_id:
                         raise ValidationError("User is required for selected flow.")
-                    flow_user = User.objects.get(id=user_id)
+                    flow_user = users_qs.get(id=user_id)
                 if flow_type == FLOW_B2B:
                     if not counterparty_id:
                         raise ValidationError("Counterparty merchant is required for B2B.")
-                    counterparty_merchant = Merchant.objects.get(id=counterparty_id)
+                    counterparty_merchant = merchants_qs.get(id=counterparty_id)
 
                 _enforce_merchant_service_policy(
                     merchant,
@@ -5049,16 +5149,18 @@ def operations_center(request):
                     if tariff_rule is not None
                     else Decimal("0")
                 )
-                _enforce_merchant_risk_limits(merchant, amount, actor=request.user)
                 merchant_fee_amount = _merchant_fee_for_amount(merchant, flow_type, amount)
                 total_fee_amount = (merchant_fee_amount + tariff_fee).quantize(Decimal("0.01"))
                 net_amount = (amount - total_fee_amount).quantize(Decimal("0.01"))
+                if net_amount < Decimal("0"):
+                    raise ValidationError("Total fee cannot exceed transfer amount.")
                 from_user = None
                 to_user = None
 
                 merchant_wallet = _merchant_wallet_for_currency(merchant, currency)
                 wallet_service = get_wallet_service()
                 with transaction.atomic():
+                    _enforce_merchant_risk_limits(merchant, amount, actor=request.user)
                     payer_wallet = None
                     payee_wallet = None
                     if flow_type == FLOW_B2C:
@@ -5191,7 +5293,7 @@ def operations_center(request):
                             },
                         )
 
-                    created_event = MerchantCashflowEvent.objects.create(
+                    created_event = MerchantCashflowEvent(
                         merchant=merchant,
                         flow_type=flow_type,
                         amount=amount,
@@ -5205,6 +5307,8 @@ def operations_center(request):
                         note=note,
                         created_by=request.user,
                     )
+                    created_event.full_clean()
+                    created_event.save()
                     risk_profile = _merchant_risk_profile(merchant)
                     if risk_profile.is_high_risk or (
                         risk_profile.require_manual_review_above > Decimal("0")
@@ -5280,7 +5384,7 @@ def operations_center(request):
             messages.error(request, f"Operation failed: {exc}")
 
     try:
-        merchants = list(Merchant.objects.select_related("owner", "service_class").order_by("code")[:200])
+        merchants = list(merchants_qs.select_related("owner", "service_class").order_by("code")[:200])
         for merchant in merchants:
             try:
                 MerchantLoyaltyProgram.objects.get_or_create(merchant=merchant)
@@ -5301,6 +5405,10 @@ def operations_center(request):
 
         case_qs = OperationCase.objects.select_related(
             "customer", "merchant", "assigned_to"
+        ).filter(
+            Q(merchant__tenant=tenant)
+            | Q(customer__tenant=tenant)
+            | Q(created_by__tenant=tenant)
         ).order_by("-created_at")
         if case_status_filter:
             case_qs = case_qs.filter(status=case_status_filter)
@@ -5324,40 +5432,49 @@ def operations_center(request):
         case_notes = OperationCaseNote.objects.select_related("created_by", "case").filter(
             case_id__in=case_ids
         ).order_by("-created_at")[:300]
-        loyalty_events = MerchantLoyaltyEvent.objects.select_related("merchant", "customer").order_by("-created_at")[:100]
+        loyalty_events = MerchantLoyaltyEvent.objects.select_related("merchant", "customer").filter(
+            merchant__tenant=tenant
+        ).order_by("-created_at")[:100]
         cashflow_events = (
             MerchantCashflowEvent.objects.select_related(
                 "merchant", "from_user", "to_user", "counterparty_merchant"
             )
+            .filter(merchant__tenant=tenant)
             .order_by("-created_at")[:100]
         )
         kyb_requests = MerchantKYBRequest.objects.select_related(
             "merchant", "maker", "checker"
-        ).order_by("-created_at")[:100]
-        fee_rules = MerchantFeeRule.objects.select_related("merchant").order_by("merchant__code", "flow_type")
-        risk_profiles = MerchantRiskProfile.objects.select_related("merchant").order_by("merchant__code")
-        api_credentials = MerchantApiCredential.objects.select_related("merchant").order_by("merchant__code")
+        ).filter(merchant__tenant=tenant).order_by("-created_at")[:100]
+        fee_rules = MerchantFeeRule.objects.select_related("merchant").filter(
+            merchant__tenant=tenant
+        ).order_by("merchant__code", "flow_type")
+        risk_profiles = MerchantRiskProfile.objects.select_related("merchant").filter(
+            merchant__tenant=tenant
+        ).order_by("merchant__code")
+        api_credentials = MerchantApiCredential.objects.select_related("merchant").filter(
+            merchant__tenant=tenant
+        ).order_by("merchant__code")
         settlements = MerchantSettlementRecord.objects.select_related(
             "merchant", "created_by", "approved_by"
-        ).order_by("-created_at")[:100]
+        ).filter(merchant__tenant=tenant).order_by("-created_at")[:100]
         refund_requests = DisputeRefundRequest.objects.select_related(
             "case", "merchant", "customer", "maker", "checker"
-        ).order_by("-created_at")[:100]
+        ).filter(merchant__tenant=tenant).order_by("-created_at")[:100]
         payouts = SettlementPayout.objects.select_related(
             "settlement", "settlement__merchant", "initiated_by", "approved_by"
-        ).order_by("-created_at")[:100]
+        ).filter(settlement__merchant__tenant=tenant).order_by("-created_at")[:100]
         reconciliation_runs = ReconciliationRun.objects.select_related(
             "created_by"
         ).order_by("-created_at")[:100]
         reconciliation_breaks = ReconciliationBreak.objects.select_related(
             "run", "merchant", "assigned_to", "resolved_by"
-        ).order_by("-created_at")[:100]
+        ).filter(merchant__tenant=tenant).order_by("-created_at")[:100]
         chargebacks = ChargebackCase.objects.select_related(
             "case", "merchant", "customer", "assigned_to"
-        ).order_by("-created_at")[:100]
+        ).filter(merchant__tenant=tenant).order_by("-created_at")[:100]
         chargeback_evidences = ChargebackEvidence.objects.select_related(
             "chargeback", "uploaded_by"
-        ).order_by("-created_at")[:100]
+        ).filter(chargeback__merchant__tenant=tenant).order_by("-created_at")[:100]
         accounting_periods = AccountingPeriodClose.objects.select_related(
             "created_by", "closed_by"
         ).order_by("-period_start")[:60]
@@ -5369,10 +5486,10 @@ def operations_center(request):
         ).order_by("-created_at")[:100]
         monitoring_alerts = TransactionMonitoringAlert.objects.select_related(
             "user", "merchant", "case", "assigned_to"
-        ).order_by("-created_at")[:100]
+        ).filter(Q(merchant__tenant=tenant) | Q(user__tenant=tenant)).order_by("-created_at")[:100]
         webhook_events = MerchantWebhookEvent.objects.select_related(
             "credential", "credential__merchant"
-        ).order_by("-created_at")[:100]
+        ).filter(credential__merchant__tenant=tenant).order_by("-created_at")[:100]
         access_reviews = AccessReviewRecord.objects.select_related(
             "user", "reviewer"
         ).order_by("-created_at")[:100]
@@ -5381,30 +5498,39 @@ def operations_center(request):
             OperationCase.STATUS_IN_PROGRESS,
             OperationCase.STATUS_ESCALATED,
         ]
-        open_cases_count = OperationCase.objects.filter(status__in=open_case_statuses).count()
+        open_cases_count = OperationCase.objects.filter(
+            Q(merchant__tenant=tenant) | Q(customer__tenant=tenant) | Q(created_by__tenant=tenant),
+            status__in=open_case_statuses,
+        ).count()
         breached_cases_count = OperationCase.objects.filter(
+            Q(merchant__tenant=tenant) | Q(customer__tenant=tenant) | Q(created_by__tenant=tenant),
             status__in=open_case_statuses,
             sla_due_at__isnull=False,
             sla_due_at__lt=now_ts,
         ).count()
         refunds_overdue_count = DisputeRefundRequest.objects.filter(
+            merchant__tenant=tenant,
             status=DisputeRefundRequest.STATUS_PENDING,
             sla_due_at__isnull=False,
             sla_due_at__lt=now_ts,
         ).count()
         pending_payout_24h = SettlementPayout.objects.filter(
+            settlement__merchant__tenant=tenant,
             status__in=[SettlementPayout.STATUS_PENDING, SettlementPayout.STATUS_SENT],
             created_at__lt=now_ts - timedelta(hours=24),
         ).count()
         pending_payout_72h = SettlementPayout.objects.filter(
+            settlement__merchant__tenant=tenant,
             status__in=[SettlementPayout.STATUS_PENDING, SettlementPayout.STATUS_SENT],
             created_at__lt=now_ts - timedelta(hours=72),
         ).count()
         open_recon_2d = ReconciliationBreak.objects.filter(
+            merchant__tenant=tenant,
             status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW],
             created_at__lt=now_ts - timedelta(days=2),
         ).count()
         open_recon_7d = ReconciliationBreak.objects.filter(
+            merchant__tenant=tenant,
             status__in=[ReconciliationBreak.STATUS_OPEN, ReconciliationBreak.STATUS_IN_REVIEW],
             created_at__lt=now_ts - timedelta(days=7),
         ).count()
@@ -5435,7 +5561,7 @@ def operations_center(request):
                 "webhook_events": webhook_events,
                 "access_reviews": access_reviews,
                 "journal_entries": JournalEntry.objects.order_by("-created_at")[:200],
-                "users": User.objects.order_by("username")[:300],
+                "users": users_qs.order_by("username")[:300],
                 "operation_settings": _operation_settings(),
                 "supported_currencies": _supported_currencies(),
                 "operations_kpis": {
@@ -5957,13 +6083,19 @@ def reconciliation_workbench(request):
 
 @login_required
 def merchant_portal(request):
+    _require_request_tenant(request)
     can_manage_all = user_has_any_role(
         request.user, ("super_admin", "admin", "operation", "sales", "finance")
     )
     if can_manage_all:
-        merchants_qs = Merchant.objects.select_related("owner").order_by("code")
+        merchants_qs = _tenant_scoped_merchants(request).select_related("owner").order_by("code")
     else:
-        merchants_qs = Merchant.objects.select_related("owner").filter(owner=request.user).order_by("code")
+        merchants_qs = (
+            _tenant_scoped_merchants(request)
+            .select_related("owner")
+            .filter(owner=request.user)
+            .order_by("code")
+        )
         if not merchants_qs.exists():
             messages.info(
                 request,
@@ -5986,7 +6118,7 @@ def merchant_portal(request):
         form_type = (request.POST.get("form_type") or "").strip().lower()
         _require_form_action_permission(request.user, form_type)
         try:
-            merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+            merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
             if not can_manage_all and merchant.owner_id != request.user.id:
                 raise PermissionDenied("You cannot manage this merchant.")
 
@@ -5999,7 +6131,19 @@ def merchant_portal(request):
                 credential.scopes_csv = (
                     request.POST.get("scopes_csv") or credential.scopes_csv
                 ).strip()
-                credential.save(update_fields=["webhook_url", "scopes_csv", "updated_at"])
+                credential.sandbox_enabled = request.POST.get("sandbox_enabled") == "on"
+                credential.live_enabled = request.POST.get("live_enabled") == "on"
+                credential.updated_by = request.user
+                credential.save(
+                    update_fields=[
+                        "webhook_url",
+                        "scopes_csv",
+                        "sandbox_enabled",
+                        "live_enabled",
+                        "updated_by",
+                        "updated_at",
+                    ]
+                )
                 messages.success(request, f"Webhook/scopes updated for {merchant.code}.")
                 return redirect("merchant_portal")
         except Exception as exc:
@@ -6075,6 +6219,10 @@ def wallet_management(request):
             {"can_manage_wallet_management": False},
         )
     _require_menu_access(request.user, "wallet_management")
+    tenant = _require_request_tenant(request)
+    users_qs = _tenant_scoped_users(request)
+    merchants_qs = _tenant_scoped_merchants(request)
+    cifs_scoped_qs = CustomerCIF.objects.select_related("user", "service_class").filter(tenant=tenant)
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -6083,7 +6231,7 @@ def wallet_management(request):
             wallet_service = get_wallet_service()
             if form_type == "wallet_open_user":
                 _require_action_permission(request.user, "wallet.open_user")
-                customer_cif = CustomerCIF.objects.select_related("user").get(
+                customer_cif = cifs_scoped_qs.select_related("user").get(
                     id=request.POST.get("cif_id")
                 )
                 if customer_cif.status != CustomerCIF.STATUS_ACTIVE:
@@ -6120,7 +6268,7 @@ def wallet_management(request):
 
             if form_type == "wallet_open_merchant":
                 _require_action_permission(request.user, "wallet.open_merchant")
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 currency = _normalize_currency(request.POST.get("currency"))
                 wallet = _merchant_wallet_for_currency(merchant, currency)
                 _audit(
@@ -6145,16 +6293,16 @@ def wallet_management(request):
                 action = (request.POST.get("action") or "").strip().lower()
                 if holder_scope == "merchant":
                     merchant_id = request.POST.get("merchant_id") or request.POST.get("holder_id")
-                    holder = Merchant.objects.get(id=merchant_id)
+                    holder = merchants_qs.get(id=merchant_id)
                     holder_label = holder.code
                 else:
                     cif_id = request.POST.get("cif_id")
                     if cif_id:
-                        customer_cif = CustomerCIF.objects.select_related("user").get(id=cif_id)
+                        customer_cif = cifs_scoped_qs.select_related("user").get(id=cif_id)
                         holder = customer_cif.user
                         holder_label = f"{customer_cif.cif_no} ({holder.username})"
                     else:
-                        holder = User.objects.get(id=request.POST.get("holder_id"))
+                        holder = users_qs.get(id=request.POST.get("holder_id"))
                         holder_label = holder.username
                 if action == "freeze":
                     holder.freeze_wallet(slug)
@@ -6174,7 +6322,7 @@ def wallet_management(request):
 
             if form_type == "wallet_adjust_user":
                 _require_action_permission(request.user, "wallet.adjust_user")
-                customer_cif = CustomerCIF.objects.select_related("user").get(
+                customer_cif = cifs_scoped_qs.select_related("user").get(
                     id=request.POST.get("cif_id")
                 )
                 if customer_cif.status != CustomerCIF.STATUS_ACTIVE:
@@ -6257,7 +6405,7 @@ def wallet_management(request):
 
             if form_type == "cif_onboard":
                 _require_action_permission(request.user, "wallet.cif_onboard")
-                target_user = User.objects.get(id=request.POST.get("user_id"))
+                target_user = users_qs.get(id=request.POST.get("user_id"))
                 cif_no = (request.POST.get("cif_no") or "").strip().upper()
                 legal_name = (request.POST.get("legal_name") or "").strip()
                 mobile_no = (request.POST.get("mobile_no") or "").strip()
@@ -6279,12 +6427,13 @@ def wallet_management(request):
                     CustomerCIF.STATUS_CLOSED,
                 }:
                     raise ValidationError("Invalid CIF status.")
-                if CustomerCIF.objects.filter(cif_no=cif_no).exclude(user=target_user).exists():
+                if cifs_scoped_qs.filter(cif_no=cif_no).exclude(user=target_user).exists():
                     raise ValidationError("CIF number already exists for another user.")
 
-                customer_cif, created = CustomerCIF.objects.get_or_create(
+                customer_cif, created = cifs_scoped_qs.get_or_create(
                     user=target_user,
                     defaults={
+                        "tenant": tenant,
                         "cif_no": cif_no or _new_cif_no(),
                         "legal_name": legal_name,
                         "mobile_no": mobile_no,
@@ -6354,7 +6503,7 @@ def wallet_management(request):
 
             if form_type == "wallet_adjust_merchant":
                 _require_action_permission(request.user, "wallet.adjust_merchant")
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = merchants_qs.get(id=request.POST.get("merchant_id"))
                 currency = _normalize_currency(request.POST.get("currency"))
                 amount = _parse_amount(request.POST.get("amount"))
                 adjustment_type = (request.POST.get("adjustment_type") or "").strip().lower()
@@ -6407,7 +6556,7 @@ def wallet_management(request):
 
     cif_query = (request.GET.get("q") or "").strip()
     cif_status = (request.GET.get("cif_status") or "").strip().lower()
-    cifs_qs = CustomerCIF.objects.select_related("user", "service_class").order_by("cif_no")
+    cifs_qs = cifs_scoped_qs.order_by("cif_no")
     if cif_query:
         cifs_qs = cifs_qs.filter(
             Q(cif_no__icontains=cif_query)
@@ -6870,6 +7019,9 @@ def policy_hub(request):
     if not user_has_any_role(request.user, policy_admin_roles):
         raise PermissionDenied("You do not have access to policy hub.")
     _require_menu_access(request.user, "policy_hub")
+    tenant = _require_request_tenant(request)
+    tenant_cifs_qs = CustomerCIF.objects.filter(tenant=tenant)
+    tenant_merchants_qs = Merchant.objects.filter(tenant=tenant)
 
     if request.method == "POST":
         form_type = (request.POST.get("form_type") or "").strip().lower()
@@ -6932,7 +7084,7 @@ def policy_hub(request):
                 return redirect("policy_hub")
 
             if form_type == "policy_assign_customer":
-                cif = CustomerCIF.objects.get(id=request.POST.get("cif_id"))
+                cif = tenant_cifs_qs.get(id=request.POST.get("cif_id"))
                 policy_id = (request.POST.get("policy_id") or "").strip()
                 policy = None
                 if policy_id:
@@ -6949,7 +7101,7 @@ def policy_hub(request):
                 return redirect("policy_hub")
 
             if form_type == "policy_upgrade_customer_request":
-                cif = CustomerCIF.objects.get(id=request.POST.get("cif_id"))
+                cif = tenant_cifs_qs.get(id=request.POST.get("cif_id"))
                 policy_id = (request.POST.get("target_policy_id") or "").strip()
                 if not policy_id:
                     raise ValidationError("Target policy is required.")
@@ -6996,7 +7148,7 @@ def policy_hub(request):
                     "cif",
                     "to_service_class",
                     "maker",
-                ).get(id=request.POST.get("request_id"))
+                ).filter(cif__tenant=tenant).get(id=request.POST.get("request_id"))
                 if req.status != CustomerClassUpgradeRequest.STATUS_PENDING:
                     raise ValidationError("Only pending requests can be decided.")
                 _ensure_maker_checker_separation(
@@ -7047,7 +7199,7 @@ def policy_hub(request):
                 return redirect("policy_hub")
 
             if form_type == "policy_assign_merchant":
-                merchant = Merchant.objects.get(id=request.POST.get("merchant_id"))
+                merchant = tenant_merchants_qs.get(id=request.POST.get("merchant_id"))
                 policy_id = (request.POST.get("policy_id") or "").strip()
                 policy = None
                 if policy_id:
@@ -7143,15 +7295,15 @@ def policy_hub(request):
             "tariff_entity_choices": TariffRule.ENTITY_CHOICES,
             "tariff_charge_side_choices": TariffRule.CHARGE_SIDE_CHOICES,
             "tariff_fee_mode_choices": TariffRule.FEE_MODE_CHOICES,
-            "customer_cifs": CustomerCIF.objects.select_related("user", "service_class").order_by("cif_no")[:300],
-            "merchants": Merchant.objects.select_related("service_class").order_by("code")[:300],
+            "customer_cifs": tenant_cifs_qs.select_related("user", "service_class").order_by("cif_no")[:300],
+            "merchants": tenant_merchants_qs.select_related("service_class").order_by("code")[:300],
             "customer_upgrade_requests": CustomerClassUpgradeRequest.objects.select_related(
                 "cif",
                 "from_service_class",
                 "to_service_class",
                 "maker",
                 "checker",
-            ).order_by("-created_at")[:200],
+            ).filter(cif__tenant=tenant).order_by("-created_at")[:200],
             "can_decide_customer_upgrade": user_has_any_role(request.user, ACCOUNTING_CHECKER_ROLES),
         },
     )
@@ -8096,6 +8248,7 @@ def register(request):
                     username=username,
                     email=email,
                     password=password,
+                    tenant=_request_tenant(request),
                 )
                 login(request, user)
                 base_currency = _normalize_currency(getattr(settings, "PLATFORM_BASE_CURRENCY", "USD"))

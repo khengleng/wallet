@@ -34,6 +34,7 @@ from .models import (
     ReconciliationRun,
     SanctionScreeningRecord,
     SettlementPayout,
+    Tenant,
     TransactionMonitoringAlert,
     OperationCase,
     OperationCaseNote,
@@ -47,8 +48,15 @@ from .models import (
 
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
-    list_display = ("username", "email", "wallet_type", "is_staff", "is_superuser", "is_active")
-    list_filter = ("wallet_type", "is_staff", "is_superuser", "is_active", "groups")
+    list_display = ("username", "email", "tenant", "wallet_type", "is_staff", "is_superuser", "is_active")
+    list_filter = ("tenant", "wallet_type", "is_staff", "is_superuser", "is_active", "groups")
+
+
+@admin.register(Tenant)
+class TenantAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("code", "name")
 
 
 @admin.register(ApprovalRequest)
@@ -296,8 +304,18 @@ class MerchantRiskProfileAdmin(admin.ModelAdmin):
 
 @admin.register(MerchantApiCredential)
 class MerchantApiCredentialAdmin(admin.ModelAdmin):
-    list_display = ("merchant", "key_id", "scopes_csv", "is_active", "webhook_url", "last_rotated_at", "updated_at")
-    list_filter = ("is_active",)
+    list_display = (
+        "merchant",
+        "key_id",
+        "scopes_csv",
+        "sandbox_enabled",
+        "live_enabled",
+        "is_active",
+        "webhook_url",
+        "last_rotated_at",
+        "updated_at",
+    )
+    list_filter = ("sandbox_enabled", "live_enabled", "is_active")
     search_fields = ("merchant__code", "key_id", "webhook_url")
     readonly_fields = ("secret_hash",)
 

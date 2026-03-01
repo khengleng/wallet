@@ -103,6 +103,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "wallets_demo.middleware.TenantContextMiddleware",
     "wallets_demo.middleware.KeycloakSessionGuardMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -269,6 +270,10 @@ OPENAI_API_KEY = _env("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = _env("OPENAI_MODEL", "gpt-5-mini").strip()
 OPENAI_BASE_URL = _env("OPENAI_BASE_URL", "https://api.openai.com/v1").strip().rstrip("/")
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "10.0"))
+MULTITENANCY_ENABLED = os.getenv("MULTITENANCY_ENABLED", "true").lower() == "true"
+MULTITENANCY_DEFAULT_TENANT_CODE = os.getenv("MULTITENANCY_DEFAULT_TENANT_CODE", "default").strip().lower()
+MULTITENANCY_HEADER_NAME = os.getenv("MULTITENANCY_HEADER_NAME", "X-Tenant-Code").strip()
+MULTITENANCY_USE_SUBDOMAIN = os.getenv("MULTITENANCY_USE_SUBDOMAIN", "false").lower() == "true"
 RELEASE_VERSION = _env(
     "RELEASE_VERSION",
     os.getenv("RAILWAY_GIT_COMMIT_SHA", ""),
