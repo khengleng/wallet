@@ -46,6 +46,25 @@
     </form>
 </div>
 
+{% if is_platform_admin %}
+<div class="card">
+    <h3>{% trans "Tenant Lifecycle" %}</h3>
+    <form method="post" style="display:inline-block; margin-right: 0.8rem;">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="tenant_deactivate" />
+        <input type="hidden" name="tenant_code" value="{{ tenant.code }}" />
+        <input type="text" name="reason" placeholder="Reason for deactivation" />
+        <button type="submit" class="btn btn-outline">{% trans "Deactivate Tenant" %}</button>
+    </form>
+    <form method="post" style="display:inline-block;">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="tenant_reactivate" />
+        <input type="hidden" name="tenant_code" value="{{ tenant.code }}" />
+        <button type="submit" class="btn btn-primary">{% trans "Reactivate Tenant" %}</button>
+    </form>
+</div>
+{% endif %}
+
 <div class="card">
     <h3>{% trans "Subscription" %}</h3>
     <form method="post">
@@ -79,6 +98,16 @@
         <div class="form-group">
             <label for="included_txn_quota">{% trans "Included Transaction Quota" %}</label>
             <input id="included_txn_quota" name="included_txn_quota" type="number" min="0" value="{{ subscription.included_txn_quota }}" />
+        </div>
+        <div class="form-group">
+            <label for="hard_limit_monthly_txn">{% trans "Hard Monthly Txn Limit (0 = disabled)" %}</label>
+            <input id="hard_limit_monthly_txn" name="hard_limit_monthly_txn" type="number" min="0" value="{{ subscription.hard_limit_monthly_txn }}" />
+        </div>
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="hard_limit_enforced" {% if subscription.hard_limit_enforced %}checked{% endif %} style="width:auto; margin-right: 0.4rem;" />
+                {% trans "Enforce Hard Transaction Limit" %}
+            </label>
         </div>
         <div class="form-group">
             <label for="status">{% trans "Status" %}</label>
@@ -154,6 +183,44 @@
     </form>
 </div>
 
+{% if is_platform_admin %}
+<div class="card">
+    <h3>{% trans "Invoicing" %}</h3>
+    <form method="post" class="flex gap-2 align-center">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="invoice_generate" />
+        <input type="hidden" name="tenant_code" value="{{ tenant.code }}" />
+        <label for="invoice_year">{% trans "Year" %}</label>
+        <input id="invoice_year" name="invoice_year" type="number" min="2020" value="{{ invoice_year }}" style="max-width: 120px;" />
+        <label for="invoice_month">{% trans "Month" %}</label>
+        <input id="invoice_month" name="invoice_month" type="number" min="1" max="12" value="{{ invoice_month }}" style="max-width: 90px;" />
+        <button type="submit" class="btn btn-primary">{% trans "Generate Invoice" %}</button>
+    </form>
+    <table>
+        <thead>
+            <tr>
+                <th>{% trans "Invoice No" %}</th>
+                <th>{% trans "Period" %}</th>
+                <th>{% trans "Status" %}</th>
+                <th>{% trans "Total" %}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for invoice in invoices %}
+            <tr>
+                <td>{{ invoice.invoice_no }}</td>
+                <td>{{ invoice.period_start }} - {{ invoice.period_end }}</td>
+                <td>{{ invoice.status }}</td>
+                <td>{{ invoice.total_amount }} {{ invoice.currency }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="text-muted">{% trans "No invoices yet." %}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
 <div class="card">
     <h3>{% trans "Operators" %}</h3>
     <table>
@@ -175,6 +242,46 @@
             <tr>
                 <td colspan="3" class="text-muted">{% trans "No operator users." %}</td>
             </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>{% trans "Billing Events" %}</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>{% trans "Created" %}</th>
+                <th>{% trans "Type" %}</th>
+                <th>{% trans "Status" %}</th>
+                <th>{% trans "Attempts" %}</th>
+                <th>{% trans "Error" %}</th>
+                <th>{% trans "Action" %}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for event in billing_events %}
+            <tr>
+                <td>{{ event.created_at|date:"Y-m-d H:i" }}</td>
+                <td>{{ event.event_type }}</td>
+                <td>{{ event.status }}</td>
+                <td>{{ event.attempt_count }}</td>
+                <td>{{ event.last_error }}</td>
+                <td>
+                    {% if is_platform_admin and event.status == "failed" %}
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="form_type" value="billing_event_retry" />
+                        <input type="hidden" name="tenant_code" value="{{ tenant.code }}" />
+                        <input type="hidden" name="event_id" value="{{ event.id }}" />
+                        <button type="submit" class="btn btn-outline">{% trans "Retry" %}</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="text-muted">{% trans "No billing events." %}</td></tr>
             {% endfor %}
         </tbody>
     </table>

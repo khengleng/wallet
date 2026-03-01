@@ -3,7 +3,9 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
+import json
 import secrets
+from datetime import date
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -18,13 +20,20 @@ from django.views.decorators.http import require_http_methods
 from .models import (
     BackofficeAuditLog,
     Tenant,
+    TenantBillingEvent,
+    TenantBillingInboundEvent,
     TenantBillingWebhook,
+    TenantInvoice,
     TenantSubscription,
     TenantUsageDaily,
     User,
 )
 from .rbac import ROLE_DEFINITIONS, assign_roles, user_has_any_role
-from .saas import ensure_tenant_subscription, queue_tenant_billing_event
+from .saas import (
+    ensure_tenant_subscription,
+    generate_tenant_invoice_for_period,
+    queue_tenant_billing_event,
+)
 
 SAAS_OPERATOR_ROLES = ("admin", "operation", "finance", "treasury", "risk", "customer_service", "sales")
 
@@ -149,6 +158,30 @@ def saas_billing_webhook_sink(request, tenant_code: str):
             {"ok": False, "error": {"code": "forbidden", "message": "Invalid signature."}},
             status=403,
         )
+    try:
+        payload = json.loads(raw.decode("utf-8")) if raw else {}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return JsonResponse(
+            {"ok": False, "error": {"code": "validation_error", "message": "Invalid JSON payload."}},
+            status=400,
+        )
+    event_id = str((payload or {}).get("event_id") or "").strip()[:128]
+    if not event_id:
+        event_id = hashlib.sha256(raw).hexdigest()[:64]
+    inbound, created = TenantBillingInboundEvent.objects.get_or_create(
+        tenant=webhook.tenant,
+        external_event_id=event_id,
+        defaults={
+            "event_type": (request.headers.get("X-Wallet-Event") or "").strip().lower()[:64],
+            "signature": signature[:128],
+            "payload_json": payload if isinstance(payload, dict) else {},
+        },
+    )
+    if not created:
+        return JsonResponse(
+            {"ok": True, "data": {"tenant_code": webhook.tenant.code, "idempotent_replay": True}},
+            status=200,
+        )
     actor = (
         User.objects.filter(tenant=webhook.tenant, is_active=True).order_by("id").first()
         or User.objects.filter(is_superuser=True, is_active=True).order_by("id").first()
@@ -163,7 +196,8 @@ def saas_billing_webhook_sink(request, tenant_code: str):
             metadata_json={
                 "tenant_code": webhook.tenant.code,
                 "payload_size": len(raw),
-                "event_type": (request.headers.get("X-Wallet-Event") or "").strip().lower(),
+                "event_type": inbound.event_type,
+                "external_event_id": inbound.external_event_id,
             },
         )
     return JsonResponse({"ok": True, "data": {"tenant_code": webhook.tenant.code}}, status=202)
@@ -195,6 +229,29 @@ def saas_tenant_admin(request):
                     tenant.is_active = (request.POST.get("is_active") or "").strip().lower() in {"1", "true", "on", "yes"}
                 tenant.save(update_fields=["name", "is_active", "updated_at"])
                 messages.success(request, "Tenant profile updated.")
+            elif form_type == "tenant_deactivate":
+                if not _is_platform_admin(request.user):
+                    raise PermissionDenied("Only platform admins can deactivate tenants.")
+                reason = (request.POST.get("reason") or "").strip()[:255]
+                tenant.is_active = False
+                tenant.save(update_fields=["is_active", "updated_at"])
+                queue_tenant_billing_event(
+                    tenant=tenant,
+                    event_type="tenant.deactivated",
+                    payload={"reason": reason, "actor": request.user.username},
+                )
+                messages.success(request, "Tenant deactivated.")
+            elif form_type == "tenant_reactivate":
+                if not _is_platform_admin(request.user):
+                    raise PermissionDenied("Only platform admins can reactivate tenants.")
+                tenant.is_active = True
+                tenant.save(update_fields=["is_active", "updated_at"])
+                queue_tenant_billing_event(
+                    tenant=tenant,
+                    event_type="tenant.reactivated",
+                    payload={"actor": request.user.username},
+                )
+                messages.success(request, "Tenant reactivated.")
             elif form_type == "subscription_update":
                 cycle = (request.POST.get("billing_cycle") or subscription.billing_cycle).strip().lower()
                 status = (request.POST.get("status") or subscription.status).strip().lower()
@@ -216,6 +273,13 @@ def saas_tenant_admin(request):
                 subscription.monthly_base_fee = Decimal(str(request.POST.get("monthly_base_fee") or subscription.monthly_base_fee))
                 subscription.per_txn_fee = Decimal(str(request.POST.get("per_txn_fee") or subscription.per_txn_fee))
                 subscription.included_txn_quota = int(request.POST.get("included_txn_quota") or subscription.included_txn_quota)
+                subscription.hard_limit_monthly_txn = int(request.POST.get("hard_limit_monthly_txn") or subscription.hard_limit_monthly_txn)
+                subscription.hard_limit_enforced = (request.POST.get("hard_limit_enforced") or "").strip().lower() in {
+                    "1",
+                    "true",
+                    "on",
+                    "yes",
+                }
                 subscription.save()
                 messages.success(request, "Subscription updated.")
             elif form_type == "billing_webhook_upsert":
@@ -260,6 +324,35 @@ def saas_tenant_admin(request):
                 )
                 assign_roles(operator, [role_name])
                 messages.success(request, f"Operator '{username}' created.")
+            elif form_type == "billing_event_retry":
+                if not _is_platform_admin(request.user):
+                    raise PermissionDenied("Only platform admins can retry failed billing events.")
+                event = TenantBillingEvent.objects.filter(tenant=tenant, id=request.POST.get("event_id")).first()
+                if event is None:
+                    raise ValidationError("Billing event not found.")
+                event.status = TenantBillingEvent.STATUS_PENDING
+                event.next_retry_at = None
+                event.last_error = ""
+                event.save(update_fields=["status", "next_retry_at", "last_error", "updated_at"])
+                messages.success(request, "Billing event queued for retry.")
+            elif form_type == "invoice_generate":
+                if not _is_platform_admin(request.user):
+                    raise PermissionDenied("Only platform admins can generate invoices.")
+                year = int(request.POST.get("invoice_year") or date.today().year)
+                month = int(request.POST.get("invoice_month") or date.today().month)
+                period_start = date(year, month, 1)
+                period_end = (
+                    date(year + 1, 1, 1) - date.resolution
+                    if month == 12
+                    else date(year, month + 1, 1) - date.resolution
+                )
+                invoice = generate_tenant_invoice_for_period(
+                    tenant=tenant,
+                    period_start=period_start,
+                    period_end=period_end,
+                    issue=True,
+                )
+                messages.success(request, f"Invoice generated: {invoice.invoice_no}")
             else:
                 raise ValidationError("Unknown form action.")
             return redirect(f"{reverse('saas_tenant_admin')}?tenant={tenant.code}")
@@ -269,6 +362,8 @@ def saas_tenant_admin(request):
             messages.error(request, f"Unable to update SaaS settings: {exc}")
 
     usage_rows = TenantUsageDaily.objects.filter(tenant=tenant).order_by("-usage_date", "metric_code")[:200]
+    invoices = TenantInvoice.objects.filter(tenant=tenant).order_by("-created_at")[:50]
+    billing_events = TenantBillingEvent.objects.filter(tenant=tenant).order_by("-created_at")[:80]
     operators = (
         User.objects.filter(tenant=tenant)
         .prefetch_related("groups")
@@ -282,11 +377,15 @@ def saas_tenant_admin(request):
             "subscription": subscription,
             "webhook": webhook,
             "usage_rows": usage_rows,
+            "invoices": invoices,
+            "billing_events": billing_events,
             "operators": operators,
             "operator_roles": [role for role in SAAS_OPERATOR_ROLES if role in ROLE_DEFINITIONS],
             "all_tenants": Tenant.objects.order_by("code") if _is_platform_admin(request.user) else [],
             "is_platform_admin": _is_platform_admin(request.user),
             "billing_cycles": TenantSubscription.CYCLE_CHOICES,
             "subscription_statuses": TenantSubscription.STATUS_CHOICES,
+            "invoice_year": date.today().year,
+            "invoice_month": date.today().month,
         },
     )

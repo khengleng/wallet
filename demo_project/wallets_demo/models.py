@@ -145,6 +145,9 @@ class TenantSubscription(models.Model):
     monthly_base_fee = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     per_txn_fee = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("0.0000"))
     included_txn_quota = models.PositiveIntegerField(default=0)
+    hard_limit_monthly_txn = models.PositiveIntegerField(default=0)
+    hard_limit_enforced = models.BooleanField(default=False, db_index=True)
+    plan_features_json = models.JSONField(default=dict, blank=True)
     trial_ends_at = models.DateTimeField(null=True, blank=True)
     current_period_start = models.DateField(null=True, blank=True)
     current_period_end = models.DateField(null=True, blank=True)
@@ -250,6 +253,72 @@ class TenantBillingEvent(models.Model):
 
     def __str__(self):
         return f"{self.tenant.code}:{self.event_type}:{self.status}"
+
+
+class TenantBillingInboundEvent(models.Model):
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="billing_inbound_events",
+    )
+    external_event_id = models.CharField(max_length=128)
+    event_type = models.CharField(max_length=64, blank=True, default="")
+    signature = models.CharField(max_length=128, blank=True, default="")
+    payload_json = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        unique_together = (("tenant", "external_event_id"),)
+        indexes = [
+            models.Index(fields=("tenant", "-created_at"), name="idx_tinbound_tenant_created"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant.code}:{self.external_event_id}"
+
+
+class TenantInvoice(models.Model):
+    STATUS_DRAFT = "draft"
+    STATUS_ISSUED = "issued"
+    STATUS_PAID = "paid"
+    STATUS_VOID = "void"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_ISSUED, "Issued"),
+        (STATUS_PAID, "Paid"),
+        (STATUS_VOID, "Void"),
+    )
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="invoices",
+    )
+    invoice_no = models.CharField(max_length=48, unique=True)
+    period_start = models.DateField(db_index=True)
+    period_end = models.DateField(db_index=True)
+    currency = models.CharField(max_length=12, default="USD")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_index=True)
+    subtotal_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0.00"))
+    tax_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0.00"))
+    total_amount = models.DecimalField(max_digits=20, decimal_places=2, default=Decimal("0.00"))
+    line_items_json = models.JSONField(default=list, blank=True)
+    notes = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    issued_at = models.DateTimeField(null=True, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        unique_together = (("tenant", "period_start", "period_end"),)
+        indexes = [
+            models.Index(fields=("tenant", "status", "-created_at"), name="idx_tinv_tenant_stat_created"),
+        ]
+
+    def __str__(self):
+        return f"{self.invoice_no}:{self.tenant.code}:{self.status}"
 
 
 class User(WalletMixin, AbstractUser):

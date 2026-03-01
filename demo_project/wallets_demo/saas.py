@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import hashlib
 import hmac
@@ -9,13 +9,15 @@ import json
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from .models import (
     Tenant,
     TenantBillingEvent,
+    TenantInvoice,
     TenantSubscription,
     TenantUsageDaily,
 )
@@ -36,6 +38,34 @@ def queue_tenant_billing_event(*, tenant: Tenant, event_type: str, payload: dict
         payload_json=payload or {},
         status=TenantBillingEvent.STATUS_PENDING,
     )
+
+
+def enforce_tenant_txn_quota(*, tenant: Tenant | None) -> None:
+    if tenant is None:
+        return
+    subscription = ensure_tenant_subscription(tenant)
+    if not subscription.hard_limit_enforced or int(subscription.hard_limit_monthly_txn or 0) <= 0:
+        return
+    today = timezone.localdate()
+    month_start = date(today.year, today.month, 1)
+    txn_count = (
+        TenantUsageDaily.objects.filter(
+            tenant=tenant,
+            usage_date__gte=month_start,
+            metric_code__in=[
+                "wallet.deposit.success",
+                "wallet.withdraw.success",
+                "wallet.transfer.success",
+                "open_api.c2b.live",
+                "open_api.b2c.live",
+            ],
+        )
+        .aggregate(total=Sum("quantity"))
+        .get("total")
+        or 0
+    )
+    if int(txn_count) >= int(subscription.hard_limit_monthly_txn):
+        raise ValidationError("Tenant monthly transaction quota exceeded.")
 
 
 def _to_decimal(raw) -> Decimal:
@@ -191,3 +221,72 @@ def dispatch_pending_billing_events(*, limit: int = 100, tenant: Tenant | None =
         webhook.save(update_fields=["last_sent_at", "last_status_code", "last_error", "updated_at"])
 
     return result
+
+
+def generate_tenant_invoice_for_period(
+    *,
+    tenant: Tenant,
+    period_start: date,
+    period_end: date,
+    issue: bool = True,
+) -> TenantInvoice:
+    subscription = ensure_tenant_subscription(tenant)
+    usage_rows = TenantUsageDaily.objects.filter(
+        tenant=tenant,
+        usage_date__gte=period_start,
+        usage_date__lte=period_end,
+    ).order_by("usage_date", "metric_code")
+    total_txn = sum(
+        int(row.quantity)
+        for row in usage_rows
+        if row.metric_code in {"wallet.deposit.success", "wallet.withdraw.success", "wallet.transfer.success", "open_api.c2b.live", "open_api.b2c.live"}
+    )
+    base_fee = _to_decimal(subscription.monthly_base_fee)
+    overage_units = max(0, int(total_txn) - int(subscription.included_txn_quota or 0))
+    usage_fee = (_to_decimal(subscription.per_txn_fee) * Decimal(str(overage_units))).quantize(Decimal("0.01"))
+    subtotal = (base_fee + usage_fee).quantize(Decimal("0.01"))
+    tax = Decimal("0.00")
+    total = (subtotal + tax).quantize(Decimal("0.01"))
+    invoice_no = f"INV-{tenant.code.upper()}-{period_start.strftime('%Y%m')}"
+    line_items = [
+        {
+            "code": "base_fee",
+            "description": f"Base subscription ({subscription.plan_code})",
+            "quantity": 1,
+            "unit_amount": str(base_fee),
+            "amount": str(base_fee),
+        },
+        {
+            "code": "txn_overage",
+            "description": "Transaction overage usage",
+            "quantity": overage_units,
+            "unit_amount": str(_to_decimal(subscription.per_txn_fee)),
+            "amount": str(usage_fee),
+        },
+    ]
+    invoice, _created = TenantInvoice.objects.update_or_create(
+        tenant=tenant,
+        period_start=period_start,
+        period_end=period_end,
+        defaults={
+            "invoice_no": invoice_no,
+            "currency": "USD",
+            "status": TenantInvoice.STATUS_ISSUED if issue else TenantInvoice.STATUS_DRAFT,
+            "subtotal_amount": subtotal,
+            "tax_amount": tax,
+            "total_amount": total,
+            "line_items_json": line_items,
+            "issued_at": timezone.now() if issue else None,
+        },
+    )
+    queue_tenant_billing_event(
+        tenant=tenant,
+        event_type="invoice.generated",
+        payload={
+            "invoice_no": invoice.invoice_no,
+            "period_start": period_start.isoformat(),
+            "period_end": period_end.isoformat(),
+            "total_amount": str(total),
+        },
+    )
+    return invoice

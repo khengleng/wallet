@@ -26,7 +26,7 @@ from .models import (
     TariffRule,
     User,
 )
-from .saas import record_tenant_usage
+from .saas import enforce_tenant_txn_quota, record_tenant_usage
 
 API_TIMESTAMP_WINDOW_SECONDS = 300
 API_NONCE_TTL_SECONDS = 600
@@ -168,6 +168,7 @@ def _build_fee_context(*, merchant: Merchant, customer: User, flow_type: str, am
 
 def _live_c2b(*, credential: MerchantApiCredential, customer: User, amount: Decimal, currency: str, reference: str, note: str):
     merchant = credential.merchant
+    enforce_tenant_txn_quota(tenant=merchant.tenant)
     capability, _ = MerchantWalletCapability.objects.get_or_create(merchant=merchant)
     if not capability.supports_c2b:
         raise ValidationError("Merchant C2B capability is disabled.")
@@ -260,6 +261,7 @@ def _live_c2b(*, credential: MerchantApiCredential, customer: User, amount: Deci
 
 def _live_b2c(*, credential: MerchantApiCredential, customer: User, amount: Decimal, currency: str, reference: str, note: str):
     merchant = credential.merchant
+    enforce_tenant_txn_quota(tenant=merchant.tenant)
     capability, _ = MerchantWalletCapability.objects.get_or_create(merchant=merchant)
     if not capability.supports_b2c:
         raise ValidationError("Merchant B2C capability is disabled.")

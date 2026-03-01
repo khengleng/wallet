@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date
 import hashlib
 import hmac
 import io
@@ -51,6 +52,9 @@ from .models import (
     SettlementPayout,
     Tenant,
     TenantBillingEvent,
+    TenantBillingInboundEvent,
+    TenantBillingWebhook,
+    TenantInvoice,
     TenantSubscription,
     TenantUsageDaily,
     TransactionMonitoringAlert,
@@ -2174,6 +2178,39 @@ class OpenApiMerchantIntegrationTests(TestCase):
         self.assertEqual(second.status_code, 403)
         self.assertEqual(second.json()["error"]["code"], "forbidden")
 
+    def test_live_c2b_blocked_by_tenant_quota(self):
+        self.credential.live_enabled = True
+        self.credential.save(update_fields=["live_enabled", "updated_at"])
+        subscription, _ = TenantSubscription.objects.get_or_create(
+            tenant=self.tenant,
+            defaults={"plan_code": "starter", "status": TenantSubscription.STATUS_ACTIVE},
+        )
+        subscription.hard_limit_monthly_txn = 1
+        subscription.hard_limit_enforced = True
+        subscription.save(update_fields=["hard_limit_monthly_txn", "hard_limit_enforced", "updated_at"])
+        TenantUsageDaily.objects.create(
+            tenant=self.tenant,
+            usage_date=timezone.localdate(),
+            metric_code="wallet.transfer.success",
+            quantity=1,
+            amount=Decimal("10.00"),
+        )
+        payload = {
+            "customer_username": self.customer.username,
+            "amount": "5.00",
+            "currency": "USD",
+            "reference": "LIVE-QUOTA-BLOCK",
+        }
+        raw, headers = self._signed_headers(payload, environment="live")
+        response = self.client.post(
+            reverse("open_api:payment_c2b"),
+            data=raw,
+            content_type="application/json",
+            **headers,
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "validation_error")
+
 
 class OpsWorkflowEscalationCommandTests(TestCase):
     def setUp(self):
@@ -2770,6 +2807,100 @@ class SaaSTenantAdministrationTests(TestCase):
                 tenant=tenant, event_type="usage.recorded"
             ).exists()
         )
+
+    def test_billing_sink_is_idempotent_for_same_event_id(self):
+        tenant = Tenant.objects.create(code="sink", name="Sink Tenant")
+        webhook = TenantBillingWebhook.objects.create(
+            tenant=tenant,
+            endpoint_url="https://example.com/hook",
+            signing_secret="sink-secret",
+            is_active=True,
+            updated_by=self.platform_admin,
+        )
+        payload = {
+            "event_id": "evt-001",
+            "tenant_code": tenant.code,
+            "event_type": "invoice.generated",
+            "payload": {"amount": "12.00"},
+        }
+        body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        sig = hmac.new(webhook.signing_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        first = self.client.post(
+            reverse("saas_billing_webhook_sink", kwargs={"tenant_code": tenant.code}),
+            data=body,
+            content_type="application/json",
+            HTTP_X_WALLET_SIGNATURE=sig,
+            HTTP_X_WALLET_EVENT="invoice.generated",
+        )
+        self.assertEqual(first.status_code, 202)
+        second = self.client.post(
+            reverse("saas_billing_webhook_sink", kwargs={"tenant_code": tenant.code}),
+            data=body,
+            content_type="application/json",
+            HTTP_X_WALLET_SIGNATURE=sig,
+            HTTP_X_WALLET_EVENT="invoice.generated",
+        )
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.json()["data"]["idempotent_replay"])
+        self.assertEqual(
+            TenantBillingInboundEvent.objects.filter(tenant=tenant, external_event_id="evt-001").count(),
+            1,
+        )
+
+    def test_platform_admin_can_retry_failed_billing_event(self):
+        tenant = Tenant.objects.create(code="retry", name="Retry Tenant")
+        event = TenantBillingEvent.objects.create(
+            tenant=tenant,
+            event_type="invoice.generated",
+            status=TenantBillingEvent.STATUS_FAILED,
+            attempt_count=2,
+            last_error="timeout",
+        )
+        self.client.login(username="saas_super", password="pass12345")
+        response = self.client.post(
+            reverse("saas_tenant_admin"),
+            {
+                "form_type": "billing_event_retry",
+                "tenant_code": tenant.code,
+                "event_id": event.id,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        event.refresh_from_db()
+        self.assertEqual(event.status, TenantBillingEvent.STATUS_PENDING)
+        self.assertEqual(event.last_error, "")
+
+    def test_platform_admin_can_generate_invoice(self):
+        tenant = Tenant.objects.create(code="inv", name="Invoice Tenant")
+        TenantSubscription.objects.create(
+            tenant=tenant,
+            plan_code="starter",
+            status=TenantSubscription.STATUS_ACTIVE,
+            monthly_base_fee=Decimal("50.00"),
+            per_txn_fee=Decimal("0.1000"),
+            included_txn_quota=10,
+        )
+        TenantUsageDaily.objects.create(
+            tenant=tenant,
+            usage_date=date(2026, 3, 10),
+            metric_code="wallet.transfer.success",
+            quantity=25,
+            amount=Decimal("250.00"),
+        )
+        self.client.login(username="saas_super", password="pass12345")
+        response = self.client.post(
+            reverse("saas_tenant_admin"),
+            {
+                "form_type": "invoice_generate",
+                "tenant_code": tenant.code,
+                "invoice_year": "2026",
+                "invoice_month": "3",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        invoice = TenantInvoice.objects.get(tenant=tenant)
+        self.assertEqual(invoice.status, TenantInvoice.STATUS_ISSUED)
+        self.assertGreater(invoice.total_amount, Decimal("0.00"))
 
 
 class InternationalizationCoverageTests(TestCase):

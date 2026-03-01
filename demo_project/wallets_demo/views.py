@@ -48,7 +48,7 @@ from .access_policy import (
     user_can_view_menu,
 )
 from .release_readiness import release_readiness_snapshot
-from .saas import record_tenant_usage
+from .saas import enforce_tenant_txn_quota, record_tenant_usage
 from .keycloak_auth import (
     decode_access_token_claims,
     introspect_access_token,
@@ -8039,6 +8039,7 @@ def deposit(request):
 
         try:
             amount = _parse_amount(request.POST.get("amount"))
+            enforce_tenant_txn_quota(tenant=request.user.tenant)
             _enforce_customer_service_policy(
                 request.user,
                 action="deposit",
@@ -8151,6 +8152,7 @@ def withdraw(request):
 
         try:
             amount = _parse_amount(request.POST.get("amount"))
+            enforce_tenant_txn_quota(tenant=request.user.tenant)
             _enforce_customer_service_policy(
                 request.user,
                 action="withdraw",
@@ -8284,6 +8286,7 @@ def transfer(request):
 
         try:
             amount = _parse_amount(request.POST.get("amount"))
+            enforce_tenant_txn_quota(tenant=request.user.tenant)
             recipient = User.objects.get(id=recipient_id)
             _enforce_customer_service_policy(
                 request.user,
