@@ -48,6 +48,7 @@ from .access_policy import (
     user_can_view_menu,
 )
 from .release_readiness import release_readiness_snapshot
+from .saas import record_tenant_usage
 from .keycloak_auth import (
     decode_access_token_claims,
     introspect_access_token,
@@ -8084,6 +8085,13 @@ def deposit(request):
                         "approval_request_id": approval_request.id,
                     },
                 )
+                record_tenant_usage(
+                    tenant=request.user.tenant,
+                    metric_code="wallet.deposit.requested",
+                    quantity=1,
+                    amount=amount,
+                    metadata={"currency": selected_currency},
+                )
                 return redirect("dashboard")
 
             with transaction.atomic():
@@ -8113,6 +8121,13 @@ def deposit(request):
                 request,
                 "wallet_deposit_success",
                 properties={"amount": str(amount), "currency": selected_currency},
+            )
+            record_tenant_usage(
+                tenant=request.user.tenant,
+                metric_code="wallet.deposit.success",
+                quantity=1,
+                amount=amount,
+                metadata={"currency": selected_currency},
             )
             return redirect("dashboard")
         except ValidationError as exc:
@@ -8196,6 +8211,13 @@ def withdraw(request):
                         "approval_request_id": approval_request.id,
                     },
                 )
+                record_tenant_usage(
+                    tenant=request.user.tenant,
+                    metric_code="wallet.withdraw.requested",
+                    quantity=1,
+                    amount=amount,
+                    metadata={"currency": selected_currency},
+                )
                 return redirect("dashboard")
 
             with transaction.atomic():
@@ -8224,6 +8246,13 @@ def withdraw(request):
                 request,
                 "wallet_withdraw_success",
                 properties={"amount": str(amount), "currency": selected_currency},
+            )
+            record_tenant_usage(
+                tenant=request.user.tenant,
+                metric_code="wallet.withdraw.success",
+                quantity=1,
+                amount=amount,
+                metadata={"currency": selected_currency},
             )
             return redirect("dashboard")
         except ValidationError as exc:
@@ -8323,6 +8352,13 @@ def transfer(request):
                         "approval_request_id": approval_request.id,
                     },
                 )
+                record_tenant_usage(
+                    tenant=request.user.tenant,
+                    metric_code="wallet.transfer.requested",
+                    quantity=1,
+                    amount=amount,
+                    metadata={"currency": selected_currency},
+                )
                 return redirect("dashboard")
 
             with transaction.atomic():
@@ -8375,6 +8411,13 @@ def transfer(request):
                     "currency": selected_currency,
                     "recipient": recipient.username,
                 },
+            )
+            record_tenant_usage(
+                tenant=request.user.tenant,
+                metric_code="wallet.transfer.success",
+                quantity=1,
+                amount=amount,
+                metadata={"currency": selected_currency},
             )
             return redirect("dashboard")
         except User.DoesNotExist:

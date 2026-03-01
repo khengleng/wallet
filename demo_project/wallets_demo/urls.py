@@ -3,6 +3,7 @@ from . import views
 from . import views_auth
 from . import views_backoffice
 from . import views_operations
+from . import views_saas
 
 urlpatterns = [
     path("mobile-portal/", include(("wallets_demo.mobile_portal_urls", "mobile_portal"), namespace="mobile_portal")),
@@ -50,6 +51,8 @@ urlpatterns = [
     path('register/', views_auth.register, name='register'),
     path('login/', views_auth.portal_login, name='login'),
     path('profile/', views_auth.profile, name='profile'),
+    path('backoffice/saas/onboarding/', views_saas.saas_onboarding, name='saas_onboarding'),
+    path('backoffice/saas/tenant/', views_saas.saas_tenant_admin, name='saas_tenant_admin'),
     path('auth/keycloak/callback/', views_auth.keycloak_callback, name='keycloak_callback'),
     path('logout/', views_auth.portal_logout, name='logout'),
 ]

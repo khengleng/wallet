@@ -114,6 +114,144 @@ class Tenant(models.Model):
         return f"{self.code} - {self.name}"
 
 
+class TenantSubscription(models.Model):
+    STATUS_TRIAL = "trial"
+    STATUS_ACTIVE = "active"
+    STATUS_PAST_DUE = "past_due"
+    STATUS_CANCELED = "canceled"
+    STATUS_CHOICES = (
+        (STATUS_TRIAL, "Trial"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_PAST_DUE, "Past Due"),
+        (STATUS_CANCELED, "Canceled"),
+    )
+
+    CYCLE_MONTHLY = "monthly"
+    CYCLE_ANNUAL = "annual"
+    CYCLE_CHOICES = (
+        (CYCLE_MONTHLY, "Monthly"),
+        (CYCLE_ANNUAL, "Annual"),
+    )
+
+    tenant = models.OneToOneField(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="subscription",
+    )
+    plan_code = models.CharField(max_length=32, default="starter")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_TRIAL, db_index=True)
+    billing_cycle = models.CharField(max_length=16, choices=CYCLE_CHOICES, default=CYCLE_MONTHLY)
+    billing_email = models.EmailField(blank=True, default="")
+    monthly_base_fee = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    per_txn_fee = models.DecimalField(max_digits=12, decimal_places=4, default=Decimal("0.0000"))
+    included_txn_quota = models.PositiveIntegerField(default=0)
+    trial_ends_at = models.DateTimeField(null=True, blank=True)
+    current_period_start = models.DateField(null=True, blank=True)
+    current_period_end = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("tenant__code",)
+
+    def save(self, *args, **kwargs):
+        self.plan_code = (self.plan_code or "starter").strip().lower()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.tenant.code}:{self.plan_code}:{self.status}"
+
+
+class TenantUsageDaily(models.Model):
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="usage_daily",
+    )
+    usage_date = models.DateField(db_index=True)
+    metric_code = models.CharField(max_length=48, db_index=True)
+    quantity = models.BigIntegerField(default=0)
+    amount = models.DecimalField(max_digits=20, decimal_places=4, default=Decimal("0.0000"))
+    metadata_json = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-usage_date", "metric_code")
+        unique_together = (("tenant", "usage_date", "metric_code"),)
+        indexes = [
+            models.Index(fields=("tenant", "-usage_date", "metric_code"), name="idx_tusage_tenant_day_metric"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant.code}:{self.usage_date}:{self.metric_code}:{self.quantity}"
+
+
+class TenantBillingWebhook(models.Model):
+    tenant = models.OneToOneField(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="billing_webhook",
+    )
+    endpoint_url = models.URLField()
+    signing_secret = models.CharField(max_length=128)
+    is_active = models.BooleanField(default=True, db_index=True)
+    updated_by = models.ForeignKey(
+        "User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="updated_tenant_billing_webhooks",
+    )
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    last_status_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    last_error = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("tenant__code",)
+
+    def __str__(self):
+        return f"{self.tenant.code}:{'active' if self.is_active else 'inactive'}"
+
+
+class TenantBillingEvent(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_SENT = "sent"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SENT, "Sent"),
+        (STATUS_FAILED, "Failed"),
+    )
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="billing_events",
+    )
+    event_type = models.CharField(max_length=64)
+    payload_json = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    attempt_count = models.PositiveIntegerField(default=0)
+    next_retry_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=("tenant", "status", "created_at"), name="idx_tbill_tenant_stat_created"),
+            models.Index(fields=("status", "next_retry_at"), name="idx_tbill_status_retry"),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant.code}:{self.event_type}:{self.status}"
+
+
 class User(WalletMixin, AbstractUser):
     tenant = models.ForeignKey(
         Tenant,

@@ -523,6 +523,14 @@
                     href="{% url 'wallet_fx_exchange' %}">{% trans "FX Exchange" %}</a>
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'profile' %} active{% endif %}"
                     href="{% url 'profile' %}">{% trans "My Profile" %}</a>
+                {% if user|can_view_menu:"saas_tenant_admin" %}
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'saas_tenant_admin' %} active{% endif %}"
+                    href="{% url 'saas_tenant_admin' %}">{% trans "Tenant SaaS Admin" %}</a>
+                {% endif %}
+                {% if user|has_role:"super_admin" %}
+                <a class="sidebar-link{% if request.resolver_match and request.resolver_match.url_name == 'saas_onboarding' %} active{% endif %}"
+                    href="{% url 'saas_onboarding' %}">{% trans "Tenant Onboarding" %}</a>
+                {% endif %}
                 {% if user|can_view_menu:"backoffice" %}
                 <a class="sidebar-link{% if request.resolver_match and request.resolver_match.namespace == 'mobile_portal' %} active{% endif %}"
                     href="{% url 'mobile_portal:home' %}">{% trans "Mobile Service Playground" %}</a>

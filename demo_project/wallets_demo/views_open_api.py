@@ -26,6 +26,7 @@ from .models import (
     TariffRule,
     User,
 )
+from .saas import record_tenant_usage
 
 API_TIMESTAMP_WINDOW_SECONDS = 300
 API_NONCE_TTL_SECONDS = 600
@@ -247,6 +248,13 @@ def _live_c2b(*, credential: MerchantApiCredential, customer: User, amount: Deci
         )
         event.full_clean()
         event.save()
+    record_tenant_usage(
+        tenant=merchant.tenant,
+        metric_code="open_api.c2b.live",
+        quantity=1,
+        amount=amount,
+        metadata={"currency": currency, "merchant_code": merchant.code},
+    )
     return event, merchant_fee, tariff_fee, total_fee, net_amount, False
 
 
@@ -332,6 +340,13 @@ def _live_b2c(*, credential: MerchantApiCredential, customer: User, amount: Deci
         )
         event.full_clean()
         event.save()
+    record_tenant_usage(
+        tenant=merchant.tenant,
+        metric_code="open_api.b2c.live",
+        quantity=1,
+        amount=amount,
+        metadata={"currency": currency, "merchant_code": merchant.code},
+    )
     return event, merchant_fee, tariff_fee, total_fee, net_amount, False
 
 
@@ -344,6 +359,13 @@ def _sandbox_preview(*, credential: MerchantApiCredential, customer: User | None
     net_amount = (amount - total_fee).quantize(Decimal("0.01"))
     if net_amount < Decimal("0"):
         raise ValidationError("Total fee cannot exceed transfer amount.")
+    record_tenant_usage(
+        tenant=merchant.tenant,
+        metric_code=f"open_api.{flow_type}.sandbox",
+        quantity=1,
+        amount=amount,
+        metadata={"currency": currency, "merchant_code": merchant.code},
+    )
     return {
         "status": "sandbox_simulated",
         "flow_type": flow_type,

@@ -1,0 +1,58 @@
+{% extends 'wallets_demo/base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "SaaS Tenant Onboarding" %} - {{ org_name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>{% trans "SaaS Tenant Onboarding" %}</h2>
+    <p class="text-muted">{% trans "Create a new tenant operator with an initial admin account and subscription profile." %}</p>
+</div>
+
+<div class="card">
+    <form method="post">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="tenant_code">{% trans "Tenant Code" %}</label>
+            <input id="tenant_code" name="tenant_code" type="text" required placeholder="acme" />
+        </div>
+        <div class="form-group">
+            <label for="tenant_name">{% trans "Tenant Name" %}</label>
+            <input id="tenant_name" name="tenant_name" type="text" required placeholder="Acme Wallet Operator" />
+        </div>
+        <div class="form-group">
+            <label for="plan_code">{% trans "Plan Code" %}</label>
+            <input id="plan_code" name="plan_code" type="text" value="starter" />
+        </div>
+        <div class="form-group">
+            <label for="billing_cycle">{% trans "Billing Cycle" %}</label>
+            <select id="billing_cycle" name="billing_cycle">
+                {% for value, label in billing_cycles %}
+                <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="billing_email">{% trans "Billing Email" %}</label>
+            <input id="billing_email" name="billing_email" type="email" placeholder="billing@acme.com" />
+        </div>
+
+        <hr style="margin: 1.4rem 0; border: 0; border-top: 1px solid var(--border);" />
+
+        <div class="form-group">
+            <label for="admin_username">{% trans "Initial Admin Username" %}</label>
+            <input id="admin_username" name="admin_username" type="text" required />
+        </div>
+        <div class="form-group">
+            <label for="admin_email">{% trans "Initial Admin Email" %}</label>
+            <input id="admin_email" name="admin_email" type="email" />
+        </div>
+        <div class="form-group">
+            <label for="admin_password">{% trans "Initial Admin Password" %}</label>
+            <input id="admin_password" name="admin_password" type="password" required minlength="8" />
+        </div>
+
+        <button type="submit" class="btn btn-primary">{% trans "Create Tenant" %}</button>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,210 @@
+{% extends 'wallets_demo/base.html' %}
+{% load i18n %}
+
+{% block title %}{% trans "Tenant SaaS Administration" %} - {{ org_name }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>{% trans "Tenant SaaS Administration" %}</h2>
+    <p class="text-muted">{% trans "Manage tenant profile, subscription, operator accounts, and billing webhook integration." %}</p>
+    {% if is_platform_admin %}
+    <form method="get" class="flex gap-2 align-center" style="margin-top: 1rem;">
+        <label for="tenant">{% trans "Tenant" %}</label>
+        <select id="tenant" name="tenant">
+            {% for t in all_tenants %}
+            <option value="{{ t.code }}" {% if t.id == tenant.id %}selected{% endif %}>{{ t.code }} - {{ t.name }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-outline">{% trans "Switch" %}</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h3>{% trans "Tenant Profile" %}</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="tenant_profile_update" />
+        <input type="hidden" name="tenant_code" value="{{ tenant.code }}" />
+        <div class="form-group">
+            <label>{% trans "Tenant Code" %}</label>
+            <input type="text" value="{{ tenant.code }}" disabled />
+        </div>
+        <div class="form-group">
+            <label for="tenant_name">{% trans "Tenant Name" %}</label>
+            <input id="tenant_name" name="tenant_name" type="text" value="{{ tenant.name }}" />
+        </div>
+        {% if is_platform_admin %}
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="is_active" {% if tenant.is_active %}checked{% endif %} style="width:auto; margin-right: 0.4rem;" />
+                {% trans "Tenant Active" %}
+            </label>
+        </div>
+        {% endif %}
+        <button type="submit" class="btn btn-primary">{% trans "Save Tenant Profile" %}</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>{% trans "Subscription" %}</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="subscription_update" />
+        <input type="hidden" name="tenant_code" value="{{ tenant.code }}" />
+        <div class="form-group">
+            <label for="plan_code">{% trans "Plan Code" %}</label>
+            <input id="plan_code" name="plan_code" type="text" value="{{ subscription.plan_code }}" />
+        </div>
+        <div class="form-group">
+            <label for="billing_email">{% trans "Billing Email" %}</label>
+            <input id="billing_email" name="billing_email" type="email" value="{{ subscription.billing_email }}" />
+        </div>
+        <div class="form-group">
+            <label for="billing_cycle">{% trans "Billing Cycle" %}</label>
+            <select id="billing_cycle" name="billing_cycle">
+                {% for value, label in billing_cycles %}
+                <option value="{{ value }}" {% if value == subscription.billing_cycle %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="monthly_base_fee">{% trans "Monthly Base Fee" %}</label>
+            <input id="monthly_base_fee" name="monthly_base_fee" type="text" value="{{ subscription.monthly_base_fee }}" />
+        </div>
+        <div class="form-group">
+            <label for="per_txn_fee">{% trans "Per Transaction Fee" %}</label>
+            <input id="per_txn_fee" name="per_txn_fee" type="text" value="{{ subscription.per_txn_fee }}" />
+        </div>
+        <div class="form-group">
+            <label for="included_txn_quota">{% trans "Included Transaction Quota" %}</label>
+            <input id="included_txn_quota" name="included_txn_quota" type="number" min="0" value="{{ subscription.included_txn_quota }}" />
+        </div>
+        <div class="form-group">
+            <label for="status">{% trans "Status" %}</label>
+            <select id="status" name="status" {% if not is_platform_admin %}disabled{% endif %}>
+                {% for value, label in subscription_statuses %}
+                <option value="{{ value }}" {% if value == subscription.status %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">{% trans "Save Subscription" %}</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>{% trans "Billing Webhook" %}</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="billing_webhook_upsert" />
+        <input type="hidden" name="tenant_code" value="{{ tenant.code }}" />
+        <div class="form-group">
+            <label for="endpoint_url">{% trans "Endpoint URL" %}</label>
+            <input id="endpoint_url" name="endpoint_url" type="url" value="{{ webhook.endpoint_url|default:'' }}" placeholder="https://example.com/billing/webhook" />
+        </div>
+        {% if webhook %}
+        <div class="form-group">
+            <label>{% trans "Current Signing Secret" %}</label>
+            <input type="text" value="{{ webhook.signing_secret }}" disabled />
+        </div>
+        {% endif %}
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="is_active" {% if not webhook or webhook.is_active %}checked{% endif %} style="width:auto; margin-right: 0.4rem;" />
+                {% trans "Webhook Active" %}
+            </label>
+        </div>
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="rotate_secret" style="width:auto; margin-right: 0.4rem;" />
+                {% trans "Rotate signing secret on save" %}
+            </label>
+        </div>
+        <button type="submit" class="btn btn-primary">{% trans "Save Webhook" %}</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>{% trans "Create Operator User" %}</h3>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="form_type" value="operator_create" />
+        <input type="hidden" name="tenant_code" value="{{ tenant.code }}" />
+        <div class="form-group">
+            <label for="username">{% trans "Username" %}</label>
+            <input id="username" name="username" type="text" required />
+        </div>
+        <div class="form-group">
+            <label for="email">{% trans "Email" %}</label>
+            <input id="email" name="email" type="email" />
+        </div>
+        <div class="form-group">
+            <label for="password">{% trans "Temporary Password" %}</label>
+            <input id="password" name="password" type="password" minlength="8" required />
+        </div>
+        <div class="form-group">
+            <label for="role_name">{% trans "Role" %}</label>
+            <select id="role_name" name="role_name">
+                {% for role in operator_roles %}
+                <option value="{{ role }}">{{ role }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="btn btn-primary">{% trans "Create Operator" %}</button>
+    </form>
+</div>
+
+<div class="card">
+    <h3>{% trans "Operators" %}</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>{% trans "Username" %}</th>
+                <th>{% trans "Email" %}</th>
+                <th>{% trans "Roles" %}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for operator in operators %}
+            <tr>
+                <td>{{ operator.username }}</td>
+                <td>{{ operator.email }}</td>
+                <td>{{ operator.role_names|join:", " }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="3" class="text-muted">{% trans "No operator users." %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="card">
+    <h3>{% trans "Daily Usage" %}</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>{% trans "Date" %}</th>
+                <th>{% trans "Metric" %}</th>
+                <th>{% trans "Quantity" %}</th>
+                <th>{% trans "Amount" %}</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in usage_rows %}
+            <tr>
+                <td>{{ row.usage_date }}</td>
+                <td>{{ row.metric_code }}</td>
+                <td>{{ row.quantity }}</td>
+                <td>{{ row.amount }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4" class="text-muted">{% trans "No usage data yet." %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -30,6 +30,7 @@ DEFAULT_MENU_ROLE_RULES: dict[str, tuple[str, ...]] = {
     "rbac_management": ("admin", "super_admin"),
     "operations_settings": ("super_admin",),
     "policy_hub": ("super_admin", "admin", "risk", "finance", "operation"),
+    "saas_tenant_admin": ("admin", "super_admin"),
 }
 
 DEFAULT_SENSITIVE_ROLES: tuple[str, ...] = (

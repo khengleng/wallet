@@ -50,6 +50,9 @@ from .models import (
     SettlementException,
     SettlementPayout,
     Tenant,
+    TenantBillingEvent,
+    TenantSubscription,
+    TenantUsageDaily,
     TransactionMonitoringAlert,
     TreasuryAccount,
     TreasuryTransferRequest,
@@ -58,6 +61,7 @@ from .models import (
     WALLET_TYPE_CUSTOMER,
 )
 from .rbac import assign_roles, seed_role_groups
+from .saas import record_tenant_usage
 
 
 class RBACMakerCheckerTests(TestCase):
@@ -2670,6 +2674,102 @@ class OperationsSettingsAndReportsUiTests(TestCase):
         self.client.login(username="ops_finance", password="pass12345")
         response = self.client.get(reverse("operations_reports"))
         self.assertEqual(response.status_code, 403)
+
+
+@override_settings(MULTITENANCY_ENABLED=True, MULTITENANCY_DEFAULT_TENANT_CODE="default")
+class SaaSTenantAdministrationTests(TestCase):
+    def setUp(self):
+        seed_role_groups()
+        self.client = Client()
+        self.default_tenant, _ = Tenant.objects.get_or_create(code="default", defaults={"name": "Default"})
+        self.platform_admin = User.objects.create_user(
+            username="saas_super",
+            email="saas_super@example.com",
+            password="pass12345",
+            tenant=self.default_tenant,
+        )
+        assign_roles(self.platform_admin, ["super_admin"])
+
+    def test_platform_admin_can_onboard_tenant(self):
+        self.client.login(username="saas_super", password="pass12345")
+        response = self.client.post(
+            reverse("saas_onboarding"),
+            {
+                "tenant_code": "acme",
+                "tenant_name": "ACME Wallet",
+                "plan_code": "pro",
+                "billing_cycle": "monthly",
+                "billing_email": "billing@acme.example",
+                "admin_username": "acme_admin",
+                "admin_email": "admin@acme.example",
+                "admin_password": "acme-pass-123",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        tenant = Tenant.objects.get(code="acme")
+        admin = User.objects.get(username="acme_admin")
+        self.assertEqual(admin.tenant_id, tenant.id)
+        self.assertTrue(admin.groups.filter(name="admin").exists())
+        subscription = TenantSubscription.objects.get(tenant=tenant)
+        self.assertEqual(subscription.plan_code, "pro")
+        self.assertEqual(subscription.status, TenantSubscription.STATUS_ACTIVE)
+        self.assertTrue(
+            TenantBillingEvent.objects.filter(
+                tenant=tenant, event_type="tenant.onboarded"
+            ).exists()
+        )
+
+    def test_tenant_admin_cannot_switch_to_other_tenant(self):
+        tenant_a = Tenant.objects.create(code="ta", name="Tenant A")
+        tenant_b = Tenant.objects.create(code="tb", name="Tenant B")
+        admin_a = User.objects.create_user(username="ta_admin", password="pass12345", tenant=tenant_a)
+        admin_b = User.objects.create_user(username="tb_admin", password="pass12345", tenant=tenant_b)
+        assign_roles(admin_a, ["admin"])
+        assign_roles(admin_b, ["admin"])
+
+        self.client.login(username="ta_admin", password="pass12345")
+        response = self.client.get(
+            reverse("saas_tenant_admin"),
+            {"tenant": "tb"},
+            HTTP_X_TENANT_CODE="ta",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["tenant"].code, "ta")
+
+        create_user_response = self.client.post(
+            reverse("saas_tenant_admin"),
+            {
+                "form_type": "operator_create",
+                "tenant_code": "tb",
+                "username": "ta_operator",
+                "email": "ta_operator@example.com",
+                "password": "strong-pass-123",
+                "role_name": "operation",
+            },
+            HTTP_X_TENANT_CODE="ta",
+        )
+        self.assertEqual(create_user_response.status_code, 302)
+        created = User.objects.get(username="ta_operator")
+        self.assertEqual(created.tenant_id, tenant_a.id)
+        self.assertNotEqual(created.tenant_id, tenant_b.id)
+
+    def test_usage_record_creates_daily_usage_and_billing_event(self):
+        tenant = Tenant.objects.create(code="usage", name="Usage Tenant")
+        record_tenant_usage(
+            tenant=tenant,
+            metric_code="wallet.transfer.success",
+            quantity=2,
+            amount=Decimal("10.50"),
+            metadata={"currency": "USD"},
+        )
+        usage = TenantUsageDaily.objects.get(tenant=tenant, metric_code="wallet.transfer.success")
+        self.assertEqual(usage.quantity, 2)
+        self.assertEqual(usage.amount, Decimal("10.50"))
+        self.assertTrue(
+            TenantBillingEvent.objects.filter(
+                tenant=tenant, event_type="usage.recorded"
+            ).exists()
+        )
 
 
 class InternationalizationCoverageTests(TestCase):
