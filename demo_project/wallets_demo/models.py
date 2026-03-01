@@ -269,8 +269,6 @@ class ApprovalRequest(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="approval_requests",
     )
     checker = models.ForeignKey(
@@ -496,8 +494,6 @@ class TreasuryTransferRequest(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="treasury_transfer_requests",
     )
     checker = models.ForeignKey(
@@ -1480,8 +1476,6 @@ class MerchantSettlementRecord(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="merchant_settlement_records",
     )
     settlement_no = models.CharField(max_length=40, unique=True)
@@ -1539,8 +1533,6 @@ class DisputeRefundRequest(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="dispute_refund_requests",
     )
     merchant = models.ForeignKey(
@@ -1627,8 +1619,6 @@ class SettlementPayout(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="settlement_payouts",
     )
     payout_reference = models.CharField(max_length=48, unique=True)
@@ -1689,8 +1679,6 @@ class SettlementBatchFile(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="settlement_batch_files",
     )
     currency = models.CharField(max_length=12, default="USD")
@@ -1750,8 +1738,6 @@ class SettlementException(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="settlement_exceptions",
     )
     payout = models.ForeignKey(
@@ -1823,8 +1809,6 @@ class ReconciliationRun(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="reconciliation_runs",
     )
     run_no = models.CharField(max_length=40, unique=True)
@@ -1906,8 +1890,6 @@ class ReconciliationBreak(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="reconciliation_breaks",
     )
     merchant = models.ForeignKey(
@@ -2161,8 +2143,6 @@ class BusinessDocument(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="business_documents",
     )
     title = models.CharField(max_length=255)
@@ -2424,8 +2404,6 @@ class TransactionMonitoringAlert(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="transaction_monitoring_alerts",
     )
     severity = models.CharField(max_length=16, default="medium")
@@ -2530,8 +2508,6 @@ class AccessReviewRecord(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="access_review_records",
     )
     user = models.ForeignKey(
@@ -2602,8 +2578,6 @@ class OperationCase(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="operation_cases",
     )
     case_type = models.CharField(max_length=16, choices=TYPE_CHOICES)
@@ -2664,8 +2638,6 @@ class OperationCaseNote(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="operation_case_notes",
     )
     note = models.TextField()
@@ -2797,8 +2769,6 @@ class CustomerClassUpgradeRequest(models.Model):
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.PROTECT,
-        null=True,
-        blank=True,
         related_name="customer_class_upgrade_requests",
     )
     from_service_class = models.ForeignKey(
