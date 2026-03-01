@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
@@ -108,7 +108,11 @@ def register_device_session(
     user_agent: str,
     expires_at: datetime | None = None,
 ) -> dict[str, Any]:
-    expiry = expires_at or datetime.now(timezone.utc)
+    if expires_at is None:
+        session_age_seconds = int(getattr(settings, "SESSION_COOKIE_AGE", 1209600) or 1209600)
+        expiry = datetime.now(timezone.utc) + timedelta(seconds=max(60, session_age_seconds))
+    else:
+        expiry = expires_at
     return _call(
         "/v1/sessions/register",
         {

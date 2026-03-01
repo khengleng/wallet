@@ -62,6 +62,14 @@ class TestWalletModel:
         wallet = user.create_wallet("euro", currency="EUR")
         assert wallet.currency == "EUR"
 
+    def test_wallet_currency_handles_null_meta(self, user):
+        """Currency access should not crash when meta is NULL."""
+        wallet = user.wallet
+        wallet.meta = None
+        wallet.save(update_fields=["meta", "updated_at"])
+        wallet.refresh_from_db()
+        assert wallet.currency == "USD"
+
     def test_wallet_str_representation(self, wallet):
         """String representation should include slug and balance."""
         result = str(wallet)

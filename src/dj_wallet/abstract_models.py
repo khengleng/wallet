@@ -90,7 +90,7 @@ class AbstractWallet(models.Model):
 
     @property
     def currency(self):
-        return self.meta.get("currency", wallet_settings.WALLET_DEFAULT_CURRENCY)
+        return (self.meta or {}).get("currency", wallet_settings.WALLET_DEFAULT_CURRENCY)
 
     def freeze(self, reason=""):
         """

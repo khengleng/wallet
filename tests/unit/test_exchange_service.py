@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pytest
 
-from dj_wallet.exceptions import InsufficientFunds
+from dj_wallet.exceptions import InsufficientFunds, WalletException
 from dj_wallet.services import ExchangeService, WalletService
 
 
@@ -136,3 +136,12 @@ class TestExchangeService:
 
         assert wallet1.balance == Decimal("0")
         assert wallet2.balance == Decimal("100.00")
+
+    def test_exchange_rejects_same_wallet(self, user_factory):
+        """Exchange should fail when source and target wallets are identical."""
+        user = user_factory()
+        wallet = user.wallet
+        WalletService.deposit(wallet, Decimal("100.00"))
+
+        with pytest.raises(WalletException):
+            ExchangeService.exchange(user, "default", "default", Decimal("10.00"))

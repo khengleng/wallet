@@ -812,14 +812,14 @@ class MobileSelfOnboardingApiTests(TestCase):
         )
 
     def test_mobile_bootstrap_requires_authentication(self):
-        response = self.client.get(reverse("mobile_bootstrap"))
+        response = self.client.get(reverse("mobile_portal:mobile_bootstrap"))
         self.assertEqual(response.status_code, 401)
         self.assertFalse(response.json()["ok"])
 
     def test_mobile_self_onboard_creates_cif_and_wallets(self):
         self.client.login(username="mobile_user", password="pass12345")
         response = self.client.post(
-            reverse("mobile_self_onboard"),
+            reverse("mobile_portal:mobile_self_onboard"),
             data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"EUR","wallet_currencies":["USD","EUR"]}',
             content_type="application/json",
         )
@@ -836,7 +836,7 @@ class MobileSelfOnboardingApiTests(TestCase):
         self.assertEqual(cif.status, CustomerCIF.STATUS_PENDING_KYC)
         self.assertTrue(self.user.get_wallet("default").is_frozen)
 
-        bootstrap = self.client.get(reverse("mobile_bootstrap"))
+        bootstrap = self.client.get(reverse("mobile_portal:mobile_bootstrap"))
         self.assertEqual(bootstrap.status_code, 200)
         bootstrap_payload = bootstrap.json()
         self.assertTrue(bootstrap_payload["data"]["onboarding"]["is_completed"])
@@ -848,19 +848,19 @@ class MobileSelfOnboardingApiTests(TestCase):
     def test_mobile_profile_get_and_update(self):
         self.client.login(username="mobile_user", password="pass12345")
         self.client.post(
-            reverse("mobile_self_onboard"),
+            reverse("mobile_portal:mobile_self_onboard"),
             data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"USD"}',
             content_type="application/json",
         )
 
-        profile_get = self.client.get(reverse("mobile_profile"))
+        profile_get = self.client.get(reverse("mobile_portal:mobile_profile"))
         self.assertEqual(profile_get.status_code, 200)
         profile_payload = profile_get.json()
         self.assertTrue(profile_payload["ok"])
         self.assertEqual(profile_payload["data"]["cif"]["legal_name"], "Mobile User")
 
         profile_update = self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data='{"first_name":"Mobile","last_name":"Tester","legal_name":"Mobile Tester","mobile_no":"+855999000","profile_picture_url":"https://cdn.example.com/avatar.png","preferences":{"language":"km","timezone":"Asia/Phnom_Penh","theme":"dark","preferred_currency":"KHR","notifications":{"push":true,"email":false,"sms":true}}}',
             content_type="application/json",
         )
@@ -884,7 +884,7 @@ class MobileSelfOnboardingApiTests(TestCase):
     def test_mobile_profile_update_requires_onboarding(self):
         self.client.login(username="mobile_user", password="pass12345")
         response = self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data='{"first_name":"No","last_name":"CIF","legal_name":"No CIF"}',
             content_type="application/json",
         )
@@ -896,19 +896,19 @@ class MobileSelfOnboardingApiTests(TestCase):
     def test_mobile_personalization_data_points(self):
         self.client.login(username="mobile_user", password="pass12345")
         self.client.post(
-            reverse("mobile_self_onboard"),
+            reverse("mobile_portal:mobile_self_onboard"),
             data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"USD"}',
             content_type="application/json",
         )
         update_profile = self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data='{"profile_picture_url":"https://cdn.example.com/u.png","preferences":{"language":"en","timezone":"Asia/Phnom_Penh","theme":"system","preferred_currency":"USD"}}',
             content_type="application/json",
         )
         self.assertEqual(update_profile.status_code, 200)
 
         signal_response = self.client.post(
-            reverse("mobile_personalization_signals"),
+            reverse("mobile_portal:mobile_personalization_signals"),
             data='{"data_points":{"last_screen":"wallet_home","preferred_entry_point":"scan_pay"}}',
             content_type="application/json",
         )
@@ -919,7 +919,7 @@ class MobileSelfOnboardingApiTests(TestCase):
             "wallet_home",
         )
 
-        personalization_response = self.client.get(reverse("mobile_personalization"))
+        personalization_response = self.client.get(reverse("mobile_portal:mobile_personalization"))
         self.assertEqual(personalization_response.status_code, 200)
         payload = personalization_response.json()
         self.assertTrue(payload["ok"])
@@ -933,7 +933,7 @@ class MobileSelfOnboardingApiTests(TestCase):
     def test_mobile_assistant_chat_requires_message(self):
         self.client.login(username="mobile_user", password="pass12345")
         response = self.client.post(
-            reverse("mobile_assistant_chat"),
+            reverse("mobile_portal:mobile_assistant_chat"),
             data="{}",
             content_type="application/json",
         )
@@ -951,7 +951,7 @@ class MobileSelfOnboardingApiTests(TestCase):
             "suggested_actions": ["transfer_funds"],
         }
         response = self.client.post(
-            reverse("mobile_assistant_chat"),
+            reverse("mobile_portal:mobile_assistant_chat"),
             data=json.dumps({"message": "Please transfer 25 USD to alice"}),
             content_type="application/json",
         )
@@ -969,19 +969,19 @@ class MobileSelfOnboardingApiTests(TestCase):
     def test_mobile_profile_pin_rotation_requires_current_pin(self):
         self.client.login(username="mobile_user", password="pass12345")
         self.client.post(
-            reverse("mobile_self_onboard"),
+            reverse("mobile_portal:mobile_self_onboard"),
             data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"USD"}',
             content_type="application/json",
         )
         set_pin = self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data=json.dumps({"transaction_pin": "2468", "transaction_pin_confirm": "2468"}),
             content_type="application/json",
         )
         self.assertEqual(set_pin.status_code, 200)
 
         missing_current = self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data=json.dumps({"transaction_pin": "8642", "transaction_pin_confirm": "8642"}),
             content_type="application/json",
         )
@@ -989,7 +989,7 @@ class MobileSelfOnboardingApiTests(TestCase):
         self.assertEqual(missing_current.json()["error"]["code"], "current_pin_required")
 
         wrong_current = self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data=json.dumps(
                 {
                     "current_transaction_pin": "0000",
@@ -1003,7 +1003,7 @@ class MobileSelfOnboardingApiTests(TestCase):
         self.assertEqual(wrong_current.json()["error"]["code"], "current_pin_invalid")
 
         ok_rotate = self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data=json.dumps(
                 {
                     "current_transaction_pin": "2468",
@@ -1019,19 +1019,19 @@ class MobileSelfOnboardingApiTests(TestCase):
     def test_mobile_profile_pin_rotation_lockout_after_failed_attempts(self):
         self.client.login(username="mobile_user", password="pass12345")
         self.client.post(
-            reverse("mobile_self_onboard"),
+            reverse("mobile_portal:mobile_self_onboard"),
             data='{"legal_name":"Mobile User","mobile_no":"+85512345678","preferred_currency":"USD"}',
             content_type="application/json",
         )
         self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data=json.dumps({"transaction_pin": "2468", "transaction_pin_confirm": "2468"}),
             content_type="application/json",
         )
 
         for _ in range(5):
             self.client.post(
-                reverse("mobile_profile"),
+                reverse("mobile_portal:mobile_profile"),
                 data=json.dumps(
                     {
                         "current_transaction_pin": "0000",
@@ -1042,7 +1042,7 @@ class MobileSelfOnboardingApiTests(TestCase):
                 content_type="application/json",
             )
         locked = self.client.post(
-            reverse("mobile_profile"),
+            reverse("mobile_portal:mobile_profile"),
             data=json.dumps(
                 {
                     "current_transaction_pin": "2468",
@@ -1085,13 +1085,13 @@ class MobileNativeLabPageTests(TestCase):
         )
 
     def test_mobile_native_lab_requires_auth(self):
-        response = self.client.get(reverse("mobile_native_lab"))
+        response = self.client.get(reverse("mobile_portal:home"))
         self.assertEqual(response.status_code, 302)
         self.assertIn("/login/", response.url)
 
     def test_mobile_native_lab_renders_for_authenticated_user(self):
         self.client.login(username="native_lab_user", password="pass12345")
-        response = self.client.get(reverse("mobile_native_lab"))
+        response = self.client.get(reverse("mobile_portal:home"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Mobile Service Playground")
         self.assertContains(response, "/mobile/v1")
@@ -1103,13 +1103,13 @@ class MobileNativeLabPageTests(TestCase):
             password="pass12345",
         )
         self.client.login(username="native_lab_outsider", password="pass12345")
-        response = self.client.get(reverse("mobile_native_lab"))
+        response = self.client.get(reverse("mobile_portal:home"))
         self.assertEqual(response.status_code, 403)
 
     def test_mobile_playground_can_impersonate_mobile_profile_user(self):
         self.client.login(username="native_lab_user", password="pass12345")
         set_response = self.client.post(
-            reverse("mobile_playground_impersonation"),
+            reverse("mobile_portal:playground_impersonation"),
             data=json.dumps({"username": "native_lab_target"}),
             content_type="application/json",
         )
@@ -1120,12 +1120,12 @@ class MobileNativeLabPageTests(TestCase):
             "native_lab_target",
         )
 
-        profile_response = self.client.get(reverse("mobile_profile"))
+        profile_response = self.client.get(reverse("mobile_portal:mobile_profile"))
         self.assertEqual(profile_response.status_code, 200)
         profile_data = profile_response.json()["data"]["user"]
         self.assertEqual(profile_data["username"], "native_lab_target")
 
-        clear_response = self.client.delete(reverse("mobile_playground_impersonation"))
+        clear_response = self.client.delete(reverse("mobile_portal:playground_impersonation"))
         self.assertEqual(clear_response.status_code, 200)
         self.assertFalse(clear_response.json()["data"]["impersonation_enabled"])
 
@@ -1137,7 +1137,7 @@ class MobileNativeLabPageTests(TestCase):
 
         self.client.login(username="native_lab_user", password="pass12345")
         no_pin_response = self.client.post(
-            reverse("mobile_playground_assistant_action"),
+            reverse("mobile_portal:playground_assistant_action"),
             data=json.dumps(
                 {
                     "action": "deposit",
@@ -1153,7 +1153,7 @@ class MobileNativeLabPageTests(TestCase):
         self.assertEqual(no_pin_response.json()["error"]["code"], "pin_required")
 
         wrong_pin_response = self.client.post(
-            reverse("mobile_playground_assistant_action"),
+            reverse("mobile_portal:playground_assistant_action"),
             data=json.dumps(
                 {
                     "action": "deposit",
@@ -1170,7 +1170,7 @@ class MobileNativeLabPageTests(TestCase):
         self.assertEqual(wrong_pin_response.json()["error"]["code"], "pin_invalid")
 
         ok_response = self.client.post(
-            reverse("mobile_playground_assistant_action"),
+            reverse("mobile_portal:playground_assistant_action"),
             data=json.dumps(
                 {
                     "action": "deposit",
@@ -1196,7 +1196,7 @@ class MobileNativeLabPageTests(TestCase):
         self.client.login(username="native_lab_user", password="pass12345")
         for _ in range(5):
             self.client.post(
-                reverse("mobile_playground_assistant_action"),
+                reverse("mobile_portal:playground_assistant_action"),
                 data=json.dumps(
                     {
                         "action": "deposit",
@@ -1211,7 +1211,7 @@ class MobileNativeLabPageTests(TestCase):
             )
 
         locked_response = self.client.post(
-            reverse("mobile_playground_assistant_action"),
+            reverse("mobile_portal:playground_assistant_action"),
             data=json.dumps(
                 {
                     "action": "deposit",

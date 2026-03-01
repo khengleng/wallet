@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from django.db import transaction
 
+from ..exceptions import WalletException
 from ..utils import get_transfer_model
 from .common import WalletService
 
@@ -16,6 +17,8 @@ class ExchangeService:
         """
         from_wallet = holder.get_wallet(from_slug)
         to_wallet = holder.get_wallet(to_slug)
+        if from_wallet.pk == to_wallet.pk:
+            raise WalletException("Source and target wallets must be different.")
 
         if rate is None:
             # Default to 1.0 if not provided, or raise error depending on policy

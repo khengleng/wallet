@@ -15,6 +15,7 @@ from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.urls import reverse
 from django.utils import timezone
 
 from dj_wallet.models import Transaction, Wallet
@@ -317,17 +318,34 @@ def mobile_native_lab(request):
             "has_oidc_token": bool(request.session.get("oidc_access_token", "")),
             "oidc_access_token": request.session.get("oidc_access_token", ""),
             "mobile_gateway_base": "/mobile/v1",
+            "sandbox_default_path": reverse("mobile_portal:mobile_bootstrap"),
+            "api_mobile_profile_url": reverse("mobile_portal:mobile_profile"),
+            "api_mobile_personalization_url": reverse("mobile_portal:mobile_personalization"),
+            "api_mobile_personalization_signals_url": reverse(
+                "mobile_portal:mobile_personalization_signals"
+            ),
+            "api_mobile_assistant_chat_url": reverse("mobile_portal:mobile_assistant_chat"),
+            "api_mobile_assistant_diagnostics_url": reverse(
+                "mobile_portal:mobile_assistant_diagnostics"
+            ),
+            "api_playground_personas_url": reverse("mobile_portal:playground_personas"),
+            "api_playground_impersonation_url": reverse(
+                "mobile_portal:playground_impersonation"
+            ),
+            "api_playground_assistant_action_url": reverse(
+                "mobile_portal:playground_assistant_action"
+            ),
             "playground_endpoints": [
                 {
                     "name": "Bootstrap",
                     "method": "GET",
-                    "path": "/api/mobile/bootstrap/",
+                    "path": reverse("mobile_portal:mobile_bootstrap"),
                     "description": "Check onboarding and wallet snapshot.",
                 },
                 {
                     "name": "Personalization",
                     "method": "GET",
-                    "path": "/api/mobile/personalization/",
+                    "path": reverse("mobile_portal:mobile_personalization"),
                     "description": "Fetch native module personalization payload.",
                 },
                 {

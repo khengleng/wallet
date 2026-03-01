@@ -288,7 +288,7 @@
         </div>
         <div class="form-group">
           <label>Path</label>
-          <input id="sandbox-path" type="text" value="/api/mobile/bootstrap/" />
+          <input id="sandbox-path" type="text" value="{{ sandbox_default_path }}" />
         </div>
         <div class="form-group">
           <label>Payload JSON</label>
@@ -407,6 +407,14 @@
     const csrfToken = "{{ csrf_token }}";
     const accessToken = "{{ oidc_access_token|escapejs }}";
     const gatewayBase = "{{ mobile_gateway_base|escapejs }}";
+    const mobileProfileUrl = "{{ api_mobile_profile_url|escapejs }}";
+    const mobilePersonalizationUrl = "{{ api_mobile_personalization_url|escapejs }}";
+    const mobilePersonalizationSignalsUrl = "{{ api_mobile_personalization_signals_url|escapejs }}";
+    const mobileAssistantChatUrl = "{{ api_mobile_assistant_chat_url|escapejs }}";
+    const mobileAssistantDiagnosticsUrl = "{{ api_mobile_assistant_diagnostics_url|escapejs }}";
+    const playgroundPersonasUrl = "{{ api_playground_personas_url|escapejs }}";
+    const playgroundImpersonationUrl = "{{ api_playground_impersonation_url|escapejs }}";
+    const playgroundAssistantActionUrl = "{{ api_playground_assistant_action_url|escapejs }}";
 
     const apiOutput = document.getElementById("api-output");
     const homeOutput = document.getElementById("home-output");
@@ -567,7 +575,7 @@
           }
           personalization = await callJson(gatewayBase + "/personalization", { method: "GET", headers: headers });
         } else {
-          personalization = await callJson("/api/mobile/personalization/", { method: "GET" });
+          personalization = await callJson(mobilePersonalizationUrl, { method: "GET" });
         }
         homeOutput.textContent = JSON.stringify(personalization, null, 2);
         setOutput(personalization);
@@ -587,7 +595,7 @@
           }
           p = await callJson(gatewayBase + "/profile", { method: "GET", headers: headers });
         } else {
-          p = await callJson("/api/mobile/profile/", { method: "GET" });
+          p = await callJson(mobileProfileUrl, { method: "GET" });
         }
         const user = (p.data || {}).user || {};
         const cif = (p.data || {}).cif || {};
@@ -634,7 +642,7 @@
             body: JSON.stringify(payload)
           });
         } else {
-          p = await callJson("/api/mobile/profile/", {
+          p = await callJson(mobileProfileUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -684,7 +692,7 @@
             body: JSON.stringify(payload)
           });
         } else {
-          p = await callJson("/api/mobile/profile/", {
+          p = await callJson(mobileProfileUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -735,7 +743,7 @@
         }
       }
       try {
-        const body = await callJson("/api/playground/assistant/action/", {
+        const body = await callJson(playgroundAssistantActionUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -812,7 +820,7 @@
             body: JSON.stringify({ data_points: dataPoints })
           });
         } else {
-          p = await callJson("/api/mobile/personalization/signals/", {
+          p = await callJson(mobilePersonalizationSignalsUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -892,7 +900,7 @@
           appendChat("bot", "Token mode selected but no token provided.");
           return;
         }
-        let body = await callJson("/api/mobile/assistant/chat/", {
+        let body = await callJson(mobileAssistantChatUrl, {
           method: "POST",
           headers: assistantHeaders(),
           body: JSON.stringify({
@@ -995,14 +1003,14 @@
         return;
       }
 
-      const diag = await probe("/api/mobile/assistant/diagnostics/", { method: "GET" });
+      const diag = await probe(mobileAssistantDiagnosticsUrl, { method: "GET" });
       setDiagnostics(diag);
       setOutput(diag);
     }
 
     async function loadPersonas() {
       try {
-        const body = await callJson("/api/playground/personas/", { method: "GET" });
+        const body = await callJson(playgroundPersonasUrl, { method: "GET" });
         const personas = (((body || {}).data || {}).personas) || [];
         personaSelectEl.innerHTML = "";
         txToUsernameEl.innerHTML = "";
@@ -1042,7 +1050,7 @@
 
     async function loadImpersonationStatus() {
       try {
-        const body = await callJson("/api/playground/impersonation/", { method: "GET" });
+        const body = await callJson(playgroundImpersonationUrl, { method: "GET" });
         const effective = (((body || {}).data || {}).effective_user) || null;
         if (effective && effective.username) {
           personaSelectEl.value = effective.username;
@@ -1064,7 +1072,7 @@
         return;
       }
       try {
-        const body = await callJson("/api/playground/impersonation/", {
+        const body = await callJson(playgroundImpersonationUrl, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1082,7 +1090,7 @@
 
     async function clearPersona() {
       try {
-        const body = await callJson("/api/playground/impersonation/", {
+        const body = await callJson(playgroundImpersonationUrl, {
           method: "DELETE",
           headers: {
             "X-CSRFToken": csrfToken

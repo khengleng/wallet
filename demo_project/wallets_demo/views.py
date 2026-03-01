@@ -14,10 +14,8 @@ from urllib.request import Request, urlopen
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.contrib import messages
-from django.contrib.auth import authenticate, login, logout as auth_logout
-from django.contrib.auth import update_session_auth_hash
+from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth.hashers import check_password
 from django.contrib.auth.models import Group
 from django.contrib.contenttypes.models import ContentType
@@ -51,16 +49,9 @@ from .access_policy import (
     user_can_view_menu,
 )
 from .release_readiness import release_readiness_snapshot
-from .identity_client import (
-    oidc_logout_url as identity_oidc_logout_url,
-    register_device_session as identity_register_device_session,
-)
 from .keycloak_auth import (
     decode_access_token_claims,
     introspect_access_token,
-    merge_keycloak_claims,
-    next_introspection_deadline,
-    sync_user_roles_from_keycloak_claims,
 )
 from .models import (
     ApprovalRequest,
@@ -589,12 +580,6 @@ def portal_logout(request):
 
 def profile(request):
     from .views_auth import profile as impl
-
-    return impl(request)
-
-
-def mobile_native_lab(request):
-    from .views_mobile import mobile_native_lab as impl
 
     return impl(request)
 
@@ -1174,7 +1159,7 @@ def mobile_playground_contract_replay(request):
     except Exception:
         payload = {}
     method = str(payload.get("method") or "GET").strip().upper()
-    path = str(payload.get("path") or "/api/mobile/bootstrap/").strip()
+    path = str(payload.get("path") or "/mobile-portal/api/mobile/bootstrap/").strip()
     if not path.startswith("/"):
         return _mobile_json_error("Path must start with /", code="invalid_path")
     body_payload = payload.get("body") if isinstance(payload.get("body"), dict) else {}
@@ -1310,18 +1295,6 @@ def _mobile_bff_probe(
         return {"ok": True, "status": status_code, "body": body}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
-
-
-def mobile_assistant_diagnostics(request):
-    from .views_mobile import mobile_assistant_diagnostics as impl
-
-    return impl(request)
-
-
-def mobile_assistant_chat(request):
-    from .views_mobile import mobile_assistant_chat as impl
-
-    return impl(request)
 
 
 def _default_mobile_customer_service_class() -> ServiceClassPolicy | None:
@@ -1566,42 +1539,6 @@ def _build_mobile_personalization_payload(
         },
         "data_points": data_points,
     }
-
-
-def mobile_bootstrap(request):
-    from .views_mobile import mobile_bootstrap as impl
-
-    return impl(request)
-
-
-def mobile_profile(request):
-    from .views_mobile import mobile_profile as impl
-
-    return impl(request)
-
-
-def mobile_statement(request):
-    from .views_mobile import mobile_statement as impl
-
-    return impl(request)
-
-
-def mobile_personalization(request):
-    from .views_mobile import mobile_personalization as impl
-
-    return impl(request)
-
-
-def mobile_personalization_signals(request):
-    from .views_mobile import mobile_personalization_signals as impl
-
-    return impl(request)
-
-
-def mobile_self_onboard(request):
-    from .views_mobile import mobile_self_onboard as impl
-
-    return impl(request)
 
 
 def metrics(request):
@@ -4614,7 +4551,7 @@ def operations_center(request):
                     status = SanctionScreeningRecord.STATUS_POTENTIAL_MATCH
                 else:
                     status = SanctionScreeningRecord.STATUS_CLEAR
-                screening = SanctionScreeningRecord.objects.create(
+                SanctionScreeningRecord.objects.create(
                     user=target_user,
                     provider=(request.POST.get("provider") or "internal").strip(),
                     reference=(request.POST.get("reference") or "").strip(),

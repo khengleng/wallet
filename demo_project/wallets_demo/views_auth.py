@@ -114,7 +114,12 @@ def keycloak_callback(request):
             return redirect("dashboard")
         return redirect("/login/?start=1")
 
-    if expected_state and expected_state != provided_state and provided_state not in state_history:
+    if not expected_state or not provided_state:
+        if request.user.is_authenticated:
+            return redirect("dashboard")
+        return redirect("/login/?start=1")
+
+    if expected_state != provided_state and provided_state not in state_history:
         if request.user.is_authenticated:
             return redirect("dashboard")
         return redirect("/login/?start=1")
