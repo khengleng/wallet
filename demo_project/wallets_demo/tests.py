@@ -26,7 +26,6 @@ from .models import (
     FxRate,
     JournalEntry,
     JournalEntryApproval,
-    JournalBackdateApproval,
     JournalLine,
     Merchant,
     MerchantApiCredential,
@@ -402,7 +401,7 @@ class AccountingOpsWorkbenchTests(TestCase):
         self.assertIn("JE-OPS-1", body)
 
     def test_non_accounting_user_forbidden(self):
-        outsider = User.objects.create_user(username="outsider_acc", password="pass12345")
+        User.objects.create_user(username="outsider_acc", password="pass12345")
         self.client.login(username="outsider_acc", password="pass12345")
         response = self.client.get(reverse("accounting_dashboard"))
         self.assertEqual(response.status_code, 403)
@@ -1097,7 +1096,7 @@ class MobileNativeLabPageTests(TestCase):
         self.assertContains(response, "/mobile/v1")
 
     def test_mobile_native_lab_forbidden_for_non_backoffice_role(self):
-        outsider = User.objects.create_user(
+        User.objects.create_user(
             username="native_lab_outsider",
             email="native_lab_outsider@example.com",
             password="pass12345",

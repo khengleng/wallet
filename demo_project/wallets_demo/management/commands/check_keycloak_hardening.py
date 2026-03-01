@@ -35,7 +35,8 @@ class Command(BaseCommand):
         warnings: list[str] = []
 
         auth_mode = getattr(settings, "AUTH_MODE", "").lower()
-        if auth_mode != "keycloak_oidc":
+        strict_mode = auth_mode == "keycloak_oidc"
+        if not strict_mode:
             warnings.append(
                 f"AUTH_MODE is '{auth_mode}'. Keycloak hardening checks are most relevant in 'keycloak_oidc' mode."
             )
@@ -50,27 +51,28 @@ class Command(BaseCommand):
         session_check_interval = int(getattr(settings, "KEYCLOAK_SESSION_CHECK_INTERVAL_SECONDS", 120))
         role_group_map = getattr(settings, "KEYCLOAK_ROLE_GROUP_MAP", {}) or {}
 
-        if not _is_https_url(keycloak_base):
-            issues.append("KEYCLOAK_BASE_URL must be an HTTPS URL.")
-        if not keycloak_realm:
-            issues.append("KEYCLOAK_REALM must be set.")
-        if not client_id:
-            issues.append("KEYCLOAK_CLIENT_ID must be set.")
+        if strict_mode:
+            if not _is_https_url(keycloak_base):
+                issues.append("KEYCLOAK_BASE_URL must be an HTTPS URL.")
+            if not keycloak_realm:
+                issues.append("KEYCLOAK_REALM must be set.")
+            if not client_id:
+                issues.append("KEYCLOAK_CLIENT_ID must be set.")
 
-        if not _is_https_url(redirect_uri):
-            issues.append("KEYCLOAK_REDIRECT_URI must be an HTTPS URL.")
-        elif _has_wildcard(redirect_uri):
-            issues.append("KEYCLOAK_REDIRECT_URI must not contain wildcard patterns.")
+            if not _is_https_url(redirect_uri):
+                issues.append("KEYCLOAK_REDIRECT_URI must be an HTTPS URL.")
+            elif _has_wildcard(redirect_uri):
+                issues.append("KEYCLOAK_REDIRECT_URI must not contain wildcard patterns.")
 
-        if post_logout_redirect_uri:
-            if not _is_https_url(post_logout_redirect_uri):
-                issues.append("KEYCLOAK_POST_LOGOUT_REDIRECT_URI must be HTTPS when set.")
-            elif _has_wildcard(post_logout_redirect_uri):
-                issues.append("KEYCLOAK_POST_LOGOUT_REDIRECT_URI must not contain wildcard patterns.")
+            if post_logout_redirect_uri:
+                if not _is_https_url(post_logout_redirect_uri):
+                    issues.append("KEYCLOAK_POST_LOGOUT_REDIRECT_URI must be HTTPS when set.")
+                elif _has_wildcard(post_logout_redirect_uri):
+                    issues.append("KEYCLOAK_POST_LOGOUT_REDIRECT_URI must not contain wildcard patterns.")
 
-        for required_scope in ("openid", "profile", "email"):
-            if required_scope not in scopes:
-                issues.append(f"KEYCLOAK_SCOPES must include '{required_scope}'.")
+            for required_scope in ("openid", "profile", "email"):
+                if required_scope not in scopes:
+                    issues.append(f"KEYCLOAK_SCOPES must include '{required_scope}'.")
 
         if introspection_timeout > 5:
             warnings.append(
@@ -81,11 +83,12 @@ class Command(BaseCommand):
                 f"KEYCLOAK_SESSION_CHECK_INTERVAL_SECONDS={session_check_interval} is high; recommended <= 300."
             )
 
-        for role in PRIVILEGED_ROLES:
-            if role not in role_group_map:
-                issues.append(
-                    f"KEYCLOAK_ROLE_GROUP_MAP must include privileged role mapping for '{role}'."
-                )
+        if strict_mode:
+            for role in PRIVILEGED_ROLES:
+                if role not in role_group_map:
+                    issues.append(
+                        f"KEYCLOAK_ROLE_GROUP_MAP must include privileged role mapping for '{role}'."
+                    )
 
         assertions = {
             "brute_force_detection": (getattr(settings, "KEYCLOAK_ASSERT_BRUTE_FORCE_DETECTION", "") or "").lower(),
