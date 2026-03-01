@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+import hashlib
+import hmac
 import secrets
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
 
 from .models import (
+    BackofficeAuditLog,
     Tenant,
     TenantBillingWebhook,
     TenantSubscription,
@@ -110,6 +116,51 @@ def saas_onboarding(request):
             "billing_cycles": TenantSubscription.CYCLE_CHOICES,
         },
     )
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def saas_billing_webhook_sink(request, tenant_code: str):
+    code = (tenant_code or "").strip().lower()
+    webhook = (
+        TenantBillingWebhook.objects.select_related("tenant")
+        .filter(tenant__code=code, is_active=True)
+        .first()
+    )
+    if webhook is None:
+        return JsonResponse(
+            {"ok": False, "error": {"code": "not_found", "message": "Active tenant webhook not found."}},
+            status=404,
+        )
+    raw = request.body or b""
+    signature = (request.headers.get("X-Wallet-Signature") or "").strip().lower()
+    if not signature:
+        return JsonResponse(
+            {"ok": False, "error": {"code": "forbidden", "message": "Missing signature."}},
+            status=403,
+        )
+    expected = hmac.new(
+        webhook.signing_secret.encode("utf-8"),
+        raw,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        return JsonResponse(
+            {"ok": False, "error": {"code": "forbidden", "message": "Invalid signature."}},
+            status=403,
+        )
+    BackofficeAuditLog.objects.create(
+        actor=None,
+        action="tenant_billing_webhook_received",
+        object_type="tenant",
+        object_id=str(webhook.tenant_id),
+        metadata={
+            "tenant_code": webhook.tenant.code,
+            "payload_size": len(raw),
+            "event_type": (request.headers.get("X-Wallet-Event") or "").strip().lower(),
+        },
+    )
+    return JsonResponse({"ok": True, "data": {"tenant_code": webhook.tenant.code}}, status=202)
 
 
 @login_required

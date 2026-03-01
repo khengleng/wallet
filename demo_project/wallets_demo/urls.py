@@ -53,6 +53,7 @@ urlpatterns = [
     path('profile/', views_auth.profile, name='profile'),
     path('backoffice/saas/onboarding/', views_saas.saas_onboarding, name='saas_onboarding'),
     path('backoffice/saas/tenant/', views_saas.saas_tenant_admin, name='saas_tenant_admin'),
+    path('open-api/v1/saas/billing/sink/<str:tenant_code>/', views_saas.saas_billing_webhook_sink, name='saas_billing_webhook_sink'),
     path('auth/keycloak/callback/', views_auth.keycloak_callback, name='keycloak_callback'),
     path('logout/', views_auth.portal_logout, name='logout'),
 ]
