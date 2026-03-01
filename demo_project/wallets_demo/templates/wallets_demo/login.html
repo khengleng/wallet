@@ -33,6 +33,10 @@
                 style="color: var(--primary); font-weight: 600; text-decoration: none;">{% trans "Sign up" %}</a>
         </p>
         {% endif %}
+        <p class="mt-4 text-muted" style="text-align: center; font-size: 0.875rem;">
+            {% trans "Starting as a new operator?" %}
+            <a href="{% url 'saas_self_onboarding' %}" style="color: var(--primary); font-weight: 600; text-decoration: none;">{% trans "Start a tenant" %}</a>
+        </p>
     </div>
 </div>
 {% endblock %}

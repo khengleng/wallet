@@ -55,6 +55,7 @@ from .models import (
     TenantBillingInboundEvent,
     TenantBillingWebhook,
     TenantInvoice,
+    TenantOnboardingInvite,
     TenantSubscription,
     TenantUsageDaily,
     TransactionMonitoringAlert,
@@ -65,7 +66,7 @@ from .models import (
     WALLET_TYPE_CUSTOMER,
 )
 from .rbac import assign_roles, seed_role_groups
-from .saas import record_tenant_usage
+from .saas import claim_pending_onboarding_invite_for_user, record_tenant_usage
 
 
 class RBACMakerCheckerTests(TestCase):
@@ -2901,6 +2902,52 @@ class SaaSTenantAdministrationTests(TestCase):
         invoice = TenantInvoice.objects.get(tenant=tenant)
         self.assertEqual(invoice.status, TenantInvoice.STATUS_ISSUED)
         self.assertGreater(invoice.total_amount, Decimal("0.00"))
+
+    @override_settings(AUTH_MODE="local")
+    def test_public_self_onboarding_creates_local_admin(self):
+        response = self.client.post(
+            reverse("saas_self_onboarding"),
+            {
+                "tenant_code": "public1",
+                "tenant_name": "Public One",
+                "admin_email": "public1@example.com",
+                "admin_username": "public1_admin",
+                "admin_password": "public1-pass-123",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        tenant = Tenant.objects.get(code="public1")
+        admin = User.objects.get(username="public1_admin")
+        self.assertEqual(admin.tenant_id, tenant.id)
+        self.assertTrue(admin.groups.filter(name="admin").exists())
+
+    @override_settings(AUTH_MODE="keycloak_oidc")
+    def test_public_self_onboarding_creates_claimable_sso_invite(self):
+        response = self.client.post(
+            reverse("saas_self_onboarding"),
+            {
+                "tenant_code": "sso1",
+                "tenant_name": "SSO One",
+                "admin_email": "sso1@example.com",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        invite = TenantOnboardingInvite.objects.get(email="sso1@example.com")
+        self.assertEqual(invite.status, TenantOnboardingInvite.STATUS_PENDING)
+
+        user = User.objects.create_user(
+            username="sso_user",
+            email="sso1@example.com",
+            password="pass12345",
+            tenant=self.default_tenant,
+        )
+        claimed = claim_pending_onboarding_invite_for_user(user)
+        user.refresh_from_db()
+        invite.refresh_from_db()
+        self.assertTrue(claimed)
+        self.assertEqual(user.tenant_id, invite.tenant_id)
+        self.assertTrue(user.groups.filter(name="admin").exists())
+        self.assertEqual(invite.status, TenantOnboardingInvite.STATUS_CLAIMED)
 
 
 class InternationalizationCoverageTests(TestCase):

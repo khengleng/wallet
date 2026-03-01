@@ -8,6 +8,7 @@ import secrets
 from datetime import date
 
 from django.contrib import messages
+from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
@@ -21,6 +22,7 @@ from .models import (
     BackofficeAuditLog,
     Tenant,
     TenantBillingEvent,
+    TenantOnboardingInvite,
     TenantBillingInboundEvent,
     TenantBillingWebhook,
     TenantInvoice,
@@ -29,6 +31,7 @@ from .models import (
     User,
 )
 from .rbac import ROLE_DEFINITIONS, assign_roles, user_has_any_role
+from . import utils as shared_utils
 from .saas import (
     ensure_tenant_subscription,
     generate_tenant_invoice_for_period,
@@ -49,6 +52,74 @@ def _is_tenant_admin(user) -> bool:
 def _require_tenant_admin(request):
     if not _is_tenant_admin(request.user):
         raise PermissionDenied("You are not allowed to manage tenant settings.")
+
+
+def saas_self_onboarding(request):
+    if request.user.is_authenticated:
+        return redirect("dashboard")
+    if request.method == "POST":
+        tenant_code = (request.POST.get("tenant_code") or "").strip().lower()
+        tenant_name = (request.POST.get("tenant_name") or "").strip()
+        admin_email = (request.POST.get("admin_email") or "").strip().lower()
+        admin_username = (request.POST.get("admin_username") or "").strip()
+        admin_password = request.POST.get("admin_password") or ""
+        try:
+            if not tenant_code or not tenant_name or not admin_email:
+                raise ValidationError("Tenant code, tenant name, and admin email are required.")
+            if Tenant.objects.filter(code=tenant_code).exists():
+                raise ValidationError("Tenant code already exists.")
+            with transaction.atomic():
+                tenant = Tenant.objects.create(code=tenant_code, name=tenant_name, is_active=True)
+                subscription = ensure_tenant_subscription(tenant)
+                subscription.status = TenantSubscription.STATUS_TRIAL
+                subscription.billing_cycle = TenantSubscription.CYCLE_MONTHLY
+                subscription.plan_code = "starter"
+                subscription.billing_email = admin_email
+                subscription.save(
+                    update_fields=["status", "billing_cycle", "plan_code", "billing_email", "updated_at"]
+                )
+                queue_tenant_billing_event(
+                    tenant=tenant,
+                    event_type="tenant.self_onboarded",
+                    payload={"tenant_code": tenant.code, "tenant_name": tenant.name, "admin_email": admin_email},
+                )
+                if shared_utils.use_keycloak_oidc():
+                    TenantOnboardingInvite.objects.create(
+                        tenant=tenant,
+                        email=admin_email,
+                        role_name="admin",
+                        status=TenantOnboardingInvite.STATUS_PENDING,
+                    )
+                    messages.success(
+                        request,
+                        "Tenant created. Continue with SSO using the same admin email to claim admin access.",
+                    )
+                    return redirect("login")
+                if not admin_username or len(admin_password) < 8:
+                    raise ValidationError("Admin username and password (min 8 chars) are required for local auth mode.")
+                if User.objects.filter(username=admin_username).exists():
+                    raise ValidationError("Admin username already exists.")
+                user = User.objects.create_user(
+                    username=admin_username,
+                    email=admin_email,
+                    password=admin_password,
+                    tenant=tenant,
+                    is_active=True,
+                )
+                assign_roles(user, ["admin"])
+                login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+                request.session.cycle_key()
+                messages.success(request, "Tenant created successfully.")
+                return redirect("saas_tenant_admin")
+        except ValidationError as exc:
+            messages.error(request, str(exc))
+        except Exception as exc:
+            messages.error(request, f"Unable to complete self onboarding: {exc}")
+    return render(
+        request,
+        "wallets_demo/saas_self_onboarding.html",
+        {"auth_mode": "keycloak_oidc" if shared_utils.use_keycloak_oidc() else "local"},
+    )
 
 
 @login_required

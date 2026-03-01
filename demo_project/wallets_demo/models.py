@@ -321,6 +321,53 @@ class TenantInvoice(models.Model):
         return f"{self.invoice_no}:{self.tenant.code}:{self.status}"
 
 
+class TenantOnboardingInvite(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_CLAIMED = "claimed"
+    STATUS_EXPIRED = "expired"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pending"),
+        (STATUS_CLAIMED, "Claimed"),
+        (STATUS_EXPIRED, "Expired"),
+    )
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="onboarding_invites",
+    )
+    email = models.EmailField(db_index=True)
+    role_name = models.CharField(max_length=32, default="admin")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_PENDING, db_index=True)
+    invited_by = models.ForeignKey(
+        "User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="created_tenant_onboarding_invites",
+    )
+    claimed_by = models.ForeignKey(
+        "User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="claimed_tenant_onboarding_invites",
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=("email", "status"), name="idx_tinvite_email_status"),
+        ]
+
+    def __str__(self):
+        return f"{self.email}:{self.tenant.code}:{self.status}"
+
+
 class User(WalletMixin, AbstractUser):
     tenant = models.ForeignKey(
         Tenant,

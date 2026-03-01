@@ -18,9 +18,11 @@ from .models import (
     Tenant,
     TenantBillingEvent,
     TenantInvoice,
+    TenantOnboardingInvite,
     TenantSubscription,
     TenantUsageDaily,
 )
+from .rbac import assign_roles
 
 
 def ensure_tenant_subscription(tenant: Tenant) -> TenantSubscription:
@@ -290,3 +292,29 @@ def generate_tenant_invoice_for_period(
         },
     )
     return invoice
+
+
+def claim_pending_onboarding_invite_for_user(user) -> bool:
+    email = (getattr(user, "email", "") or "").strip().lower()
+    if not email:
+        return False
+    invite = (
+        TenantOnboardingInvite.objects.select_related("tenant")
+        .filter(email__iexact=email, status=TenantOnboardingInvite.STATUS_PENDING)
+        .order_by("created_at")
+        .first()
+    )
+    if invite is None:
+        return False
+    with transaction.atomic():
+        invite = TenantOnboardingInvite.objects.select_for_update().get(id=invite.id)
+        if invite.status != TenantOnboardingInvite.STATUS_PENDING:
+            return False
+        user.tenant = invite.tenant
+        user.save(update_fields=["tenant"])
+        assign_roles(user, [invite.role_name or "admin"])
+        invite.status = TenantOnboardingInvite.STATUS_CLAIMED
+        invite.claimed_by = user
+        invite.claimed_at = timezone.now()
+        invite.save(update_fields=["status", "claimed_by", "claimed_at", "updated_at"])
+    return True

@@ -27,6 +27,7 @@ from .keycloak_auth import (
     next_introspection_deadline,
     sync_user_roles_from_keycloak_claims,
 )
+from .saas import claim_pending_onboarding_invite_for_user
 from . import utils as shared_utils
 
 logger = logging.getLogger(__name__)
@@ -151,6 +152,7 @@ def keycloak_callback(request):
             introspection_claims,
         )
         sync_user_roles_from_keycloak_claims(user, merged_claims)
+        claim_pending_onboarding_invite_for_user(user)
     except Exception as exc:
         logger.exception("Keycloak callback failed: %s", str(exc))
         legacy._track(

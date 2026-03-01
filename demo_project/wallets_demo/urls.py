@@ -6,6 +6,7 @@ from . import views_operations
 from . import views_saas
 
 urlpatterns = [
+    path('saas/start/', views_saas.saas_self_onboarding, name='saas_self_onboarding'),
     path("mobile-portal/", include(("wallets_demo.mobile_portal_urls", "mobile_portal"), namespace="mobile_portal")),
     path("open-api/v1/", include(("wallets_demo.open_api_urls", "open_api"), namespace="open_api")),
     path('', views.dashboard, name='dashboard'),
