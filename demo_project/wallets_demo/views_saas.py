@@ -149,17 +149,23 @@ def saas_billing_webhook_sink(request, tenant_code: str):
             {"ok": False, "error": {"code": "forbidden", "message": "Invalid signature."}},
             status=403,
         )
-    BackofficeAuditLog.objects.create(
-        actor=None,
-        action="tenant_billing_webhook_received",
-        object_type="tenant",
-        object_id=str(webhook.tenant_id),
-        metadata={
-            "tenant_code": webhook.tenant.code,
-            "payload_size": len(raw),
-            "event_type": (request.headers.get("X-Wallet-Event") or "").strip().lower(),
-        },
+    actor = (
+        User.objects.filter(tenant=webhook.tenant, is_active=True).order_by("id").first()
+        or User.objects.filter(is_superuser=True, is_active=True).order_by("id").first()
+        or User.objects.filter(is_active=True).order_by("id").first()
     )
+    if actor is not None:
+        BackofficeAuditLog.objects.create(
+            actor=actor,
+            action="tenant_billing_webhook_received",
+            target_type="tenant",
+            target_id=str(webhook.tenant_id),
+            metadata_json={
+                "tenant_code": webhook.tenant.code,
+                "payload_size": len(raw),
+                "event_type": (request.headers.get("X-Wallet-Event") or "").strip().lower(),
+            },
+        )
     return JsonResponse({"ok": True, "data": {"tenant_code": webhook.tenant.code}}, status=202)
 
 
