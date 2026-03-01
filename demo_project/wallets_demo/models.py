@@ -266,6 +266,13 @@ class ApprovalRequest(models.Model):
     maker = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="made_approval_requests"
     )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="approval_requests",
+    )
     checker = models.ForeignKey(
         User,
         on_delete=models.PROTECT,
@@ -298,6 +305,15 @@ class ApprovalRequest(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = (
+                self.source_user.tenant_id
+                or self.maker.tenant_id
+                or (self.recipient_user.tenant_id if self.recipient_user_id else None)
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.action}:{self.amount} ({self.status})"
@@ -477,6 +493,13 @@ class TreasuryTransferRequest(models.Model):
     maker = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="made_treasury_requests"
     )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="treasury_transfer_requests",
+    )
     checker = models.ForeignKey(
         User,
         on_delete=models.PROTECT,
@@ -504,6 +527,11 @@ class TreasuryTransferRequest(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = self.maker.tenant_id or (self.checker.tenant_id if self.checker_id else None)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.from_account}->{self.to_account}:{self.amount} ({self.status})"
@@ -1449,6 +1477,13 @@ class MerchantSettlementRecord(models.Model):
     merchant = models.ForeignKey(
         Merchant, on_delete=models.PROTECT, related_name="settlement_records"
     )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="merchant_settlement_records",
+    )
     settlement_no = models.CharField(max_length=40, unique=True)
     currency = models.CharField(max_length=12, default="USD")
     period_start = models.DateField()
@@ -1475,6 +1510,11 @@ class MerchantSettlementRecord(models.Model):
     class Meta:
         ordering = ("-created_at", "-id")
 
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = self.merchant.tenant_id or self.created_by.tenant_id
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.settlement_no}:{self.merchant.code}:{self.status}"
 
@@ -1495,6 +1535,13 @@ class DisputeRefundRequest(models.Model):
 
     case = models.ForeignKey(
         "OperationCase", on_delete=models.PROTECT, related_name="refund_requests"
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="dispute_refund_requests",
     )
     merchant = models.ForeignKey(
         Merchant, on_delete=models.PROTECT, related_name="refund_requests"
@@ -1544,6 +1591,16 @@ class DisputeRefundRequest(models.Model):
     class Meta:
         ordering = ("-created_at", "-id")
 
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = (
+                self.merchant.tenant_id
+                or self.customer.tenant_id
+                or self.maker.tenant_id
+                or (self.case.tenant_id if self.case_id else None)
+            )
+        super().save(*args, **kwargs)
+
     def clean(self):
         if self.amount <= Decimal("0"):
             raise ValidationError("Refund amount must be greater than 0.")
@@ -1566,6 +1623,13 @@ class SettlementPayout(models.Model):
 
     settlement = models.OneToOneField(
         MerchantSettlementRecord, on_delete=models.CASCADE, related_name="payout"
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="settlement_payouts",
     )
     payout_reference = models.CharField(max_length=48, unique=True)
     payout_channel = models.CharField(max_length=32, default="bank_transfer")
@@ -1592,6 +1656,14 @@ class SettlementPayout(models.Model):
 
     class Meta:
         ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=("tenant", "status", "-created_at"), name="idx_payout_tenant_stat_created"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = self.settlement.tenant_id or self.settlement.merchant.tenant_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.payout_reference}:{self.status}"
@@ -1614,6 +1686,13 @@ class SettlementBatchFile(models.Model):
     )
 
     batch_no = models.CharField(max_length=40, unique=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="settlement_batch_files",
+    )
     currency = models.CharField(max_length=12, default="USD")
     period_start = models.DateField()
     period_end = models.DateField()
@@ -1642,6 +1721,11 @@ class SettlementBatchFile(models.Model):
     class Meta:
         ordering = ("-created_at", "-id")
 
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = self.created_by.tenant_id or (self.approved_by.tenant_id if self.approved_by_id else None)
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.batch_no}:{self.status}"
 
@@ -1662,6 +1746,13 @@ class SettlementException(models.Model):
         null=True,
         blank=True,
         related_name="exceptions",
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="settlement_exceptions",
     )
     payout = models.ForeignKey(
         SettlementPayout,
@@ -1707,6 +1798,15 @@ class SettlementException(models.Model):
     class Meta:
         ordering = ("-created_at", "-id")
 
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = (
+                (self.settlement.tenant_id if self.settlement_id else None)
+                or (self.payout.tenant_id if self.payout_id else None)
+                or self.created_by.tenant_id
+            )
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"SETTLE-EX-{self.id}:{self.status}"
 
@@ -1720,6 +1820,13 @@ class ReconciliationRun(models.Model):
     )
 
     source = models.CharField(max_length=64, default="internal_vs_settlement")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reconciliation_runs",
+    )
     run_no = models.CharField(max_length=40, unique=True)
     currency = models.CharField(max_length=12, default="USD")
     period_start = models.DateField()
@@ -1739,6 +1846,11 @@ class ReconciliationRun(models.Model):
 
     class Meta:
         ordering = ("-created_at", "-id")
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = self.created_by.tenant_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.run_no}:{self.status}"
@@ -1790,6 +1902,13 @@ class ReconciliationBreak(models.Model):
 
     run = models.ForeignKey(
         ReconciliationRun, on_delete=models.CASCADE, related_name="breaks"
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reconciliation_breaks",
     )
     merchant = models.ForeignKey(
         Merchant,
@@ -1866,6 +1985,18 @@ class ReconciliationBreak(models.Model):
 
     class Meta:
         ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=("tenant", "status", "-created_at"), name="idx_rbreak_tenant_stat_created"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = (
+                (self.run.tenant_id if self.run_id else None)
+                or (self.merchant.tenant_id if self.merchant_id else None)
+                or self.created_by.tenant_id
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.run.run_no}:{self.status}:{self.issue_type}"
@@ -2027,6 +2158,13 @@ class BusinessDocument(models.Model):
     )
 
     source_module = models.CharField(max_length=32, choices=SOURCE_CHOICES, default=SOURCE_GENERAL, db_index=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="business_documents",
+    )
     title = models.CharField(max_length=255)
     document_type = models.CharField(max_length=64, default="generic")
     file = models.FileField(upload_to="business_documents/", null=True, blank=True)
@@ -2085,10 +2223,23 @@ class BusinessDocument(models.Model):
 
     class Meta:
         ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=("tenant", "-created_at"), name="idx_bdoc_tenant_created"),
+        ]
 
     def clean(self):
         if not self.file and not self.external_url:
             raise ValidationError("Either file upload or external URL is required.")
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = (
+                (self.case.tenant_id if self.case_id else None)
+                or (self.merchant.tenant_id if self.merchant_id else None)
+                or (self.customer.tenant_id if self.customer_id else None)
+                or self.uploaded_by.tenant_id
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.source_module}:{self.title}"
@@ -2270,6 +2421,13 @@ class TransactionMonitoringAlert(models.Model):
     )
 
     alert_type = models.CharField(max_length=64, default="velocity")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="transaction_monitoring_alerts",
+    )
     severity = models.CharField(max_length=16, default="medium")
     user = models.ForeignKey(
         User,
@@ -2320,6 +2478,19 @@ class TransactionMonitoringAlert(models.Model):
 
     class Meta:
         ordering = ("-created_at", "-id")
+        indexes = [
+            models.Index(fields=("tenant", "status", "-created_at"), name="idx_alert_tenant_stat_created"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = (
+                (self.case.tenant_id if self.case_id else None)
+                or (self.merchant.tenant_id if self.merchant_id else None)
+                or (self.user.tenant_id if self.user_id else None)
+                or (self.created_by.tenant_id if self.created_by_id else None)
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.alert_type}:{self.severity}:{self.status}"
@@ -2356,6 +2527,13 @@ class AccessReviewRecord(models.Model):
     )
 
     review_no = models.CharField(max_length=40, unique=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="access_review_records",
+    )
     user = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="access_review_records"
     )
@@ -2374,6 +2552,11 @@ class AccessReviewRecord(models.Model):
 
     class Meta:
         ordering = ("-created_at", "-id")
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = self.user.tenant_id or (self.reviewer.tenant_id if self.reviewer_id else None)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.review_no}:{self.status}"
@@ -2416,6 +2599,13 @@ class OperationCase(models.Model):
     )
 
     case_no = models.CharField(max_length=40, unique=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operation_cases",
+    )
     case_type = models.CharField(max_length=16, choices=TYPE_CHOICES)
     priority = models.CharField(max_length=16, choices=PRIORITY_CHOICES, default=PRIORITY_MEDIUM)
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_OPEN, db_index=True)
@@ -2450,6 +2640,18 @@ class OperationCase(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=("tenant", "status", "-created_at"), name="idx_case_tenant_status_created"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = (
+                self.customer.tenant_id
+                or (self.merchant.tenant_id if self.merchant_id else None)
+                or self.created_by.tenant_id
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.case_no} ({self.status})"
@@ -2458,6 +2660,13 @@ class OperationCase(models.Model):
 class OperationCaseNote(models.Model):
     case = models.ForeignKey(
         OperationCase, on_delete=models.CASCADE, related_name="notes"
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operation_case_notes",
     )
     note = models.TextField()
     is_internal = models.BooleanField(default=True)
@@ -2468,6 +2677,11 @@ class OperationCaseNote(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = self.case.tenant_id or self.created_by.tenant_id
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.case.case_no} note by {self.created_by.username}"
@@ -2580,6 +2794,13 @@ class CustomerClassUpgradeRequest(models.Model):
         on_delete=models.PROTECT,
         related_name="class_upgrade_requests",
     )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="customer_class_upgrade_requests",
+    )
     from_service_class = models.ForeignKey(
         ServiceClassPolicy,
         on_delete=models.PROTECT,
@@ -2619,6 +2840,11 @@ class CustomerClassUpgradeRequest(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+    def save(self, *args, **kwargs):
+        if self.tenant_id is None:
+            self.tenant_id = self.cif.tenant_id or self.maker.tenant_id
+        super().save(*args, **kwargs)
 
     def clean(self):
         if self.to_service_class.entity_type != ServiceClassPolicy.ENTITY_CUSTOMER:

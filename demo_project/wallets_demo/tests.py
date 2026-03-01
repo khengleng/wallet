@@ -20,6 +20,7 @@ from .models import (
     AccountingPeriodClose,
     ApprovalRequest,
     BackofficeAuditLog,
+    BusinessDocument,
     ChartOfAccount,
     ChargebackCase,
     ChargebackEvidence,
@@ -156,6 +157,16 @@ class MultiTenantIsolationTests(TestCase):
             merchant=None,
             created_by=self.admin_a,
         )
+        self.refund_b = DisputeRefundRequest.objects.create(
+            case=self.case_b,
+            merchant=self.merchant_b,
+            customer=self.user_b,
+            amount=Decimal("5.00"),
+            currency="USD",
+            reason="tenant b refund",
+            maker=self.admin_b,
+            status=DisputeRefundRequest.STATUS_PENDING,
+        )
 
     def test_operations_center_blocks_cross_tenant_merchant_mutation(self):
         self.client.login(username="tenant_admin_a", password="pass12345")
@@ -205,6 +216,29 @@ class MultiTenantIsolationTests(TestCase):
         response = self.client.get(reverse("operations_reports"), HTTP_X_TENANT_CODE="tenant_a")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["kpis"]["cases_open"], 1)
+
+    def test_ops_work_queue_hides_cross_tenant_pending_items(self):
+        self.client.login(username="tenant_admin_a", password="pass12345")
+        response = self.client.get(reverse("ops_work_queue"), HTTP_X_TENANT_CODE="tenant_a")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, f"RFD-{self.refund_b.id}")
+
+    def test_documents_center_hides_cross_tenant_documents(self):
+        BusinessDocument.objects.create(
+            source_module=BusinessDocument.SOURCE_CASE,
+            title="Tenant B Private Doc",
+            document_type="evidence",
+            external_url="https://example.com/tenant-b-doc.pdf",
+            is_internal=True,
+            case=self.case_b,
+            merchant=self.merchant_b,
+            customer=self.user_b,
+            uploaded_by=self.admin_b,
+        )
+        self.client.login(username="tenant_admin_a", password="pass12345")
+        response = self.client.get(reverse("documents_center"), HTTP_X_TENANT_CODE="tenant_a")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Tenant B Private Doc")
 
 class TreasuryWorkflowTests(TestCase):
     def setUp(self):
